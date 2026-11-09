@@ -20,6 +20,7 @@ foreach ( array(
 	'core/class-aitp-contracts.php',
 	'core/class-aitp-circuit-breaker.php',
 	'core/class-aitp-translator.php',
+	'core/class-aitp-queue-logic.php',
 	'providers/class-aitp-provider.php',
 	'providers/class-aitp-provider-gemini.php',
 	'providers/class-aitp-provider-openai.php',

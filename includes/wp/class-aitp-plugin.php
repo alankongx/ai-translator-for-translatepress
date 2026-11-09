@@ -37,6 +37,11 @@ final class AITP_Plugin {
 			AITP_Admin::instance()->boot();
 		}
 		AITP_Updater::instance()->boot();
+		AITP_Queue::instance()->boot();
+		if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( 'WP_CLI' ) ) {
+			require_once AITP_DIR . 'includes/wp/class-aitp-cli.php';
+			WP_CLI::add_command( 'aitp', 'AITP_CLI' );
+		}
 	}
 
 	/** Load translations of the plugin's own interface. */
@@ -91,8 +96,12 @@ final class AITP_Plugin {
 	 * @return int
 	 */
 	public function time_budget( $lock_timeout ) {
-		$s = AITP_Settings::get();
-		return (int) max( 10, min( (int) $s['time_budget'], (int) $lock_timeout - 15 ) );
+		$s      = AITP_Settings::get();
+		$budget = (int) $s['time_budget'];
+		if ( AITP_Queue::is_warm() ) {
+			$budget = max( $budget, AITP_Queue::page_seconds() ); // Background visit: nobody is waiting.
+		}
+		return (int) max( 10, min( $budget, (int) $lock_timeout - 15 ) );
 	}
 
 	/**
@@ -151,5 +160,6 @@ final class AITP_Plugin {
 	/** Deactivation. */
 	public static function deactivate() {
 		wp_clear_scheduled_hook( 'aitp_daily' );
+		wp_clear_scheduled_hook( AITP_Queue::CRON );
 	}
 }

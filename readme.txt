@@ -4,7 +4,7 @@ Tags: translatepress, translation, gemini, openai, multilingual
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.1.0
+Stable tag: 0.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -40,6 +40,17 @@ The guiding rule: **a wrong translation is worse than none.** A string that cann
 * A circuit breaker stops requests on invalid keys, billing problems, rate limits, repeated server errors or repeated bad answers, and resumes by itself.
 * Human translations (TranslatePress status "manually translated") are never touched: the engine only receives strings TranslatePress has not translated yet.
 * JSON-LD structured data is never sent.
+
+= Backfill queue =
+
+Without visitors, pages are never translated. The backfill queue (Settings → AI Translator → Backfill queue) visits the translated version of your pages in the background, one page at a time, so TranslatePress translates them before a visitor arrives.
+
+* The queue only visits pages; TranslatePress translates them through its normal pipeline, so every check above applies and nothing is written to TranslatePress directly.
+* The page list is built from published content (home page, pages, posts, products, categories) plus extra addresses; edited content is queued again automatically.
+* Limits: pages per minute, a daily character limit of its own, and a reserve of the TranslatePress daily limit kept for visitors. The queue waits while the provider has a problem (invalid key, rate limit, repeated bad answers).
+* Page caches are bypassed for these visits, and a visit answered by a cache is detected instead of being counted as done.
+* Internal visits are signed (HMAC, valid 5 minutes, single use). A forged or replayed signature is treated as an ordinary page view.
+* Runs through WP-Cron, from the open admin page, or with WP-CLI: `wp aitp queue sync|start|pause|status|run|retry|clear`.
 
 = Security =
 
@@ -77,6 +88,9 @@ No. It only translates strings TranslatePress sends to an engine, which are stri
 Updates come from the GitHub releases of this plugin. To turn update checks off: `add_filter( 'aitp_github_updates', '__return_false' );`
 
 == Changelog ==
+
+= 0.2.0 =
+* Backfill queue: translates pages nobody has visited yet, with speed and character limits, visitor reserve, pause on provider problems, page-cache bypass, signed internal visits, progress page and WP-CLI commands.
 
 = 0.1.0 =
 * First release: Gemini and OpenAI-compatible engines, ID-based mapping, whole-answer misalignment check, validation, long-text splitting, cache, back-off, circuit breaker, review list, status page, Simplified Chinese interface.

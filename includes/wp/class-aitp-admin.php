@@ -41,6 +41,7 @@ final class AITP_Admin {
 		add_action( 'admin_post_aitp_review', array( $this, 'handle_review' ) );
 		add_action( 'admin_post_aitp_export_review', array( $this, 'handle_export_review' ) );
 		add_action( 'trp_machine_translation_extra_settings_middle', array( $this, 'tp_status_card' ), 30, 1 );
+		AITP_Admin_Queue::boot();
 		add_filter( 'plugin_action_links_' . plugin_basename( AITP_FILE ), array( $this, 'action_links' ) );
 	}
 
@@ -91,6 +92,17 @@ final class AITP_Admin {
 			$presets[ $k ] = array( 'base_url' => $p['base_url'], 'model' => $p['model'] );
 		}
 		wp_add_inline_script( 'aitp-admin', 'window.aitpPresets = ' . wp_json_encode( $presets ) . ';', 'before' );
+		wp_add_inline_script(
+			'aitp-admin',
+			'window.aitpQueue = ' . wp_json_encode(
+				array(
+					'ajax'  => admin_url( 'admin-ajax.php' ),
+					'nonce' => wp_create_nonce( 'aitp_queue_step' ),
+					'error' => __( 'Request failed; trying again shortly.', 'ai-translator-for-translatepress' ),
+				)
+			) . ';',
+			'before'
+		);
 	}
 
 	/* -------------------------------------------------------------------------------------
@@ -207,6 +219,7 @@ final class AITP_Admin {
 		$tabs = array(
 			'settings' => __( 'Settings', 'ai-translator-for-translatepress' ),
 			'status'   => __( 'Status & log', 'ai-translator-for-translatepress' ),
+			'queue'    => __( 'Backfill queue', 'ai-translator-for-translatepress' ),
 			'review'   => __( 'Review list', 'ai-translator-for-translatepress' ),
 		);
 		if ( ! isset( $tabs[ $tab ] ) ) {
@@ -220,6 +233,8 @@ final class AITP_Admin {
 		echo '</nav>';
 		if ( $tab === 'status' ) {
 			$this->render_status();
+		} elseif ( $tab === 'queue' ) {
+			AITP_Admin_Queue::render();
 		} elseif ( $tab === 'review' ) {
 			$this->render_review();
 		} else {

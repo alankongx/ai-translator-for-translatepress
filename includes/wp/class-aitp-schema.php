@@ -11,10 +11,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 final class AITP_Schema {
 
-	const VERSION = '1';
+	const VERSION = '2';
 
 	/**
-	 * @param string $name Short name: cache, failures, review, log.
+	 * @param string $name Short name: cache, failures, review, log, queue.
 	 * @return string
 	 */
 	public static function table( $name ) {
@@ -91,16 +91,43 @@ final class AITP_Schema {
   KEY event (event,created_at)
 ) $c;"
 		);
+		dbDelta(
+			'CREATE TABLE ' . self::table( 'queue' ) . " (
+  id bigint unsigned NOT NULL AUTO_INCREMENT,
+  ukey char(40) NOT NULL,
+  source_url text NOT NULL,
+  url text NOT NULL,
+  lang varchar(20) NOT NULL DEFAULT '',
+  object_type varchar(10) NOT NULL DEFAULT '',
+  object_id bigint unsigned NOT NULL DEFAULT 0,
+  priority tinyint unsigned NOT NULL DEFAULT 5,
+  status varchar(10) NOT NULL DEFAULT 'pending',
+  next_at bigint unsigned NOT NULL DEFAULT 0,
+  visits smallint unsigned NOT NULL DEFAULT 0,
+  attempts smallint unsigned NOT NULL DEFAULT 0,
+  passes smallint unsigned NOT NULL DEFAULT 0,
+  note varchar(64) NOT NULL DEFAULT '',
+  translated int unsigned NOT NULL DEFAULT 0,
+  chars bigint unsigned NOT NULL DEFAULT 0,
+  last_visit_at bigint unsigned NOT NULL DEFAULT 0,
+  seen bigint unsigned NOT NULL DEFAULT 0,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  UNIQUE KEY ukey (ukey),
+  KEY due (status,next_at),
+  KEY object (object_type,object_id)
+) $c;"
+		);
 		update_option( 'aitp_db_version', self::VERSION, false );
 	}
 
 	/** Remove everything (uninstall). */
 	public static function uninstall() {
 		global $wpdb;
-		foreach ( array( 'cache', 'failures', 'review', 'log' ) as $t ) {
+		foreach ( array( 'cache', 'failures', 'review', 'log', 'queue' ) as $t ) {
 			$wpdb->query( 'DROP TABLE IF EXISTS ' . self::table( $t ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
 		}
-		foreach ( array( 'aitp_settings', 'aitp_db_version', 'aitp_breaker', 'aitp_caps', 'aitp_notice' ) as $o ) {
+		foreach ( array( 'aitp_settings', 'aitp_db_version', 'aitp_breaker', 'aitp_caps', 'aitp_notice', 'aitp_queue_settings', 'aitp_queue_state', 'aitp_queue_lock' ) as $o ) {
 			delete_option( $o );
 		}
 		delete_site_transient( 'aitp_github_release' );

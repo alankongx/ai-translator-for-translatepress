@@ -43,6 +43,7 @@ services:
     volumes:
       - wp:/var/www/html
       - ../..:/var/www/html/wp-content/plugins/ai-translator-for-translatepress:ro
+      - ./mu-plugins:/var/www/html/wp-content/mu-plugins:ro
   cli:
     image: wordpress:cli-2.11-php8.2
     user: "33:33"
@@ -57,6 +58,7 @@ services:
     volumes:
       - wp:/var/www/html
       - ../..:/var/www/html/wp-content/plugins/ai-translator-for-translatepress:ro
+      - ./mu-plugins:/var/www/html/wp-content/mu-plugins:ro
       - ./:/e2e:ro
     profiles: ["cli"]
 volumes:

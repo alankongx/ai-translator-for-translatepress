@@ -5,3 +5,4 @@
 .aitp-wrap .aitp-review td { vertical-align: top; word-break: break-word; }
 .aitp-wrap .aitp-test ul { margin: 0 0 8px 18px; list-style: disc; }
 .aitp-wrap .aitp-hidden { display: none; }
+.aitp-button-delete{color:#b32d2e!important;border-color:#b32d2e!important;}

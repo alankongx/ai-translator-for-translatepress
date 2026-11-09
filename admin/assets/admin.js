@@ -50,3 +50,62 @@
 	}
 	update( false );
 } )();
+
+// Backfill queue: advance from the open admin page.
+( function () {
+	'use strict';
+	var btn = document.getElementById( 'aitp-queue-live' );
+	var out = document.getElementById( 'aitp-queue-live-status' );
+	var cfg = window.aitpQueue;
+	if ( ! btn || ! out || ! cfg ) {
+		return;
+	}
+	var label = btn.textContent;
+	var on = false;
+	var timer = null;
+
+	function stop() {
+		on = false;
+		clearTimeout( timer );
+		btn.textContent = label;
+	}
+
+	function step() {
+		if ( ! on ) {
+			return;
+		}
+		var body = new FormData();
+		body.append( 'action', 'aitp_queue_step' );
+		body.append( '_ajax_nonce', cfg.nonce );
+		fetch( cfg.ajax, { method: 'POST', body: body, credentials: 'same-origin' } )
+			.then( function ( r ) {
+				return r.json();
+			} )
+			.then( function ( j ) {
+				if ( ! j || ! j.success ) {
+					throw new Error( 'bad response' );
+				}
+				out.textContent = j.data.text;
+				if ( j.data.stop ) {
+					stop();
+					return;
+				}
+				var wait = j.data.result === 'pages' || j.data.result === 'time' ? 1 : Math.min( 60, Math.max( 2, j.data.wait || 5 ) );
+				timer = setTimeout( step, wait * 1000 );
+			} )
+			.catch( function () {
+				out.textContent = cfg.error;
+				timer = setTimeout( step, 15000 );
+			} );
+	}
+
+	btn.addEventListener( 'click', function () {
+		if ( on ) {
+			stop();
+			return;
+		}
+		on = true;
+		btn.textContent = btn.getAttribute( 'data-label-stop' );
+		step();
+	} );
+} )();
