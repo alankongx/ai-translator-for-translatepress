@@ -1,0 +1,7 @@
+.aitp-wrap .form-table th { width: 220px; }
+.aitp-wrap .aitp-kv th { font-weight: 600; }
+.aitp-wrap .aitp-log td code { white-space: pre-wrap; word-break: break-word; background: none; padding: 0; }
+.aitp-wrap .aitp-level-error td, .aitp-wrap .aitp-level-warning td { background: #fcf0f1; }
+.aitp-wrap .aitp-review td { vertical-align: top; word-break: break-word; }
+.aitp-wrap .aitp-test ul { margin: 0 0 8px 18px; list-style: disc; }
+.aitp-wrap .aitp-hidden { display: none; }

@@ -1,0 +1,809 @@
+# Copyright (C) 2026 alankongx
+# Simplified Chinese translation.
+# This file is distributed under the GPL-2.0-or-later.
+msgid ""
+msgstr ""
+"Project-Id-Version: AI Translator for TranslatePress 0.1.0\n"
+"Report-Msgid-Bugs-To: https://github.com/alankongx/ai-translator-for-translatepress/issues\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: 简体中文\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-11-09T10:20:30+00:00\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"X-Generator: WP-CLI 2.11.0\n"
+"X-Domain: ai-translator-for-translatepress\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#. Plugin Name of the plugin
+#: ai-translator-for-translatepress.php
+#: includes/wp/class-aitp-admin.php:215
+msgid "AI Translator for TranslatePress"
+msgstr "AI Translator for TranslatePress"
+
+#. Plugin URI of the plugin
+#: ai-translator-for-translatepress.php
+msgid "https://github.com/alankongx/ai-translator-for-translatepress"
+msgstr "https://github.com/alankongx/ai-translator-for-translatepress"
+
+#. Description of the plugin
+#: ai-translator-for-translatepress.php
+msgid "Translation engine for TranslatePress using Google Gemini or any OpenAI-compatible API. Translations are mapped by ID and validated before TranslatePress saves them; failed strings stay untranslated and are retried later instead of being saved wrong."
+msgstr "TranslatePress 的翻译引擎，支持 Google Gemini 和任意 OpenAI 兼容接口。译文按编号对应，并在 TranslatePress 保存前逐条校验；校验不过的文字保持未翻译、稍后重试，绝不存错。"
+
+#. Author of the plugin
+#: ai-translator-for-translatepress.php
+msgid "alankongx"
+msgstr "alankongx"
+
+#. Author URI of the plugin
+#: ai-translator-for-translatepress.php
+msgid "https://github.com/alankongx"
+msgstr "https://github.com/alankongx"
+
+#: includes/wp/class-aitp-admin.php:54
+#: includes/wp/class-aitp-admin.php:169
+msgid "AI Translator"
+msgstr "AI 翻译"
+
+#: includes/wp/class-aitp-admin.php:76
+#: includes/wp/class-aitp-admin.php:208
+msgid "Settings"
+msgstr "设置"
+
+#: includes/wp/class-aitp-admin.php:106
+msgid "AI Translator for TranslatePress needs the TranslatePress plugin to be installed and active."
+msgstr "AI Translator for TranslatePress 需要先安装并启用 TranslatePress 插件。"
+
+#: includes/wp/class-aitp-admin.php:110
+msgid "The plugin \"HHG for TranslatePress\" is also active. Only one translation engine is used at a time (TranslatePress → Automatic Translation → engine). Deactivate HHG after switching to AI Translator to avoid confusion."
+msgstr "「HHG for TranslatePress」插件也处于启用状态。TranslatePress 同一时间只用一个翻译引擎（TranslatePress → 自动翻译 → 引擎）。切换到 AI 翻译后请停用 HHG，以免混淆。"
+
+#: includes/wp/class-aitp-admin.php:113
+msgid "AI Translator: the saved API key can no longer be read (the site's secret keys in wp-config.php changed). Please enter the API key again."
+msgstr "AI 翻译：已保存的 API 密钥无法读取（wp-config.php 里的站点密钥变了）。请重新填写 API 密钥。"
+
+#: includes/wp/class-aitp-admin.php:113
+msgid "Open settings"
+msgstr "打开设置"
+
+#: includes/wp/class-aitp-admin.php:118
+msgid "AI Translator has paused automatic translation."
+msgstr "AI 翻译已暂停自动翻译。"
+
+#: includes/wp/class-aitp-admin.php:118
+#: includes/wp/class-aitp-admin.php:505
+msgid "Details"
+msgstr "详情"
+
+#: includes/wp/class-aitp-admin.php:144
+msgid "The API key was rejected. Check the key and the API address."
+msgstr "API 密钥被拒绝。请检查密钥和接口地址。"
+
+#: includes/wp/class-aitp-admin.php:145
+msgid "The provider reports a billing or balance problem. Top up or check the account."
+msgstr "服务商提示账单或余额有问题。请充值或检查账户。"
+
+#: includes/wp/class-aitp-admin.php:146
+msgid "The model or API address was not found. Check the model name."
+msgstr "找不到模型或接口地址。请检查模型名称。"
+
+#: includes/wp/class-aitp-admin.php:147
+msgid "The provider rejected the requests as invalid. Check the model and settings, then run the connection test."
+msgstr "服务商认为请求无效。请检查模型和设置，然后运行连接测试。"
+
+#: includes/wp/class-aitp-admin.php:148
+msgid "Rate limit reached; requests resume automatically."
+msgstr "已达到频率上限，稍后自动恢复。"
+
+#: includes/wp/class-aitp-admin.php:149
+msgid "The provider's daily quota is used up; requests resume automatically later."
+msgstr "服务商当天额度已用完，稍后自动恢复。"
+
+#: includes/wp/class-aitp-admin.php:150
+msgid "The provider returned server errors; requests resume automatically."
+msgstr "服务商返回服务器错误，稍后自动恢复。"
+
+#: includes/wp/class-aitp-admin.php:151
+msgid "Requests timed out; requests resume automatically."
+msgstr "请求超时，稍后自动恢复。"
+
+#: includes/wp/class-aitp-admin.php:152
+msgid "Network error while contacting the provider."
+msgstr "连接服务商时网络出错。"
+
+#: includes/wp/class-aitp-admin.php:153
+msgid "The provider returned an unreadable response."
+msgstr "服务商返回的内容无法读取。"
+
+#: includes/wp/class-aitp-admin.php:154
+msgid "The model's answers were repeatedly cut off, unreadable or misaligned, so they were discarded; requests resume automatically."
+msgstr "模型的回答接连被截断、无法读取或对位错乱，已全部丢弃；稍后自动恢复。"
+
+#: includes/wp/class-aitp-admin.php:171
+msgid "Not configured yet."
+msgstr "尚未配置。"
+
+#: includes/wp/class-aitp-admin.php:177
+msgid "Open AI Translator settings"
+msgstr "打开 AI 翻译设置"
+
+#: includes/wp/class-aitp-admin.php:178
+msgid "The daily character limit above also applies to AI Translator (sent characters, retries included)."
+msgstr "上方的每日字符上限同样适用于 AI 翻译（按发送的字符计，含重试）。"
+
+#: includes/wp/class-aitp-admin.php:189
+msgid "paused"
+msgstr "已暂停"
+
+#: includes/wp/class-aitp-admin.php:192
+msgid "waiting (temporary)"
+msgstr "等待中（临时）"
+
+#: includes/wp/class-aitp-admin.php:194
+msgid "running"
+msgstr "运行中"
+
+#: includes/wp/class-aitp-admin.php:209
+msgid "Status & log"
+msgstr "状态与日志"
+
+#: includes/wp/class-aitp-admin.php:210
+msgid "Review list"
+msgstr "待复核列表"
+
+#: includes/wp/class-aitp-admin.php:240
+msgid "To use this engine, open TranslatePress → Settings → Automatic Translation, turn automatic translation on and choose \"AI Translator\" as the engine."
+msgstr "要使用这个引擎，请打开 TranslatePress → 设置 → 自动翻译，开启自动翻译并把引擎选为「AI Translator」。"
+
+#: includes/wp/class-aitp-admin.php:251
+msgid "Connection"
+msgstr "连接"
+
+#: includes/wp/class-aitp-admin.php:253
+msgid "API type"
+msgstr "接口类型"
+
+#: includes/wp/class-aitp-admin.php:254
+msgid "Google Gemini (native API)"
+msgstr "Google Gemini（原生接口）"
+
+#: includes/wp/class-aitp-admin.php:254
+msgid "OpenAI-compatible API (OpenAI, DeepSeek, Zhipu, OpenRouter, relays …)"
+msgstr "OpenAI 兼容接口（OpenAI、DeepSeek、智谱、OpenRouter、中转站等）"
+
+#: includes/wp/class-aitp-admin.php:259
+msgid "Service"
+msgstr "服务"
+
+#: includes/wp/class-aitp-admin.php:265
+msgid "API address"
+msgstr "接口地址"
+
+#: includes/wp/class-aitp-admin.php:266
+msgid "Leave empty to use the default address of the selected service. HTTPS only. For relays, enter the address that ends before /chat/completions (often ending in /v1)."
+msgstr "留空则使用所选服务的默认地址。只接受 HTTPS。中转站请填到 /chat/completions 之前的部分（通常以 /v1 结尾）。"
+
+#: includes/wp/class-aitp-admin.php:268
+msgid "API key"
+msgstr "API 密钥"
+
+#: includes/wp/class-aitp-admin.php:270
+msgid "Set in wp-config.php (AITP_API_KEY)."
+msgstr "已在 wp-config.php 中设置（AITP_API_KEY）。"
+
+#. translators: %s: last 4 characters
+#: includes/wp/class-aitp-admin.php:272
+msgid "Saved (…%s) — enter a new key to replace it"
+msgstr "已保存（…%s）——填写新密钥即可替换"
+
+#. translators: %s: last 4 characters
+#: includes/wp/class-aitp-admin.php:272
+msgid "Paste the API key"
+msgstr "粘贴 API 密钥"
+
+#: includes/wp/class-aitp-admin.php:274
+msgid "Remove saved key"
+msgstr "删除已保存的密钥"
+
+#: includes/wp/class-aitp-admin.php:276
+msgid "Stored encrypted and never shown again. It is only sent to the API address above, in a request header."
+msgstr "加密保存，之后不再显示。只会通过请求头发送到上面的接口地址。"
+
+#: includes/wp/class-aitp-admin.php:280
+msgid "Model"
+msgstr "模型"
+
+#: includes/wp/class-aitp-admin.php:281
+msgid "Model name exactly as the provider writes it, e.g. gemini-3.5-flash, gpt-4.1-mini, deepseek-chat."
+msgstr "按服务商写法填写模型名称，例如 gemini-3.5-flash、gpt-4.1-mini、deepseek-chat。"
+
+#: includes/wp/class-aitp-admin.php:283
+msgid "Thinking"
+msgstr "思考"
+
+#: includes/wp/class-aitp-admin.php:284
+msgid "Minimal (fastest, recommended)"
+msgstr "最少（最快，推荐）"
+
+#: includes/wp/class-aitp-admin.php:284
+msgid "Low"
+msgstr "低"
+
+#: includes/wp/class-aitp-admin.php:284
+msgid "Model default"
+msgstr "模型默认"
+
+#: includes/wp/class-aitp-admin.php:289
+msgid "Structured output"
+msgstr "结构化输出"
+
+#: includes/wp/class-aitp-admin.php:290
+msgid "Automatic (schema → JSON → plain, chosen by what the API accepts)"
+msgstr "自动（按接口支持情况依次用 schema → JSON → 纯文本）"
+
+#: includes/wp/class-aitp-admin.php:290
+msgid "JSON mode only"
+msgstr "仅 JSON 模式"
+
+#: includes/wp/class-aitp-admin.php:290
+msgid "Off (prompt only)"
+msgstr "关闭（只靠提示词）"
+
+#: includes/wp/class-aitp-admin.php:295
+msgid "Temperature"
+msgstr "温度"
+
+#: includes/wp/class-aitp-admin.php:295
+msgid "Empty = provider default (recommended for Gemini 3)."
+msgstr "留空 = 使用服务商默认值（Gemini 3 推荐留空）。"
+
+#: includes/wp/class-aitp-admin.php:298
+msgid "Translation rules"
+msgstr "翻译规则"
+
+#: includes/wp/class-aitp-admin.php:299
+msgid "Protected terms"
+msgstr "保护词"
+
+#: includes/wp/class-aitp-admin.php:299
+msgid "One per line. Brand and product names that must appear unchanged (exact spelling and capitals), e.g. OKAY EYEWEAR."
+msgstr "每行一个。必须原样出现的品牌名和产品名（拼写和大小写都不能变），例如 OKAY EYEWEAR。"
+
+#: includes/wp/class-aitp-admin.php:300
+msgid "Glossary"
+msgstr "术语表"
+
+#: includes/wp/class-aitp-admin.php:300
+msgid "One rule per line: source term => language: preferred | alternative ; !forbidden. Language can be a code (fr, es_MX) or * for all. Example: tinted lenses => es_MX: micas tintadas | lentes tintados ; !polarizadas"
+msgstr "每行一条：源词 => 语言: 首选 | 备选 ; !禁用词。语言可写代码（fr、es_MX），* 表示所有语言。例：tinted lenses => es_MX: micas tintadas | lentes tintados ; !polarizadas"
+
+#: includes/wp/class-aitp-admin.php:301
+msgid "Protected patterns"
+msgstr "保护格式"
+
+#: includes/wp/class-aitp-admin.php:301
+msgid "Optional. One regular expression per line (without delimiters); every match must reappear unchanged. Technical standards (EN ISO 12312-1, ANSI Z80.3 …) and model codes (TR90, UV400) are protected automatically."
+msgstr "可选。每行一个正则表达式（不带分隔符）；每个匹配到的内容都必须原样保留。技术标准（EN ISO 12312-1、ANSI Z80.3 等）和型号代码（TR90、UV400）会自动保护。"
+
+#: includes/wp/class-aitp-admin.php:302
+msgid "About the site"
+msgstr "网站简介"
+
+#: includes/wp/class-aitp-admin.php:302
+msgid "Short description sent with every request: industry, audience, tone. Example: B2B manufacturer of kids sunglasses and optical frames; formal business tone."
+msgstr "每次请求都会附上的简短说明：行业、受众、语气。例：儿童太阳镜和光学镜架的 B2B 制造商；正式商务语气。"
+
+#: includes/wp/class-aitp-admin.php:304
+msgid "Checks"
+msgstr "检查项"
+
+#: includes/wp/class-aitp-admin.php:306
+msgid "Model numbers and material codes must stay unchanged (TR90, UV400, OK-A1001)"
+msgstr "型号和材料代码必须保持不变（TR90、UV400、OK-A1001）"
+
+#: includes/wp/class-aitp-admin.php:307
+msgid "Size labels must stay unchanged (S, M, L, XL)"
+msgstr "尺码必须保持不变（S、M、L、XL）"
+
+#: includes/wp/class-aitp-admin.php:308
+msgid "Flag added claims (guaranteed, certified, in stock, polarized, reinforced, best …)"
+msgstr "标出多加的宣传说法（保证、认证、现货、偏光、加强、最好等）"
+
+#: includes/wp/class-aitp-admin.php:314
+msgid "Flagged translations"
+msgstr "被标记的译文"
+
+#: includes/wp/class-aitp-admin.php:315
+msgid "Save them and add them to the review list (recommended)"
+msgstr "保存并加入待复核列表（推荐）"
+
+#: includes/wp/class-aitp-admin.php:315
+msgid "Do not save them; keep the original until reviewed"
+msgstr "不保存，复核前继续显示原文"
+
+#: includes/wp/class-aitp-admin.php:318
+msgid "Applies to possible meaning changes (added claims, glossary). Broken structure, missing numbers, untranslated or truncated text is never saved."
+msgstr "只针对可能改变意思的情况（多加的说法、术语表）。结构损坏、数字缺失、没翻译或被截断的译文一律不保存。"
+
+#: includes/wp/class-aitp-admin.php:321
+msgid "Performance"
+msgstr "性能"
+
+#: includes/wp/class-aitp-admin.php:322
+msgid "Seconds per page view"
+msgstr "每次页面访问的秒数"
+
+#: includes/wp/class-aitp-admin.php:322
+msgid "Maximum time spent translating during one page view. Strings not finished are translated on a later view."
+msgstr "一次页面访问里最多花在翻译上的时间。没来得及翻的文字会在之后的访问中继续翻译。"
+
+#: includes/wp/class-aitp-admin.php:323
+msgid "Strings per call"
+msgstr "每次调用的文字条数"
+
+#: includes/wp/class-aitp-admin.php:323
+msgid "How many strings TranslatePress hands over at once."
+msgstr "TranslatePress 一次交给引擎多少条文字。"
+
+#: includes/wp/class-aitp-admin.php:324
+msgid "Strings per request"
+msgstr "每个请求的文字条数"
+
+#: includes/wp/class-aitp-admin.php:325
+msgid "Source tokens per request"
+msgstr "每个请求的原文 token 数"
+
+#: includes/wp/class-aitp-admin.php:326
+msgid "Parallel requests"
+msgstr "并行请求数"
+
+#: includes/wp/class-aitp-admin.php:326
+msgid "Lower this if the provider reports rate limits."
+msgstr "服务商提示频率超限时调低这个值。"
+
+#: includes/wp/class-aitp-admin.php:327
+msgid "Request timeout (seconds)"
+msgstr "请求超时（秒）"
+
+#: includes/wp/class-aitp-admin.php:328
+msgid "Keep log (days)"
+msgstr "日志保留（天）"
+
+#: includes/wp/class-aitp-admin.php:334
+msgid "Connection test"
+msgstr "连接测试"
+
+#: includes/wp/class-aitp-admin.php:335
+msgid "Translates two short test sentences with the saved settings and shows exactly what came back. Nothing is saved to TranslatePress."
+msgstr "用已保存的设置翻译两句简短的测试句子，并原样显示返回结果。不会保存到 TranslatePress。"
+
+#: includes/wp/class-aitp-admin.php:338
+msgid "Run connection test"
+msgstr "运行连接测试"
+
+#: includes/wp/class-aitp-admin.php:347
+msgid "Connection test passed."
+msgstr "连接测试通过。"
+
+#: includes/wp/class-aitp-admin.php:347
+msgid "Connection test failed."
+msgstr "连接测试失败。"
+
+#: includes/wp/class-aitp-admin.php:357
+msgid "Not translated:"
+msgstr "未翻译："
+
+#: includes/wp/class-aitp-admin.php:363
+msgid "Detected features:"
+msgstr "检测到的功能："
+
+#: includes/wp/class-aitp-admin.php:408
+msgid "Overview"
+msgstr "概览"
+
+#: includes/wp/class-aitp-admin.php:409
+msgid "Engine selected in TranslatePress"
+msgstr "已在 TranslatePress 中选用此引擎"
+
+#: includes/wp/class-aitp-admin.php:409
+#: includes/wp/class-aitp-admin.php:411
+#: includes/wp/class-aitp-admin.php:637
+msgid "Yes"
+msgstr "是"
+
+#: includes/wp/class-aitp-admin.php:409
+#: includes/wp/class-aitp-admin.php:411
+#: includes/wp/class-aitp-admin.php:637
+msgid "No"
+msgstr "否"
+
+#: includes/wp/class-aitp-admin.php:410
+msgid "Automatic translation"
+msgstr "自动翻译"
+
+#: includes/wp/class-aitp-admin.php:410
+msgid "On"
+msgstr "开"
+
+#: includes/wp/class-aitp-admin.php:410
+msgid "Off"
+msgstr "关"
+
+#: includes/wp/class-aitp-admin.php:411
+msgid "Configured"
+msgstr "已配置"
+
+#. translators: %s: time
+#: includes/wp/class-aitp-admin.php:417
+msgid "(next attempt %s)"
+msgstr "（下次尝试 %s）"
+
+#: includes/wp/class-aitp-admin.php:420
+msgid "State"
+msgstr "状态"
+
+#: includes/wp/class-aitp-admin.php:422
+msgid "Last error"
+msgstr "最近一次错误"
+
+#. translators: 1: used characters, 2: limit
+#: includes/wp/class-aitp-admin.php:425
+msgid "Characters sent today (TranslatePress limit)"
+msgstr "今天已发送的字符（TranslatePress 上限）"
+
+#. translators: 1: used characters, 2: limit
+#: includes/wp/class-aitp-admin.php:425
+msgid "%1$s of %2$s"
+msgstr "%1$s / %2$s"
+
+#: includes/wp/class-aitp-admin.php:431
+msgid "Resume now"
+msgstr "立即恢复"
+
+#: includes/wp/class-aitp-admin.php:456
+msgid "Last 24 hours"
+msgstr "最近 24 小时"
+
+#: includes/wp/class-aitp-admin.php:457
+msgid "Engine calls"
+msgstr "引擎调用次数"
+
+#: includes/wp/class-aitp-admin.php:458
+msgid "Strings received"
+msgstr "收到的文字条数"
+
+#: includes/wp/class-aitp-admin.php:459
+msgid "Translated and handed to TranslatePress"
+msgstr "已翻译并交给 TranslatePress"
+
+#. translators: %s: number
+#: includes/wp/class-aitp-admin.php:459
+msgid "%s from cache"
+msgstr "其中 %s 条来自缓存"
+
+#. translators: %s: number
+#: includes/wp/class-aitp-admin.php:460
+msgid "Saved with a review flag"
+msgstr "已保存但带复核标记"
+
+#: includes/wp/class-aitp-admin.php:461
+msgid "Not translated (left for a later attempt)"
+msgstr "未翻译（留待之后重试）"
+
+#: includes/wp/class-aitp-admin.php:462
+msgid "API requests"
+msgstr "API 请求数"
+
+#: includes/wp/class-aitp-admin.php:463
+msgid "Characters sent"
+msgstr "已发送字符数"
+
+#: includes/wp/class-aitp-admin.php:469
+msgid "Reasons"
+msgstr "原因"
+
+#: includes/wp/class-aitp-admin.php:476
+msgid "Strings that keep failing"
+msgstr "反复失败的文字"
+
+#: includes/wp/class-aitp-admin.php:477
+msgid "After repeated failures a string is retried less often (5 min, 30 min, 2 h, 12 h). It stays untranslated in TranslatePress meanwhile."
+msgstr "反复失败后，重试间隔会逐步拉长（5 分钟、30 分钟、2 小时、12 小时）。在此期间它在 TranslatePress 中保持未翻译。"
+
+#: includes/wp/class-aitp-admin.php:479
+msgid "None."
+msgstr "无。"
+
+#: includes/wp/class-aitp-admin.php:481
+#: includes/wp/class-aitp-admin.php:505
+#: includes/wp/class-aitp-admin.php:634
+msgid "Language"
+msgstr "语言"
+
+#: includes/wp/class-aitp-admin.php:481
+msgid "Reason"
+msgstr "原因"
+
+#: includes/wp/class-aitp-admin.php:481
+msgid "Strings"
+msgstr "条数"
+
+#: includes/wp/class-aitp-admin.php:481
+msgid "Waiting"
+msgstr "等待中"
+
+#: includes/wp/class-aitp-admin.php:487
+msgid "Latest examples"
+msgstr "最近的例子"
+
+#: includes/wp/class-aitp-admin.php:494
+msgid "Retry all now"
+msgstr "立即全部重试"
+
+#: includes/wp/class-aitp-admin.php:500
+msgid "Recent log"
+msgstr "最近日志"
+
+#: includes/wp/class-aitp-admin.php:502
+msgid "Nothing logged yet."
+msgstr "暂无日志。"
+
+#: includes/wp/class-aitp-admin.php:505
+msgid "Time (UTC)"
+msgstr "时间（UTC）"
+
+#: includes/wp/class-aitp-admin.php:505
+msgid "Event"
+msgstr "事件"
+
+#: includes/wp/class-aitp-admin.php:548
+msgid "translation too short"
+msgstr "译文过短"
+
+#: includes/wp/class-aitp-admin.php:549
+msgid "translation too long"
+msgstr "译文过长"
+
+#: includes/wp/class-aitp-admin.php:550
+msgid "sentences missing"
+msgstr "句子缺失"
+
+#: includes/wp/class-aitp-admin.php:551
+msgid "returned untranslated"
+msgstr "原样返回未翻译"
+
+#: includes/wp/class-aitp-admin.php:552
+msgid "source language left in translation"
+msgstr "译文里残留原文语言"
+
+#: includes/wp/class-aitp-admin.php:553
+msgid "numbers changed"
+msgstr "数字被改"
+
+#: includes/wp/class-aitp-admin.php:554
+msgid "HTML changed"
+msgstr "HTML 被改"
+
+#: includes/wp/class-aitp-admin.php:555
+msgid "HTML broken"
+msgstr "HTML 损坏"
+
+#: includes/wp/class-aitp-admin.php:556
+msgid "placeholders changed"
+msgstr "占位符被改"
+
+#: includes/wp/class-aitp-admin.php:557
+msgid "link or e-mail changed"
+msgstr "链接或邮箱被改"
+
+#: includes/wp/class-aitp-admin.php:558
+msgid "protected term missing"
+msgstr "缺少保护词"
+
+#: includes/wp/class-aitp-admin.php:559
+msgid "ordinary word written like the brand"
+msgstr "普通词被写成品牌的写法"
+
+#: includes/wp/class-aitp-admin.php:560
+msgid "code or standard changed"
+msgstr "代码或标准被改"
+
+#: includes/wp/class-aitp-admin.php:561
+msgid "size label changed"
+msgstr "尺码被改"
+
+#: includes/wp/class-aitp-admin.php:562
+msgid "characters of another language"
+msgstr "混入其他语言的文字"
+
+#: includes/wp/class-aitp-admin.php:563
+msgid "source characters left in translation"
+msgstr "译文里残留原文字符"
+
+#: includes/wp/class-aitp-admin.php:564
+msgid "answer cut off"
+msgstr "回答被截断"
+
+#: includes/wp/class-aitp-admin.php:565
+msgid "missing in answer"
+msgstr "回答里缺了这一条"
+
+#: includes/wp/class-aitp-admin.php:566
+msgid "answer IDs did not match"
+msgstr "回答的编号对不上"
+
+#: includes/wp/class-aitp-admin.php:567
+msgid "answer looked misaligned, all of it discarded"
+msgstr "回答疑似对位错乱，整批丢弃"
+
+#: includes/wp/class-aitp-admin.php:568
+#: includes/wp/class-aitp-admin.php:569
+msgid "unreadable answer"
+msgstr "回答无法读取"
+
+#: includes/wp/class-aitp-admin.php:570
+msgid "blocked by provider safety filter"
+msgstr "被服务商安全过滤拦截"
+
+#: includes/wp/class-aitp-admin.php:571
+msgid "time budget used up (next page view)"
+msgstr "时间用完（下次访问再翻）"
+
+#: includes/wp/class-aitp-admin.php:572
+msgid "engine paused / waiting"
+msgstr "引擎暂停 / 等待中"
+
+#: includes/wp/class-aitp-admin.php:573
+msgid "daily character limit reached"
+msgstr "已达每日字符上限"
+
+#: includes/wp/class-aitp-admin.php:574
+msgid "waiting after repeated failures"
+msgstr "反复失败后等待重试"
+
+#: includes/wp/class-aitp-admin.php:575
+msgid "structured data (not translated)"
+msgstr "结构化数据（不翻译）"
+
+#: includes/wp/class-aitp-admin.php:576
+msgid "empty answer"
+msgstr "空回答"
+
+#: includes/wp/class-aitp-admin.php:577
+msgid "answer format leaked into text"
+msgstr "回答格式混入了正文"
+
+#: includes/wp/class-aitp-admin.php:578
+msgid "glossary term not used"
+msgstr "没用术语表指定的译法"
+
+#: includes/wp/class-aitp-admin.php:579
+msgid "forbidden glossary term used"
+msgstr "用了术语表禁用的词"
+
+#: includes/wp/class-aitp-admin.php:580
+msgid "brand added"
+msgstr "多加了品牌名"
+
+#: includes/wp/class-aitp-admin.php:581
+msgid "number written in words"
+msgstr "数字被写成了文字"
+
+#. translators: %s: concept such as guarantee
+#: includes/wp/class-aitp-admin.php:588
+msgid "added claim: %s"
+msgstr "多加的说法：%s"
+
+#. translators: %s: reason
+#: includes/wp/class-aitp-admin.php:592
+msgid "not saved, needs review: %s"
+msgstr "未保存，需复核：%s"
+
+#: includes/wp/class-aitp-admin.php:618
+msgid "Translations that passed all hard checks but may change the meaning (added claims, glossary). Correct them in the TranslatePress translation editor if needed, then mark them as reviewed."
+msgstr "这些译文通过了所有硬性检查，但可能改变了原意（多加的说法、术语表）。如需修改，请在 TranslatePress 翻译编辑器中更正，然后标记为已复核。"
+
+#: includes/wp/class-aitp-admin.php:621
+msgid "Open"
+msgstr "待处理"
+
+#: includes/wp/class-aitp-admin.php:621
+msgid "Reviewed"
+msgstr "已复核"
+
+#: includes/wp/class-aitp-admin.php:621
+msgid "Dismissed"
+msgstr "已忽略"
+
+#: includes/wp/class-aitp-admin.php:626
+msgid "Export CSV"
+msgstr "导出 CSV"
+
+#: includes/wp/class-aitp-admin.php:629
+msgid "Nothing here."
+msgstr "这里还没有内容。"
+
+#: includes/wp/class-aitp-admin.php:634
+msgid "Original"
+msgstr "原文"
+
+#: includes/wp/class-aitp-admin.php:634
+msgid "Translation"
+msgstr "译文"
+
+#: includes/wp/class-aitp-admin.php:634
+msgid "Flags"
+msgstr "标记"
+
+#: includes/wp/class-aitp-admin.php:634
+msgid "Saved"
+msgstr "已保存"
+
+#: includes/wp/class-aitp-admin.php:641
+msgid "Mark as reviewed"
+msgstr "标记为已复核"
+
+#: includes/wp/class-aitp-admin.php:644
+msgid "Dismiss"
+msgstr "忽略"
+
+#: includes/wp/class-aitp-admin.php:647
+msgid "Reopen"
+msgstr "重新打开"
+
+#: includes/wp/class-aitp-admin.php:667
+msgid "You are not allowed to do this."
+msgstr "你没有权限执行此操作。"
+
+#: includes/wp/class-aitp-admin.php:689
+msgid "Enter the API key and model first."
+msgstr "请先填写 API 密钥和模型。"
+
+#: includes/wp/class-aitp-admin.php:755
+msgid "Automatic translation resumed."
+msgstr "自动翻译已恢复。"
+
+#: includes/wp/class-aitp-admin.php:765
+msgid "Failed strings will be retried on the next page view."
+msgstr "失败的文字会在下一次页面访问时重试。"
+
+#: includes/wp/class-aitp-plugin.php:54
+msgid "AI Translator (Gemini / OpenAI-compatible)"
+msgstr "AI 翻译（Gemini / OpenAI 兼容）"
+
+#: includes/wp/class-aitp-settings.php:170
+msgid "The API address is not a valid URL."
+msgstr "接口地址不是有效的网址。"
+
+#: includes/wp/class-aitp-settings.php:174
+msgid "The API address must start with https://."
+msgstr "接口地址必须以 https:// 开头。"
+
+#: includes/wp/class-aitp-settings.php:177
+msgid "The API address must not contain a user name, password, query string or fragment. Enter the API key in its own field."
+msgstr "接口地址里不能包含用户名、密码、查询参数或锚点。API 密钥请填在单独的字段里。"
+
+#: includes/wp/class-aitp-settings.php:337
+msgid "The API key is too long."
+msgstr "API 密钥过长。"
+
+#. translators: %s: list of patterns
+#: includes/wp/class-aitp-settings.php:362
+msgid "These protected patterns are not valid regular expressions (or match empty text) and are ignored: %s"
+msgstr "以下保护格式不是有效的正则表达式（或会匹配空文本），已忽略：%s"
+
+#. translators: %s: list of lines
+#: includes/wp/class-aitp-settings.php:369
+msgid "These glossary lines could not be read and are ignored: %s"
+msgstr "以下术语表行无法识别，已忽略：%s"
+
+#: includes/wp/class-aitp-tp-engine.php:96
+msgid "AI Translator is not configured yet: add the API key and model under Settings → AI Translator."
+msgstr "AI 翻译尚未配置：请在 设置 → AI 翻译 中填写 API 密钥和模型。"
+
+#: includes/wp/class-aitp-updater.php:91
+msgid "Translation engine for TranslatePress using Google Gemini or any OpenAI-compatible API, with ID-based mapping and validation before saving."
+msgstr "TranslatePress 的翻译引擎，支持 Google Gemini 和任意 OpenAI 兼容接口；译文按编号对应，保存前逐条校验。"

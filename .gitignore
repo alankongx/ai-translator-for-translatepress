@@ -1,0 +1,6 @@
+/tests/fixtures/private/
+/dev/e2e/.state/
+/build/
+/dist/
+.DS_Store
+/tests/results.json
