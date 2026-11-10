@@ -9,7 +9,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-11-10T02:57:10+00:00\n"
+"POT-Creation-Date: 2026-11-10T03:37:26+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.11.0\n"
 "X-Domain: ai-translator-for-translatepress\n"
@@ -510,9 +510,9 @@ msgstr ""
 msgid "Import: %1$s rows read, %2$s added. Not added — changed since: %3$s, translated manually: %4$s, missing or unreadable: %5$s, on the accepted list: %6$s."
 msgstr ""
 
-#. translators: 1: rows read, 2: added, 3: already on the list, 4: changed, 5: manual, 6: missing or unreadable
+#. translators: 1: rows read, 2: added, 3: of them found by original text, 4: already on the list, 5: changed, 6: manual, 7: missing or unreadable, 8: original found more than once
 #: includes/wp/class-aitp-admin-audit.php:462
-msgid "Accepted list: %1$s rows read, %2$s added, %3$s already on the list. Not added — text differs from the site: %4$s, translated manually (protected anyway): %5$s, missing or unreadable: %6$s."
+msgid "Accepted list: %1$s rows read, %2$s added (%3$s of them found by their original text because the ID differs), %4$s already on the list. Not added — text differs from the site: %5$s, translated manually (protected anyway): %6$s, missing or unreadable: %7$s, original found more than once: %8$s."
 msgstr ""
 
 #. translators: %s: number of rows

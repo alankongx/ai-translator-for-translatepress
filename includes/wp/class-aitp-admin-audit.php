@@ -458,8 +458,8 @@ final class AITP_Admin_Audit {
 					break;
 				}
 				$r = AITP_Audit::protect( $content, isset( $_POST['label'] ) ? sanitize_text_field( wp_unslash( $_POST['label'] ) ) : '' );
-				/* translators: 1: rows read, 2: added, 3: already on the list, 4: changed, 5: manual, 6: missing or unreadable */
-				$msg = sprintf( __( 'Accepted list: %1$s rows read, %2$s added, %3$s already on the list. Not added — text differs from the site: %4$s, translated manually (protected anyway): %5$s, missing or unreadable: %6$s.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['read'] ), number_format_i18n( $r['added'] ), number_format_i18n( $r['already'] ), number_format_i18n( $r['changed'] + $r['untranslated'] ), number_format_i18n( $r['manual'] ), number_format_i18n( $r['missing'] + $r['bad'] ) );
+				/* translators: 1: rows read, 2: added, 3: of them found by original text, 4: already on the list, 5: changed, 6: manual, 7: missing or unreadable, 8: original found more than once */
+				$msg = sprintf( __( 'Accepted list: %1$s rows read, %2$s added (%3$s of them found by their original text because the ID differs), %4$s already on the list. Not added — text differs from the site: %5$s, translated manually (protected anyway): %6$s, missing or unreadable: %7$s, original found more than once: %8$s.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['read'] ), number_format_i18n( $r['added'] ), number_format_i18n( $r['by_original'] ), number_format_i18n( $r['already'] ), number_format_i18n( $r['changed'] + $r['untranslated'] ), number_format_i18n( $r['manual'] ), number_format_i18n( $r['missing'] + $r['bad'] ), number_format_i18n( $r['duplicate'] ) );
 				break;
 			case 'unprotect':
 				$n = AITP_Audit::unprotect( isset( $_POST['label'] ) ? sanitize_text_field( wp_unslash( $_POST['label'] ) ) : '' );

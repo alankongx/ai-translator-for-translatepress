@@ -474,8 +474,9 @@ const S = {
 		} );
 
 		// 5b. Accepted list: rows people reviewed are listed but never repaired.
-		const accRows = restored.slice( 0, 3 ).map( ( r ) => seed.rows.find( ( x ) => x.id === r.id && x.lang === r.lang && x.kind === r.kind ) );
-		const accB64 = Buffer.from( JSON.stringify( { rows: accRows.map( ( r ) => ( { language: r.lang, id: r.id, original: r.original, new: r.bad, table: r.kind } ) ) } ) ).toString( 'base64' );
+		const accRows = restored.filter( ( r ) => r.kind === 'dictionary' ).slice( 0, 4 ).map( ( r ) => seed.rows.find( ( x ) => x.id === r.id && x.lang === r.lang && x.kind === r.kind ) );
+		// The last entry has a wrong id (copied database): it must be found by its original text.
+		const accB64 = Buffer.from( JSON.stringify( { rows: accRows.map( ( r, i ) => ( { language: i === 3 ? r.lang.toLowerCase() : r.lang, id: i === 3 ? r.id + 900000 : r.id, original: r.original, new: r.bad, table: r.kind } ) ) } ) ).toString( 'base64' );
 		wp( 'eval', `file_put_contents(WP_CONTENT_DIR . "/e2e-state/accepted.json", base64_decode("${ accB64 }")); echo 1;` );
 		const prot = a( 'protect', '/var/www/html/wp-content/e2e-state/accepted.json', '--label=e2e reviewed' );
 		a( 'scan', '--minutes=5' );
@@ -489,11 +490,11 @@ const S = {
 		wp( 'aitp', 'audit', 'unprotect', '--label=e2e reviewed' );
 		const reopened = list().filter( ( f ) => accKeys.has( key( f.kind, f.lang, f.row_id ) ) );
 		record( 'audit: accepted list is listed but never repaired', { protect: prot, accepted_found: accFound.length, open_while_accepted: openAcc.length, repair: accRep, unchanged: stillBad.length, reopened: reopened.length }, {
-			all_added: prot.added === 3,
-			listed_as_accepted: accFound.length === 3 && openAcc.length === 0,
-			repair_refused: accRep.reset === 0 && ( accRep.skipped.accepted || 0 ) === 3,
-			text_unchanged: stillBad.length === 3,
-			reopened_after_removal: reopened.length === 3,
+			all_added: prot.added === 4 && prot.by_original === 1,
+			listed_as_accepted: accFound.length === 4 && openAcc.length === 0,
+			repair_refused: accRep.reset === 0 && ( accRep.skipped.accepted || 0 ) === 4,
+			text_unchanged: stillBad.length === 4,
+			reopened_after_removal: reopened.length === 4,
 		} );
 
 		// 6. Import of a candidate list.

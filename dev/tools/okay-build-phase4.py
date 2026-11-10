@@ -4,7 +4,8 @@
   python3 -I dev/tools/okay-build-phase4.py <acceptance folder>
 
 Writes (gitignored, never upload):
-  tests/fixtures/private/okay-accepted-hhg-repair.json  rows the earlier HHG repair wrote to production
+  tests/fixtures/private/okay-accepted-hhg-repair.json  rows the earlier HHG repair wrote to production, plus the
+                                                        later read-back corrections (18 Arabic, 2 German popup rows)
                                                         (language, id, original, new) -> accepted list
   tests/fixtures/private/okay-candidates-remaining.json legacy candidates minus the ones already repaired
                                                         (language, id, original, old) -> candidate import
@@ -35,6 +36,21 @@ def main():
             accepted.append({'language': lang_of(r['table']), 'id': str(r['row']['id']), 'original': r['row']['original'], 'new': r['new']})
             status[str(r['new_status'])] = status.get(str(r['new_status']), 0) + 1
 
+    # Later corrections (read back from production after they were applied): their final text wins.
+    by_key = {(a['language'].lower(), a['id']): i for i, a in enumerate(accepted)}
+    later = {'added': 0, 'replaced': 0}
+    for rel in ('legacy-candidates-v4/regeneration/first-18-readback.json', 'production-deployment/popup-german-grammar-readback.json'):
+        for r in json.load(open(os.path.join(src, rel), encoding='utf-8'))['records']:
+            e = {'language': r['language'], 'id': str(r['row']['id']), 'original': r['row']['original'], 'new': r['row']['translated']}
+            k = (e['language'].lower(), e['id'])
+            if k in by_key:
+                accepted[by_key[k]] = e
+                later['replaced'] += 1
+            else:
+                by_key[k] = len(accepted)
+                accepted.append(e)
+                later['added'] += 1
+
     done = set()
     for f in sorted(glob.glob(os.path.join(src, 'legacy-candidates-v4', 'regeneration', '*-applied.json'))):
         d = json.load(open(f, encoding='utf-8'))
@@ -48,7 +64,7 @@ def main():
 
     json.dump({'rows': accepted}, open(os.path.join(out, 'okay-accepted-hhg-repair.json'), 'w', encoding='utf-8'), ensure_ascii=False)
     json.dump({'rows': remaining}, open(os.path.join(out, 'okay-candidates-remaining.json'), 'w', encoding='utf-8'), ensure_ascii=False)
-    print(json.dumps({'accepted_rows': len(accepted), 'accepted_new_status': status, 'candidates_listed': len(cands), 'already_repaired': len(done), 'candidates_remaining': len(remaining), 'remaining_structured': structured}))
+    print(json.dumps({'accepted_rows': len(accepted), 'accepted_new_status': status, 'later_corrections': later, 'candidates_listed': len(cands), 'already_repaired': len(done), 'candidates_remaining': len(remaining), 'remaining_structured': structured}))
 
 
 if __name__ == '__main__':

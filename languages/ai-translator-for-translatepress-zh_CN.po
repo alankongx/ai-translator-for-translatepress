@@ -1587,3 +1587,6 @@ msgstr "TranslatePress 的自动翻译已关闭"
 
 msgid "TranslatePress is still translating with the HHG engine (%s). AI Translator is installed but not in use: choose \"AI Translator\" under TranslatePress → Automatic Translation, then deactivate HHG."
 msgstr "TranslatePress 仍在用 HHG 引擎（%s）翻译。AI Translator 已安装但没有在用：请在 TranslatePress → 自动翻译里选「AI Translator」，再停用 HHG。"
+
+msgid "Accepted list: %1$s rows read, %2$s added (%3$s of them found by their original text because the ID differs), %4$s already on the list. Not added — text differs from the site: %5$s, translated manually (protected anyway): %6$s, missing or unreadable: %7$s, original found more than once: %8$s."
+msgstr "已验收清单：读到 %1$s 行，加入 %2$s 行（其中 %3$s 行编号不同、按原文找到），已在清单里 %4$s 行。未加入——和网站当前文字不一致：%5$s，已人工翻译（本来就受保护）：%6$s，找不到或读不懂：%7$s，同一原文有多行：%8$s。"

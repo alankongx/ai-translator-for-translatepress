@@ -744,14 +744,17 @@ final class AITP_Audit {
 	 *
 	 * @param string $content File content (JSON or CSV): language, id, original, translated (or new).
 	 * @param string $label   Name of the list (shown in the admin page).
-	 * @return array{read:int,bad:int,added:int,already:int,manual:int,changed:int,missing:int,untranslated:int}
+	 * Rows are found by id; when the id points elsewhere (copied site, other database), a
+	 * page-text row is found by its exact original instead — only when exactly one row has it.
+	 *
+	 * @return array{read:int,bad:int,added:int,by_original:int,already:int,manual:int,changed:int,missing:int,untranslated:int,duplicate:int}
 	 */
 	public static function protect( $content, $label ) {
 		global $wpdb;
 		$label = substr( sanitize_text_field( (string) $label ), 0, 64 );
 		$label = $label !== '' ? $label : gmdate( 'Y-m-d H:i' );
 		$p     = AITP_Audit_Logic::parse_import( $content, array( 'new', 'translated', 'translation', 'text', 'old' ) );
-		$out   = array( 'read' => count( $p['rows'] ) + $p['bad'], 'bad' => $p['bad'], 'added' => 0, 'already' => 0, 'manual' => 0, 'changed' => 0, 'missing' => 0, 'untranslated' => 0 );
+		$out   = array( 'read' => count( $p['rows'] ) + $p['bad'], 'bad' => $p['bad'], 'added' => 0, 'by_original' => 0, 'already' => 0, 'manual' => 0, 'changed' => 0, 'missing' => 0, 'untranslated' => 0, 'duplicate' => 0 );
 		$table = AITP_Schema::table( 'protect' );
 		$by    = array();
 		foreach ( $p['rows'] as $c ) {
@@ -767,12 +770,22 @@ final class AITP_Audit {
 			foreach ( array_chunk( $list, 500 ) as $chunk ) {
 				$cur = self::rows( $t, wp_list_pluck( $chunk, 'id' ) );
 				foreach ( $chunk as $c ) {
-					$r = isset( $cur[ $c['id'] ] ) ? $cur[ $c['id'] ] : null;
-					if ( ! $r ) {
+					$r  = isset( $cur[ $c['id'] ] ) ? $cur[ $c['id'] ] : null;
+					$by = 'id';
+					if ( ( ! $r || (string) $r['original'] !== $c['original'] ) && $t['kind'] === 'dictionary' ) {
+						$m = self::rows_by_original( $t, $c['original'] );
+						if ( count( $m ) > 1 ) {
+							$out['duplicate']++;
+							continue;
+						}
+						$r  = $m ? $m[0] : null;
+						$by = 'original';
+					}
+					if ( ! $r || (string) $r['original'] !== $c['original'] ) {
 						$out['missing']++;
 						continue;
 					}
-					if ( (string) $r['original'] !== $c['original'] || (string) $r['translated'] !== $c['old'] ) {
+					if ( (string) $r['translated'] !== $c['old'] ) {
 						$out['changed']++;
 						continue;
 					}
@@ -787,12 +800,28 @@ final class AITP_Audit {
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery
 					$n = $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO $table (kind, lang, row_id, original_hash, translated_hash, label, created_at) VALUES (%s, %s, %d, %s, %s, %s, %s)", $t['kind'], $t['lang'], (int) $r['id'], sha1( (string) $r['original'] ), sha1( (string) $r['translated'] ), $label, current_time( 'mysql', true ) ) );
 					$out[ $n ? 'added' : 'already' ]++;
+					if ( $n && $by === 'original' ) {
+						$out['by_original']++;
+					}
 				}
 			}
 		}
 		self::sync_accepted();
 		( new AITP_WP_Log() )->log( 'info', 'audit_protect', array( 'label' => $label ) + $out );
 		return $out;
+	}
+
+	/**
+	 * Page-text rows with exactly this original (binary compare).
+	 *
+	 * @param array  $t        Table entry.
+	 * @param string $original Original text.
+	 * @return array[] Up to 2 rows (enough to tell unique from duplicate).
+	 */
+	private static function rows_by_original( array $t, $original ) {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
+		return (array) $wpdb->get_results( $wpdb->prepare( self::select_rows( $t ) . ' WHERE tt.original = %s AND BINARY tt.original = BINARY %s LIMIT 2', $original, $original ), ARRAY_A );
 	}
 
 	/**
