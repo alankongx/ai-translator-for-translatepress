@@ -6,7 +6,7 @@ TranslatePress 的 AI 翻译引擎，支持 **Google Gemini 原生接口**和**�
 
 **补翻队列**：在后台一页一页访问各页面的译文版本，让没人访问过的页面也提前翻好；有速度上限、每日字符上限、给访客预留 TranslatePress 额度，接口出问题时自动等待。
 
-**旧坏译文体检与修复**：用同一套校验器扫描 TranslatePress 里已有的机器译文（错位、英文、截短、结构化数据损坏、占位符丢失），可导入外部候选清单、可选 AI 复核；人工勾选后先备份再改回「未翻译」交给补翻队列重翻，按批次逐字节回滚；人工译文从不动。
+**旧坏译文体检与修复**：用同一套校验器扫描 TranslatePress 里已有的机器译文（错位、英文、截短、结构化数据损坏、占位符丢失），可导入外部候选清单、可选 AI 复核；人工勾选后先备份再改回「未翻译」交给补翻队列重翻，按批次逐字节回滚；人工译文从不动。人工核过的译文可以导入「已验收清单」，永不被修复；TranslatePress 用的不是本引擎时，补翻队列和修复都会停下。
 
 - 下载安装：在 [Releases](https://github.com/alankongx/ai-translator-for-translatepress/releases) 下载 `ai-translator-for-translatepress.zip`，在 WordPress 后台「插件 → 安装插件 → 上传插件」安装。之后的新版本会在后台自动提示更新。
 - 使用说明：见 [readme.txt](readme.txt)

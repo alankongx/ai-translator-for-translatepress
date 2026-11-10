@@ -37,6 +37,8 @@ final class AITP_Admin_Queue {
 			'max_visits'      => __( 'still new strings after several visits; continues later', 'ai-translator-for-translatepress' ),
 			'strings_failing' => __( 'some strings keep failing; retried later', 'ai-translator-for-translatepress' ),
 			'queue_cap'       => __( 'daily character limit of the queue reached', 'ai-translator-for-translatepress' ),
+			'engine_not_selected' => __( 'TranslatePress is not using the AI Translator engine (TranslatePress → Automatic Translation); the queue does not visit pages for another engine', 'ai-translator-for-translatepress' ),
+			'automatic_off'   => __( 'automatic translation is switched off in TranslatePress', 'ai-translator-for-translatepress' ),
 			'tp_limit'        => __( 'TranslatePress daily limit almost used up (reserve kept for visitors)', 'ai-translator-for-translatepress' ),
 		);
 		if ( isset( $map[ $code ] ) ) {

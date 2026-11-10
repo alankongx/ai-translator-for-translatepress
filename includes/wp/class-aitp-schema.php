@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 final class AITP_Schema {
 
-	const VERSION = '3';
+	const VERSION = '4';
 
 	/**
 	 * @param string $name Short name: cache, failures, review, log, queue, audit, repair.
@@ -158,13 +158,28 @@ final class AITP_Schema {
   KEY batch (batch)
 ) $c;"
 		);
+		dbDelta(
+			'CREATE TABLE ' . self::table( 'protect' ) . " (
+  id bigint unsigned NOT NULL AUTO_INCREMENT,
+  kind varchar(12) NOT NULL DEFAULT '',
+  lang varchar(20) NOT NULL DEFAULT '',
+  row_id bigint unsigned NOT NULL DEFAULT 0,
+  original_hash char(40) NOT NULL DEFAULT '',
+  translated_hash char(40) NOT NULL DEFAULT '',
+  label varchar(64) NOT NULL DEFAULT '',
+  created_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  UNIQUE KEY row_text (kind,lang,row_id,translated_hash),
+  KEY label (label)
+) $c;"
+		);
 		update_option( 'aitp_db_version', self::VERSION, false );
 	}
 
 	/** Remove everything (uninstall). */
 	public static function uninstall() {
 		global $wpdb;
-		foreach ( array( 'cache', 'failures', 'review', 'log', 'queue', 'audit', 'repair' ) as $t ) {
+		foreach ( array( 'cache', 'failures', 'review', 'log', 'queue', 'audit', 'repair', 'protect' ) as $t ) {
 			$wpdb->query( 'DROP TABLE IF EXISTS ' . self::table( $t ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
 		}
 		foreach ( array( 'aitp_settings', 'aitp_db_version', 'aitp_breaker', 'aitp_caps', 'aitp_notice', 'aitp_queue_settings', 'aitp_queue_state', 'aitp_queue_lock', 'aitp_audit_state', 'aitp_audit_lock', 'aitp_audit_settings', 'aitp_repair_batches' ) as $o ) {

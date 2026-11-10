@@ -94,10 +94,13 @@ final class AITP_CLI {
 	 * ## OPTIONS
 	 *
 	 * <action>
-	 * : scan | status | list | repair | rollback | import | ai-check | dismiss
+	 * : scan | status | list | repair | rollback | import | ai-check | dismiss | protect | unprotect | protected
 	 *
 	 * [<arg>]
-	 * : For "rollback": batch id. For "import": file path.
+	 * : For "rollback": batch id. For "import" and "protect": file path.
+ *
+ * [--label=<label>]
+ * : For "protect" / "unprotect": name of the accepted list.
 	 *
 	 * [--ids=<ids>]
 	 * : Finding ids, comma separated (repair, ai-check, dismiss).
@@ -115,7 +118,7 @@ final class AITP_CLI {
 	 * : Filter: scan | import.
 	 *
 	 * [--state=<state>]
-	 * : Filter: open (default) | fixed | dismissed | changed | all.
+	 * : Filter: open (default) | fixed | dismissed | changed | accepted | all.
 	 *
 	 * [--limit=<n>]
 	 * : For "list": rows to show (default 50).
@@ -132,6 +135,7 @@ final class AITP_CLI {
 	 *     wp aitp audit list --lang=fr_FR --severity=error
 	 *     wp aitp audit repair --ids=12,13
 	 *     wp aitp audit rollback 1762700000000
+ *     wp aitp audit protect reviewed.json --label="Reviewed 2026-11"
 	 *
 	 * @param array $args  Positional.
 	 * @param array $assoc Named.
@@ -173,6 +177,21 @@ final class AITP_CLI {
 					WP_CLI::error( 'File not readable.' );
 				}
 				WP_CLI::log( wp_json_encode( AITP_Audit::import( (string) file_get_contents( $args[1] ) ) ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+				break;
+			case 'protect':
+				if ( empty( $args[1] ) || ! is_readable( $args[1] ) ) {
+					WP_CLI::error( 'File not readable.' );
+				}
+				WP_CLI::log( wp_json_encode( AITP_Audit::protect( (string) file_get_contents( $args[1] ), isset( $assoc['label'] ) ? (string) $assoc['label'] : '' ) ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+				break;
+			case 'unprotect':
+				if ( empty( $assoc['label'] ) ) {
+					WP_CLI::error( '--label is required.' );
+				}
+				WP_CLI::success( AITP_Audit::unprotect( (string) $assoc['label'] ) . ' rows removed from the accepted list.' );
+				break;
+			case 'protected':
+				WP_CLI::log( wp_json_encode( AITP_Audit::protected_lists(), JSON_PRETTY_PRINT ) );
 				break;
 			case 'ai-check':
 				WP_CLI::log( wp_json_encode( AITP_Audit::ai_check( $ids ? $ids : AITP_Audit::ids_for( $f ), 300 ) ) );

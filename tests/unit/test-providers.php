@@ -11,6 +11,15 @@ test( 'gemini: key in header, never in URL; schema and thinking set', function (
 	eq( 4000, $b['generationConfig']['maxOutputTokens'] );
 } );
 
+test( 'gemini: 3.5-flash LOW like the OKAY production engine, default sampling', function () {
+	foreach ( array( 'low' => 'low', 'auto' => 'low', 'off' => 'minimal' ) as $mode => $level ) {
+		$p = new AITP_Provider_Gemini( array( 'api_key' => 'k123456', 'model' => 'gemini-3.5-flash', 'thinking' => $mode ) );
+		$g = json_decode( $p->build_request( 's', 'u', 100, $p->default_caps() )['body'], true )['generationConfig'];
+		eq( $level, $g['thinkingConfig']['thinkingLevel'], $mode );
+		ok( ! isset( $g['temperature'] ) && ! isset( $g['topP'] ) && ! isset( $g['candidateCount'] ), 'default sampling' );
+	}
+} );
+
 test( 'gemini: 2.5-flash uses thinking budget 0', function () {
 	$p = new AITP_Provider_Gemini( array( 'api_key' => 'k123456', 'model' => 'gemini-2.5-flash', 'thinking' => 'off' ) );
 	$b = json_decode( $p->build_request( 's', 'u', 100, $p->default_caps() )['body'], true );

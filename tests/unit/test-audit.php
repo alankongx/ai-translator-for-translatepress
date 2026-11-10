@@ -149,3 +149,26 @@ test( 'audit: JSON with typographic quotes (texturized by WordPress) is still ch
 	eq( 'structured_broken', audit_row( $o, 'TR90' )['codes'][0] );
 	eq( null, audit_row( $o, "{\n  &#8220;@context&#8221;: &#8220;https://schema.org&#8221;, &#8220;@type&#8221;: &#8220;FAQPage&#8221;, &#8220;name&#8221;: &#8220;Qu'est-ce que le TR90 ?&#8221;}" ) );
 } );
+
+test( 'audit: accepted rows are never reset, only while the text is unchanged', function () {
+	$row = array( 'original' => 'Kids sunglasses', 'translated' => 'نظارات شمسية للأطفال', 'status' => 1 );
+	$f   = array( 'original_hash' => sha1( $row['original'] ), 'translated_hash' => sha1( $row['translated'] ) );
+	$acc = array( array( sha1( $row['original'] ), sha1( $row['translated'] ) ) );
+	eq( 'accepted', AITP_Audit_Logic::reset_block( $f, $row, $acc ) );
+	eq( '', AITP_Audit_Logic::reset_block( $f, $row ) );
+	// The accepted text was replaced later: no longer protected.
+	eq( '', AITP_Audit_Logic::reset_block( $f, $row, array( array( sha1( $row['original'] ), sha1( 'other' ) ) ) ) );
+	// Manual and changed rows keep their own reason.
+	eq( 'manual', AITP_Audit_Logic::reset_block( $f, array( 'status' => 2 ) + $row, $acc ) );
+	ok( AITP_Audit_Logic::is_accepted( $row, $acc ) );
+	ok( ! AITP_Audit_Logic::is_accepted( array( 'translated' => 'x' ) + $row, $acc ) );
+} );
+
+test( 'audit: accepted list reads "new" columns and {rows:[...]} files', function () {
+	$json = json_encode( array( 'rows' => array( array( 'language' => 'ar', 'id' => '5', 'original' => 'TPEE Kids Sunglasses', 'new' => 'نظارات', 'old' => 'قديم', 'new_status' => '1' ) ) ) );
+	$p    = AITP_Audit_Logic::parse_import( $json, array( 'new', 'translated', 'translation', 'text', 'old' ) );
+	eq( 1, count( $p['rows'] ) );
+	eq( 'نظارات', $p['rows'][0]['old'] );
+	// The candidate import still reads the old text.
+	eq( 'قديم', AITP_Audit_Logic::parse_import( $json )['rows'][0]['old'] );
+} );

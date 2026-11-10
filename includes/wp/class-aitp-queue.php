@@ -518,6 +518,15 @@ final class AITP_Queue {
 					$result = 'pages';
 					break;
 				}
+				// Visits make TranslatePress translate with whatever engine it has selected:
+				// never drive another engine (for example HHG) or a switched-off automatic translation.
+				$engine = ! AITP_Plugin::engine_selected() ? 'engine_not_selected' : ( ! AITP_Plugin::automatic_translation_on() ? 'automatic_off' : '' );
+				if ( $engine !== '' ) {
+					self::update_state( array( 'wait_until' => $now + 300, 'wait_reason' => $engine ) );
+					$result = 'waiting';
+					$wait   = 300;
+					break;
+				}
 				$block = self::budget_block( $s, $set );
 				if ( $block !== '' ) {
 					$until = strtotime( 'tomorrow', $now ) + 60;

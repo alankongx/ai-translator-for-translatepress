@@ -247,9 +247,10 @@ final class AITP_Audit_Logic {
 	 *
 	 * @param array $finding Finding: original_hash, translated_hash.
 	 * @param array|null $row Current TranslatePress row: original, translated, status.
-	 * @return string '' when allowed, otherwise the reason (missing, manual, untranslated, changed).
+	 * @param array      $accepted Accepted-list entries of this row ([original_hash, translated_hash] pairs).
+	 * @return string '' when allowed, otherwise the reason (missing, manual, untranslated, changed, accepted).
 	 */
-	public static function reset_block( array $finding, $row ) {
+	public static function reset_block( array $finding, $row, array $accepted = array() ) {
 		if ( ! is_array( $row ) ) {
 			return 'missing';
 		}
@@ -262,7 +263,28 @@ final class AITP_Audit_Logic {
 		if ( sha1( (string) $row['original'] ) !== $finding['original_hash'] || sha1( (string) $row['translated'] ) !== $finding['translated_hash'] ) {
 			return 'changed';
 		}
+		if ( self::is_accepted( $row, $accepted ) ) {
+			return 'accepted';
+		}
 		return '';
+	}
+
+	/**
+	 * Whether the row's current text is on the accepted list (reviewed by people).
+	 *
+	 * @param array $row      Current row: original, translated.
+	 * @param array $accepted Accepted entries for this row: list of [original_hash, translated_hash].
+	 * @return bool
+	 */
+	public static function is_accepted( array $row, array $accepted ) {
+		$oh = sha1( (string) $row['original'] );
+		$th = sha1( (string) $row['translated'] );
+		foreach ( $accepted as $a ) {
+			if ( $a[0] === $oh && $a[1] === $th ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -312,13 +334,16 @@ final class AITP_Audit_Logic {
 	 * @param string $content File content.
 	 * @return array{rows:array<int,array{lang:string,id:int,original:string,old:string,table:string}>,bad:int}
 	 */
-	public static function parse_import( $content ) {
+	public static function parse_import( $content, array $text_keys = array( 'old', 'translated', 'translation' ) ) {
 		$content = preg_replace( '~^\xEF\xBB\xBF~', '', (string) $content );
 		$records = array();
 		$data    = json_decode( $content, true );
 		if ( is_array( $data ) ) {
-			if ( isset( $data['items'] ) && is_array( $data['items'] ) ) {
-				$data = $data['items'];
+			foreach ( array( 'items', 'rows' ) as $wrap ) {
+				if ( isset( $data[ $wrap ] ) && is_array( $data[ $wrap ] ) ) {
+					$data = $data[ $wrap ];
+					break;
+				}
 			}
 			$records = array_values( array_filter( $data, 'is_array' ) );
 		} else {
@@ -349,7 +374,7 @@ final class AITP_Audit_Logic {
 			$lang = $pick( $r, array( 'language', 'lang', 'locale', 'target_locale' ) );
 			$id   = $pick( $r, array( 'id', 'row_id' ) );
 			$orig = $pick( $r, array( 'original', 'source' ) );
-			$old  = $pick( $r, array( 'old', 'translated', 'translation' ) );
+			$old  = $pick( $r, $text_keys );
 			$tbl  = $pick( $r, array( 'table' ) );
 			if ( $lang === null || $id === null || ! ctype_digit( trim( $id ) ) || $orig === null || $old === null || ! preg_match( '~^[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]{2,8})*$~', trim( $lang ) ) ) {
 				$bad++;

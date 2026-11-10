@@ -2,21 +2,21 @@
 # This file is distributed under the GPL-2.0-or-later.
 msgid ""
 msgstr ""
-"Project-Id-Version: AI Translator for TranslatePress 0.2.0\n"
+"Project-Id-Version: AI Translator for TranslatePress 0.4.0\n"
 "Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/src\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-11-10T01:24:23+00:00\n"
+"POT-Creation-Date: 2026-11-10T02:57:10+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.11.0\n"
 "X-Domain: ai-translator-for-translatepress\n"
 
 #. Plugin Name of the plugin
 #: ai-translator-for-translatepress.php
-#: includes/wp/class-aitp-admin.php:236
+#: includes/wp/class-aitp-admin.php:242
 msgid "AI Translator for TranslatePress"
 msgstr ""
 
@@ -53,7 +53,7 @@ msgid "Check meaning"
 msgstr ""
 
 #: includes/wp/class-aitp-admin-audit.php:74
-#: includes/wp/class-aitp-admin.php:655
+#: includes/wp/class-aitp-admin.php:661
 msgid "Open"
 msgstr ""
 
@@ -62,7 +62,7 @@ msgid "Reset, waiting for new translation"
 msgstr ""
 
 #: includes/wp/class-aitp-admin-audit.php:76
-#: includes/wp/class-aitp-admin.php:655
+#: includes/wp/class-aitp-admin.php:661
 msgid "Dismissed"
 msgstr ""
 
@@ -71,403 +71,466 @@ msgid "Changed since the scan"
 msgstr ""
 
 #: includes/wp/class-aitp-admin-audit.php:78
+msgid "Accepted (reviewed, never repaired)"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:79
 msgid "All"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:90
+#: includes/wp/class-aitp-admin-audit.php:91
 msgid "AI: matches"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:91
+#: includes/wp/class-aitp-admin-audit.php:92
 msgid "AI: does not match"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:92
+#: includes/wp/class-aitp-admin-audit.php:93
 msgid "AI: unsure"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:103
-#: includes/wp/class-aitp-admin-audit.php:230
+#: includes/wp/class-aitp-admin-audit.php:104
+#: includes/wp/class-aitp-admin-audit.php:236
 msgid "changed since the scan"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:104
+#: includes/wp/class-aitp-admin-audit.php:105
 msgid "translated manually"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:105
+#: includes/wp/class-aitp-admin-audit.php:106
 msgid "row no longer exists"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:106
+#: includes/wp/class-aitp-admin-audit.php:107
 msgid "already untranslated"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:107
+#: includes/wp/class-aitp-admin-audit.php:108
 msgid "not open"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:108
+#: includes/wp/class-aitp-admin-audit.php:109
+msgid "on the accepted list"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:110
+msgid "nothing reset: TranslatePress is not using the AI Translator engine, so another engine would translate these rows again"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:111
 msgid "backup failed"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:131
+#: includes/wp/class-aitp-admin-audit.php:134
 msgid "Checks translations TranslatePress already stored (machine translations only) with the same rules used before saving new ones. Nothing is changed by a check. Rows you choose can be set back to \"not translated\" – they are backed up first and translated again through the backfill queue. Manual translations are never touched."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:135
+#: includes/wp/class-aitp-admin-audit.php:138
 msgid "not run yet"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:136
-#: includes/wp/class-aitp-admin-queue.php:70
-#: includes/wp/class-aitp-admin.php:213
+#: includes/wp/class-aitp-admin-audit.php:139
+#: includes/wp/class-aitp-admin-queue.php:72
+#: includes/wp/class-aitp-admin.php:219
 msgid "running"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:137
+#: includes/wp/class-aitp-admin-audit.php:140
 msgid "stopped"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:138
+#: includes/wp/class-aitp-admin-audit.php:141
 msgid "finished"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:140
+#: includes/wp/class-aitp-admin-audit.php:143
 msgid "Check"
 msgstr ""
 
 #. translators: 1: table number, 2: number of tables
-#: includes/wp/class-aitp-admin-audit.php:144
+#: includes/wp/class-aitp-admin-audit.php:147
 msgid "table %1$s of %2$s"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:146
-#: includes/wp/class-aitp-admin-audit.php:224
-#: includes/wp/class-aitp-admin-queue.php:79
-#: includes/wp/class-aitp-admin-queue.php:140
-#: includes/wp/class-aitp-admin.php:445
+#: includes/wp/class-aitp-admin-audit.php:149
+#: includes/wp/class-aitp-admin-audit.php:230
+#: includes/wp/class-aitp-admin-queue.php:81
+#: includes/wp/class-aitp-admin-queue.php:142
+#: includes/wp/class-aitp-admin.php:451
 msgid "State"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:147
+#: includes/wp/class-aitp-admin-audit.php:150
 msgid "Machine translations checked"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:148
+#: includes/wp/class-aitp-admin-audit.php:151
 msgid "Started"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:149
+#: includes/wp/class-aitp-admin-audit.php:152
 msgid "Finished"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:150
+#: includes/wp/class-aitp-admin-audit.php:153
 msgid "Open findings"
 msgstr ""
 
 #: includes/wp/class-aitp-admin-audit.php:155
+msgid "Findings on the accepted list (never repaired)"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:161
 msgid "Stop check"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:156
-#: includes/wp/class-aitp-admin-queue.php:106
+#: includes/wp/class-aitp-admin-audit.php:162
+#: includes/wp/class-aitp-admin-queue.php:108
 msgid "Stop advancing from this page"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:156
+#: includes/wp/class-aitp-admin-audit.php:162
 msgid "Advance the check from this page now"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:158
+#: includes/wp/class-aitp-admin-audit.php:164
 msgid "Start check"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:158
+#: includes/wp/class-aitp-admin-audit.php:164
 msgid "Check again"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:164
-#: includes/wp/class-aitp-admin-audit.php:224
-#: includes/wp/class-aitp-admin-queue.php:120
-#: includes/wp/class-aitp-admin-queue.php:140
-#: includes/wp/class-aitp-admin.php:506
-#: includes/wp/class-aitp-admin.php:530
-#: includes/wp/class-aitp-admin.php:668
+#: includes/wp/class-aitp-admin-audit.php:170
+#: includes/wp/class-aitp-admin-audit.php:230
+#: includes/wp/class-aitp-admin-queue.php:122
+#: includes/wp/class-aitp-admin-queue.php:142
+#: includes/wp/class-aitp-admin.php:512
+#: includes/wp/class-aitp-admin.php:536
+#: includes/wp/class-aitp-admin.php:674
 msgid "Language"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:193
+#: includes/wp/class-aitp-admin-audit.php:199
 msgid "Findings"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:197
+#: includes/wp/class-aitp-admin-audit.php:203
 msgid "All languages"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:198
+#: includes/wp/class-aitp-admin-audit.php:204
 msgid "All problems"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:199
+#: includes/wp/class-aitp-admin-audit.php:205
 msgid "Page text and interface text"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:199
+#: includes/wp/class-aitp-admin-audit.php:205
 msgid "Page text"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:199
+#: includes/wp/class-aitp-admin-audit.php:205
 msgid "Interface text (gettext)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:200
+#: includes/wp/class-aitp-admin-audit.php:206
 msgid "Any AI result"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:201
+#: includes/wp/class-aitp-admin-audit.php:207
 msgid "Found by check or import"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:201
+#: includes/wp/class-aitp-admin-audit.php:207
 msgid "Found by check"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:201
+#: includes/wp/class-aitp-admin-audit.php:207
 msgid "Imported"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:210
+#: includes/wp/class-aitp-admin-audit.php:216
 msgid "problem code"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:211
+#: includes/wp/class-aitp-admin-audit.php:217
 msgid "Filter"
 msgstr ""
 
 #. translators: %s: number of findings
-#: includes/wp/class-aitp-admin-audit.php:214
+#: includes/wp/class-aitp-admin-audit.php:220
 msgid "%s findings match."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:224
-#: includes/wp/class-aitp-admin.php:668
+#: includes/wp/class-aitp-admin-audit.php:230
+#: includes/wp/class-aitp-admin.php:674
 msgid "Original"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:224
+#: includes/wp/class-aitp-admin-audit.php:230
 msgid "Stored translation"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:224
+#: includes/wp/class-aitp-admin-audit.php:230
 msgid "Problem"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:227
+#: includes/wp/class-aitp-admin-audit.php:233
 msgid "interface"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:238
+#: includes/wp/class-aitp-admin-audit.php:244
 msgid "Set the selected translations back to \"not translated\"? They are backed up first and can be rolled back."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:238
+#: includes/wp/class-aitp-admin-audit.php:244
 msgid "Reset selected (backup first)"
 msgstr ""
 
 #. translators: %s: maximum number of rows
-#: includes/wp/class-aitp-admin-audit.php:240
+#: includes/wp/class-aitp-admin-audit.php:246
 msgid "Reset ALL findings matching the filter (at most %s)? They are backed up first and can be rolled back."
 msgstr ""
 
 #. translators: %s: maximum number of rows
-#: includes/wp/class-aitp-admin-audit.php:242
+#: includes/wp/class-aitp-admin-audit.php:248
 msgid "Reset all matching (at most %s)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:243
+#: includes/wp/class-aitp-admin-audit.php:249
 msgid "Not a problem"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:244
-#: includes/wp/class-aitp-admin.php:681
+#: includes/wp/class-aitp-admin-audit.php:250
+#: includes/wp/class-aitp-admin.php:687
 msgid "Reopen"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:246
+#: includes/wp/class-aitp-admin-audit.php:252
 msgid "AI check selected"
 msgstr ""
 
 #. translators: %s: maximum number of rows
-#: includes/wp/class-aitp-admin-audit.php:248
+#: includes/wp/class-aitp-admin-audit.php:254
 msgid "AI check all matching (at most %s)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:251
+#: includes/wp/class-aitp-admin-audit.php:257
 msgid "After a reset the pages showing these strings are queued again; start the backfill queue (or wait for visitors) to get new translations. Clear CDN or server caches outside WordPress yourself."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:269
+#: includes/wp/class-aitp-admin-audit.php:275
 msgid "Repairs"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:269
+#: includes/wp/class-aitp-admin-audit.php:275
 msgid "Time"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:269
+#: includes/wp/class-aitp-admin-audit.php:275
 msgid "Reset"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:269
+#: includes/wp/class-aitp-admin-audit.php:275
 msgid "Skipped"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:269
+#: includes/wp/class-aitp-admin-audit.php:275
 msgid "Pages queued"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:269
+#: includes/wp/class-aitp-admin-audit.php:275
 msgid "Rolled back"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:276
+#: includes/wp/class-aitp-admin-audit.php:282
 msgid "Download backup"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:278
+#: includes/wp/class-aitp-admin-audit.php:284
 msgid "Put the old translations of this repair back? Rows translated manually since then are kept."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:280
+#: includes/wp/class-aitp-admin-audit.php:286
 msgid "Roll back"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:289
+#: includes/wp/class-aitp-admin-audit.php:295
 msgid "Import a candidate list"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:290
+#: includes/wp/class-aitp-admin-audit.php:296
 msgid "JSON or CSV with the columns language, id, original and old (the stored translation); optional table = gettext. A row is added only when id, original and old translation all match the current TranslatePress row and it is still machine translated. Nothing is changed by an import."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:293
+#: includes/wp/class-aitp-admin-audit.php:299
 msgid "Import"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:298
-msgid "Check settings"
-msgstr ""
-
-#: includes/wp/class-aitp-admin-audit.php:300
-msgid "Also check interface text (gettext)"
-msgstr ""
-
 #: includes/wp/class-aitp-admin-audit.php:301
-msgid "Allow the AI check"
-msgstr ""
-
-#: includes/wp/class-aitp-admin-audit.php:301
-msgid "Asks the configured model whether each selected translation belongs to its original. Rules cannot catch every short misplaced label; the AI can, but each check costs characters (counted against the TranslatePress daily limit) and the AI can be wrong too. Only runs on rows you select."
+msgid "Accepted list"
 msgstr ""
 
 #: includes/wp/class-aitp-admin-audit.php:302
+msgid "Translations people have already reviewed (for example rows corrected by hand or by an earlier repair). The check still lists them, but they never count as open and can never be repaired. JSON or CSV with the columns language, id, original and translated (or new); optional table = gettext. An entry is kept only when it matches the current row exactly; when the row changes later, the protection no longer applies."
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:305
+msgid "List"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:305
+msgid "Rows"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:305
+msgid "Added"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:308
+msgid "Remove this accepted list? Its rows can then be repaired again."
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:310
+msgid "Remove"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:316
+msgid "Name of the list"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:316
+msgid "Add to the accepted list"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:335
+msgid "Check settings"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:337
+msgid "Also check interface text (gettext)"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:338
+msgid "Allow the AI check"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:338
+msgid "Asks the configured model whether each selected translation belongs to its original. Rules cannot catch every short misplaced label; the AI can, but each check costs characters (counted against the TranslatePress daily limit) and the AI can be wrong too. Only runs on rows you select."
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:339
 msgid "Save"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:328
-#: includes/wp/class-aitp-admin-audit.php:433
-#: includes/wp/class-aitp-admin-queue.php:209
-#: includes/wp/class-aitp-admin.php:701
+#: includes/wp/class-aitp-admin-audit.php:365
+#: includes/wp/class-aitp-admin-audit.php:485
+#: includes/wp/class-aitp-admin-queue.php:211
+#: includes/wp/class-aitp-admin.php:707
 msgid "You are not allowed to do this."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:340
+#: includes/wp/class-aitp-admin-audit.php:377
 msgid "Check started. It continues in the background; you can also advance it from this page."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:344
+#: includes/wp/class-aitp-admin-audit.php:381
 msgid "Check stopped. Findings so far are kept."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:350
+#: includes/wp/class-aitp-admin-audit.php:387
 msgid "Nothing selected."
 msgstr ""
 
 #. translators: 1: rows reset, 2: pages queued
-#: includes/wp/class-aitp-admin-audit.php:356
+#: includes/wp/class-aitp-admin-audit.php:393
 msgid "%1$s translations backed up and reset; %2$s pages queued again."
 msgstr ""
 
 #. translators: %s: reasons and counts
-#: includes/wp/class-aitp-admin-audit.php:359
+#: includes/wp/class-aitp-admin-audit.php:396
 msgid "Skipped: %s."
 msgstr ""
 
 #. translators: %s: languages
-#: includes/wp/class-aitp-admin-audit.php:363
+#: includes/wp/class-aitp-admin-audit.php:400
 msgid "Some strings are not linked to a page (menus, widgets, interface text): every page of %s was queued again."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:366
+#: includes/wp/class-aitp-admin-audit.php:403
 msgid "The backfill queue is paused: start it, or the strings are translated again when visitors open the pages."
 msgstr ""
 
 #. translators: %s: rows restored
-#: includes/wp/class-aitp-admin-audit.php:373
+#: includes/wp/class-aitp-admin-audit.php:410
 msgid "%s translations restored."
 msgstr ""
 
 #. translators: %s: reasons and counts
-#: includes/wp/class-aitp-admin-audit.php:376
+#: includes/wp/class-aitp-admin-audit.php:413
 msgid "Kept as they are: %s."
 msgstr ""
 
 #. translators: %s: number of rows
-#: includes/wp/class-aitp-admin-audit.php:383
+#: includes/wp/class-aitp-admin-audit.php:420
 msgid "%s findings updated."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:390
+#: includes/wp/class-aitp-admin-audit.php:427
 msgid "The AI check is turned off in the check settings below."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:390
-#: includes/wp/class-aitp-admin-queue.php:229
-#: includes/wp/class-aitp-admin.php:723
+#: includes/wp/class-aitp-admin-audit.php:427
+#: includes/wp/class-aitp-admin-queue.php:231
+#: includes/wp/class-aitp-admin.php:729
 msgid "Enter the API key and model first."
 msgstr ""
 
 #. translators: 1: checked, 2: mismatches, 3: matches, 4: unsure
-#: includes/wp/class-aitp-admin-audit.php:395
+#: includes/wp/class-aitp-admin-audit.php:432
 msgid "AI check: %1$s checked — %2$s do not match, %3$s match, %4$s unsure."
 msgstr ""
 
 #. translators: %s: number of rows
-#: includes/wp/class-aitp-admin-audit.php:398
+#: includes/wp/class-aitp-admin-audit.php:435
 msgid "%s not checked yet (time or provider limit); run it again."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:408
+#: includes/wp/class-aitp-admin-audit.php:444
+#: includes/wp/class-aitp-admin-audit.php:456
 msgid "No file, or the file is larger than 10 MB."
 msgstr ""
 
-#. translators: 1: rows read, 2: rows added, 3: changed, 4: manual, 5: missing or unreadable
-#: includes/wp/class-aitp-admin-audit.php:414
-msgid "Import: %1$s rows read, %2$s added. Not added — changed since: %3$s, translated manually: %4$s, missing or unreadable: %5$s."
+#. translators: 1: rows read, 2: rows added, 3: changed, 4: manual, 5: missing or unreadable, 6: on the accepted list
+#: includes/wp/class-aitp-admin-audit.php:450
+msgid "Import: %1$s rows read, %2$s added. Not added — changed since: %3$s, translated manually: %4$s, missing or unreadable: %5$s, on the accepted list: %6$s."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:420
+#. translators: 1: rows read, 2: added, 3: already on the list, 4: changed, 5: manual, 6: missing or unreadable
+#: includes/wp/class-aitp-admin-audit.php:462
+msgid "Accepted list: %1$s rows read, %2$s added, %3$s already on the list. Not added — text differs from the site: %4$s, translated manually (protected anyway): %5$s, missing or unreadable: %6$s."
+msgstr ""
+
+#. translators: %s: number of rows
+#: includes/wp/class-aitp-admin-audit.php:467
+msgid "%s rows removed from the accepted list."
+msgstr ""
+
+#: includes/wp/class-aitp-admin-audit.php:472
 msgid "Saved."
 msgstr ""
 
 #. translators: 1: rows checked, 2: open findings
-#: includes/wp/class-aitp-admin-audit.php:453
+#: includes/wp/class-aitp-admin-audit.php:505
 msgid "%1$s checked, %2$s findings"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-audit.php:455
-#: includes/wp/class-aitp-admin-queue.php:283
+#: includes/wp/class-aitp-admin-audit.php:507
+#: includes/wp/class-aitp-admin-queue.php:285
 msgid "another run is in progress"
 msgstr ""
 
@@ -496,289 +559,297 @@ msgid "daily character limit of the queue reached"
 msgstr ""
 
 #: includes/wp/class-aitp-admin-queue.php:40
+msgid "TranslatePress is not using the AI Translator engine (TranslatePress → Automatic Translation); the queue does not visit pages for another engine"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-queue.php:41
+msgid "automatic translation is switched off in TranslatePress"
+msgstr ""
+
+#: includes/wp/class-aitp-admin-queue.php:42
 msgid "TranslatePress daily limit almost used up (reserve kept for visitors)"
 msgstr ""
 
 #. translators: %s: HTTP status code
-#: includes/wp/class-aitp-admin-queue.php:47
+#: includes/wp/class-aitp-admin-queue.php:49
 msgid "page returned HTTP %s"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:66
+#: includes/wp/class-aitp-admin-queue.php:68
 msgid "Visits the translated version of your pages in the background, one page at a time, so TranslatePress translates them before a visitor does. Every translation goes through the same checks as during a normal page view; nothing is written to TranslatePress directly."
 msgstr ""
 
 #. translators: 1: reason, 2: time
-#: includes/wp/class-aitp-admin-queue.php:73
+#: includes/wp/class-aitp-admin-queue.php:75
 msgid "waiting: %1$s (until %2$s)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:76
-#: includes/wp/class-aitp-admin.php:208
+#: includes/wp/class-aitp-admin-queue.php:78
+#: includes/wp/class-aitp-admin.php:214
 msgid "paused"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:78
-#: includes/wp/class-aitp-admin.php:433
+#: includes/wp/class-aitp-admin-queue.php:80
+#: includes/wp/class-aitp-admin.php:439
 msgid "Overview"
 msgstr ""
 
 #. translators: 1: done pages, 2: all pages
-#: includes/wp/class-aitp-admin-queue.php:81
+#: includes/wp/class-aitp-admin-queue.php:83
 msgid "Pages done"
 msgstr ""
 
 #. translators: 1: done pages, 2: all pages
 #. translators: 1: used characters, 2: limit
-#: includes/wp/class-aitp-admin-queue.php:81
-#: includes/wp/class-aitp-admin.php:450
+#: includes/wp/class-aitp-admin-queue.php:83
+#: includes/wp/class-aitp-admin.php:456
 msgid "%1$s of %2$s"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:83
+#: includes/wp/class-aitp-admin-queue.php:85
 msgid "Characters used by the queue today"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:84
+#: includes/wp/class-aitp-admin-queue.php:86
 msgid "Page list built"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:84
+#: includes/wp/class-aitp-admin-queue.php:86
 msgid "not yet"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:86
+#: includes/wp/class-aitp-admin-queue.php:88
 msgid "Background run (WP-Cron)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:86
+#: includes/wp/class-aitp-admin-queue.php:88
 msgid "scheduled every minute"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:86
+#: includes/wp/class-aitp-admin-queue.php:88
 msgid "WP-Cron is disabled on this site; a server cron job must call wp-cron.php, or keep this page open, or use \"wp aitp queue run\"."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:86
+#: includes/wp/class-aitp-admin-queue.php:88
 msgid "not scheduled"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:92
+#: includes/wp/class-aitp-admin-queue.php:94
 msgid "Pause"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:94
+#: includes/wp/class-aitp-admin-queue.php:96
 msgid "Start"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:94
+#: includes/wp/class-aitp-admin-queue.php:96
 msgid "Build page list and start"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:96
+#: includes/wp/class-aitp-admin-queue.php:98
 msgid "Rebuild page list"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:98
+#: includes/wp/class-aitp-admin-queue.php:100
 msgid "Queue unfinished pages again"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:101
+#: includes/wp/class-aitp-admin-queue.php:103
 msgid "Check all pages again"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:102
+#: includes/wp/class-aitp-admin-queue.php:104
 msgid "Empty the queue"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:102
+#: includes/wp/class-aitp-admin-queue.php:104
 msgid "Remove all pages from the queue? Translations are not affected."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:106
+#: includes/wp/class-aitp-admin-queue.php:108
 msgid "Advance from this page now"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:110
+#: includes/wp/class-aitp-admin-queue.php:112
 msgid "Progress"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:112
+#: includes/wp/class-aitp-admin-queue.php:114
 msgid "The queue is empty. Choose what to translate below, then start."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:115
+#: includes/wp/class-aitp-admin-queue.php:117
 msgid "Done"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:116
-#: includes/wp/class-aitp-admin.php:506
+#: includes/wp/class-aitp-admin-queue.php:118
+#: includes/wp/class-aitp-admin.php:512
 msgid "Waiting"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:117
-#: includes/wp/class-aitp-admin-queue.php:142
+#: includes/wp/class-aitp-admin-queue.php:119
+#: includes/wp/class-aitp-admin-queue.php:144
 msgid "Partly done"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:118
-#: includes/wp/class-aitp-admin-queue.php:142
+#: includes/wp/class-aitp-admin-queue.php:120
+#: includes/wp/class-aitp-admin-queue.php:144
 msgid "Failed"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:124
+#: includes/wp/class-aitp-admin-queue.php:126
 msgid "Total"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:140
+#: includes/wp/class-aitp-admin-queue.php:142
 msgid "Pages needing attention"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:140
+#: includes/wp/class-aitp-admin-queue.php:142
 msgid "Page"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:140
-#: includes/wp/class-aitp-admin.php:506
+#: includes/wp/class-aitp-admin-queue.php:142
+#: includes/wp/class-aitp-admin.php:512
 msgid "Reason"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:140
+#: includes/wp/class-aitp-admin-queue.php:142
 msgid "Next attempt"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:144
+#: includes/wp/class-aitp-admin-queue.php:146
 msgid "Strings that fail are listed under Status & log with their reasons."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:153
+#: includes/wp/class-aitp-admin-queue.php:155
 msgid "What to translate"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:158
+#: includes/wp/class-aitp-admin-queue.php:160
 msgid "Languages"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:162
+#: includes/wp/class-aitp-admin-queue.php:164
 msgid "Languages configured in TranslatePress."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:164
+#: includes/wp/class-aitp-admin-queue.php:166
 msgid "Content"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:168
+#: includes/wp/class-aitp-admin-queue.php:170
 msgid "Published content only. Edited pages are queued again automatically."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:170
+#: includes/wp/class-aitp-admin-queue.php:172
 msgid "Extra pages"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:170
+#: includes/wp/class-aitp-admin-queue.php:172
 msgid "One address per line, in the default language, on this site (e.g. archive or landing pages)."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:173
+#: includes/wp/class-aitp-admin-queue.php:175
 msgid "Pages per minute"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:173
+#: includes/wp/class-aitp-admin-queue.php:175
 msgid "Upper limit; a page with many new strings takes longer."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:174
+#: includes/wp/class-aitp-admin-queue.php:176
 msgid "Daily character limit of the queue"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:174
+#: includes/wp/class-aitp-admin-queue.php:176
 msgid "Characters the queue may send per day (0 = only the TranslatePress limit applies)."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:175
+#: includes/wp/class-aitp-admin-queue.php:177
 msgid "Reserve for visitors (%)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:175
+#: includes/wp/class-aitp-admin-queue.php:177
 msgid "The queue stops when the TranslatePress daily limit is used up to this reserve, so live page views can still be translated."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:176
+#: includes/wp/class-aitp-admin-queue.php:178
 msgid "Seconds per page"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:176
+#: includes/wp/class-aitp-admin-queue.php:178
 msgid "Time budget of one background page visit (10–40)."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:182
+#: includes/wp/class-aitp-admin-queue.php:184
 msgid "Save and rebuild page list"
 msgstr ""
 
 #. translators: 1: pages, 2: queue entries
-#: includes/wp/class-aitp-admin-queue.php:220
+#: includes/wp/class-aitp-admin-queue.php:222
 msgid "Saved. %1$s pages, %2$s page/language combinations in the queue."
 msgstr ""
 
 #. translators: 1: pages, 2: queue entries
-#: includes/wp/class-aitp-admin-queue.php:225
+#: includes/wp/class-aitp-admin-queue.php:227
 msgid "Page list rebuilt: %1$s pages, %2$s page/language combinations."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:236
+#: includes/wp/class-aitp-admin-queue.php:238
 msgid "The queue is running."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:240
+#: includes/wp/class-aitp-admin-queue.php:242
 msgid "The queue is paused."
 msgstr ""
 
 #. translators: %s: number of pages
-#: includes/wp/class-aitp-admin-queue.php:244
-#: includes/wp/class-aitp-admin-queue.php:248
+#: includes/wp/class-aitp-admin-queue.php:246
+#: includes/wp/class-aitp-admin-queue.php:250
 msgid "%s pages queued again."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:253
+#: includes/wp/class-aitp-admin-queue.php:255
 msgid "The queue is empty."
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:278
+#: includes/wp/class-aitp-admin-queue.php:280
 msgid "working"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:279
+#: includes/wp/class-aitp-admin-queue.php:281
 msgid "page done"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:280
+#: includes/wp/class-aitp-admin-queue.php:282
 msgid "waiting for the speed limit"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:281
+#: includes/wp/class-aitp-admin-queue.php:283
 msgid "queue is waiting"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:282
+#: includes/wp/class-aitp-admin-queue.php:284
 msgid "nothing due right now"
 msgstr ""
 
-#: includes/wp/class-aitp-admin-queue.php:284
+#: includes/wp/class-aitp-admin-queue.php:286
 msgid "queue is paused"
 msgstr ""
 
 #. translators: 1: state, 2: done pages, 3: all pages
-#: includes/wp/class-aitp-admin-queue.php:287
+#: includes/wp/class-aitp-admin-queue.php:289
 msgid "%1$s — %2$s of %3$s done"
 msgstr ""
 
 #: includes/wp/class-aitp-admin.php:56
-#: includes/wp/class-aitp-admin.php:188
+#: includes/wp/class-aitp-admin.php:194
 msgid "AI Translator"
 msgstr ""
 
 #: includes/wp/class-aitp-admin.php:78
-#: includes/wp/class-aitp-admin.php:227
+#: includes/wp/class-aitp-admin.php:233
 msgid "Settings"
 msgstr ""
 
@@ -791,701 +862,706 @@ msgstr ""
 msgid "AI Translator for TranslatePress needs the TranslatePress plugin to be installed and active."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:129
+#. translators: %s: engine id
+#: includes/wp/class-aitp-admin.php:133
+msgid "TranslatePress is still translating with the HHG engine (%s). AI Translator is installed but not in use: choose \"AI Translator\" under TranslatePress → Automatic Translation, then deactivate HHG."
+msgstr ""
+
+#: includes/wp/class-aitp-admin.php:135
 msgid "The plugin \"HHG for TranslatePress\" is also active. Only one translation engine is used at a time (TranslatePress → Automatic Translation → engine). Deactivate HHG after switching to AI Translator to avoid confusion."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:132
+#: includes/wp/class-aitp-admin.php:138
 msgid "AI Translator: the saved API key can no longer be read (the site's secret keys in wp-config.php changed). Please enter the API key again."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:132
+#: includes/wp/class-aitp-admin.php:138
 msgid "Open settings"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:137
+#: includes/wp/class-aitp-admin.php:143
 msgid "AI Translator has paused automatic translation."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:137
-#: includes/wp/class-aitp-admin.php:530
+#: includes/wp/class-aitp-admin.php:143
+#: includes/wp/class-aitp-admin.php:536
 msgid "Details"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:163
+#: includes/wp/class-aitp-admin.php:169
 msgid "The API key was rejected. Check the key and the API address."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:164
+#: includes/wp/class-aitp-admin.php:170
 msgid "The provider reports a billing or balance problem. Top up or check the account."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:165
+#: includes/wp/class-aitp-admin.php:171
 msgid "The model or API address was not found. Check the model name."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:166
+#: includes/wp/class-aitp-admin.php:172
 msgid "The provider rejected the requests as invalid. Check the model and settings, then run the connection test."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:167
+#: includes/wp/class-aitp-admin.php:173
 msgid "Rate limit reached; requests resume automatically."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:168
+#: includes/wp/class-aitp-admin.php:174
 msgid "The provider's daily quota is used up; requests resume automatically later."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:169
+#: includes/wp/class-aitp-admin.php:175
 msgid "The provider returned server errors; requests resume automatically."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:170
+#: includes/wp/class-aitp-admin.php:176
 msgid "Requests timed out; requests resume automatically."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:171
+#: includes/wp/class-aitp-admin.php:177
 msgid "Network error while contacting the provider."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:172
+#: includes/wp/class-aitp-admin.php:178
 msgid "The provider returned an unreadable response."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:173
+#: includes/wp/class-aitp-admin.php:179
 msgid "The model's answers were repeatedly cut off, unreadable or misaligned, so they were discarded; requests resume automatically."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:190
+#: includes/wp/class-aitp-admin.php:196
 msgid "Not configured yet."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:196
+#: includes/wp/class-aitp-admin.php:202
 msgid "Open AI Translator settings"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:197
+#: includes/wp/class-aitp-admin.php:203
 msgid "The daily character limit above also applies to AI Translator (sent characters, retries included)."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:211
+#: includes/wp/class-aitp-admin.php:217
 msgid "waiting (temporary)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:228
+#: includes/wp/class-aitp-admin.php:234
 msgid "Status & log"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:229
+#: includes/wp/class-aitp-admin.php:235
 msgid "Backfill queue"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:230
+#: includes/wp/class-aitp-admin.php:236
 msgid "Review list"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:231
+#: includes/wp/class-aitp-admin.php:237
 msgid "Audit & repair"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:265
+#: includes/wp/class-aitp-admin.php:271
 msgid "To use this engine, open TranslatePress → Settings → Automatic Translation, turn automatic translation on and choose \"AI Translator\" as the engine."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:276
+#: includes/wp/class-aitp-admin.php:282
 msgid "Connection"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:278
+#: includes/wp/class-aitp-admin.php:284
 msgid "API type"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:279
+#: includes/wp/class-aitp-admin.php:285
 msgid "Google Gemini (native API)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:279
+#: includes/wp/class-aitp-admin.php:285
 msgid "OpenAI-compatible API (OpenAI, DeepSeek, Zhipu, OpenRouter, relays …)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:284
+#: includes/wp/class-aitp-admin.php:290
 msgid "Service"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:290
+#: includes/wp/class-aitp-admin.php:296
 msgid "API address"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:291
+#: includes/wp/class-aitp-admin.php:297
 msgid "Leave empty to use the default address of the selected service. HTTPS only. For relays, enter the address that ends before /chat/completions (often ending in /v1)."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:293
+#: includes/wp/class-aitp-admin.php:299
 msgid "API key"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:295
+#: includes/wp/class-aitp-admin.php:301
 msgid "Set in wp-config.php (AITP_API_KEY)."
 msgstr ""
 
 #. translators: %s: last 4 characters
-#: includes/wp/class-aitp-admin.php:297
+#: includes/wp/class-aitp-admin.php:303
 msgid "Saved (…%s) — enter a new key to replace it"
 msgstr ""
 
 #. translators: %s: last 4 characters
-#: includes/wp/class-aitp-admin.php:297
+#: includes/wp/class-aitp-admin.php:303
 msgid "Paste the API key"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:299
+#: includes/wp/class-aitp-admin.php:305
 msgid "Remove saved key"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:301
+#: includes/wp/class-aitp-admin.php:307
 msgid "Stored encrypted and never shown again. It is only sent to the API address above, in a request header."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:305
+#: includes/wp/class-aitp-admin.php:311
 msgid "Model"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:306
+#: includes/wp/class-aitp-admin.php:312
 msgid "Model name exactly as the provider writes it, e.g. gemini-3.5-flash, gpt-4.1-mini, deepseek-chat."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:308
+#: includes/wp/class-aitp-admin.php:314
 msgid "Thinking"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:309
+#: includes/wp/class-aitp-admin.php:315
 msgid "Minimal (fastest, recommended)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:309
+#: includes/wp/class-aitp-admin.php:315
 msgid "Low"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:309
+#: includes/wp/class-aitp-admin.php:315
 msgid "Model default"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:314
+#: includes/wp/class-aitp-admin.php:320
 msgid "Structured output"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:315
+#: includes/wp/class-aitp-admin.php:321
 msgid "Automatic (schema → JSON → plain, chosen by what the API accepts)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:315
+#: includes/wp/class-aitp-admin.php:321
 msgid "JSON mode only"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:315
+#: includes/wp/class-aitp-admin.php:321
 msgid "Off (prompt only)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:320
+#: includes/wp/class-aitp-admin.php:326
 msgid "Temperature"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:320
+#: includes/wp/class-aitp-admin.php:326
 msgid "Empty = provider default (recommended for Gemini 3)."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:323
+#: includes/wp/class-aitp-admin.php:329
 msgid "Translation rules"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:324
+#: includes/wp/class-aitp-admin.php:330
 msgid "Protected terms"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:324
+#: includes/wp/class-aitp-admin.php:330
 msgid "One per line. Brand and product names that must appear unchanged (exact spelling and capitals), e.g. OKAY EYEWEAR."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:325
+#: includes/wp/class-aitp-admin.php:331
 msgid "Glossary"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:325
+#: includes/wp/class-aitp-admin.php:331
 msgid "One rule per line: source term => language: preferred | alternative ; !forbidden. Language can be a code (fr, es_MX) or * for all. Example: tinted lenses => es_MX: micas tintadas | lentes tintados ; !polarizadas"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:326
+#: includes/wp/class-aitp-admin.php:332
 msgid "Protected patterns"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:326
+#: includes/wp/class-aitp-admin.php:332
 msgid "Optional. One regular expression per line (without delimiters); every match must reappear unchanged. Technical standards (EN ISO 12312-1, ANSI Z80.3 …) and model codes (TR90, UV400) are protected automatically."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:327
+#: includes/wp/class-aitp-admin.php:333
 msgid "About the site"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:327
+#: includes/wp/class-aitp-admin.php:333
 msgid "Short description sent with every request: industry, audience, tone. Example: B2B manufacturer of kids sunglasses and optical frames; formal business tone."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:329
+#: includes/wp/class-aitp-admin.php:335
 msgid "Checks"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:331
+#: includes/wp/class-aitp-admin.php:337
 msgid "Model numbers and material codes must stay unchanged (TR90, UV400, OK-A1001)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:332
+#: includes/wp/class-aitp-admin.php:338
 msgid "Size labels must stay unchanged (S, M, L, XL)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:333
+#: includes/wp/class-aitp-admin.php:339
 msgid "Flag added claims (guaranteed, certified, in stock, polarized, reinforced, best …)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:339
+#: includes/wp/class-aitp-admin.php:345
 msgid "Flagged translations"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:340
+#: includes/wp/class-aitp-admin.php:346
 msgid "Save them and add them to the review list (recommended)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:340
+#: includes/wp/class-aitp-admin.php:346
 msgid "Do not save them; keep the original until reviewed"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:343
+#: includes/wp/class-aitp-admin.php:349
 msgid "Applies to possible meaning changes (added claims, glossary). Broken structure, missing numbers, untranslated or truncated text is never saved."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:346
+#: includes/wp/class-aitp-admin.php:352
 msgid "Performance"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:347
+#: includes/wp/class-aitp-admin.php:353
 msgid "Seconds per page view"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:347
+#: includes/wp/class-aitp-admin.php:353
 msgid "Maximum time spent translating during one page view. Strings not finished are translated on a later view."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:348
+#: includes/wp/class-aitp-admin.php:354
 msgid "Strings per call"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:348
+#: includes/wp/class-aitp-admin.php:354
 msgid "How many strings TranslatePress hands over at once."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:349
+#: includes/wp/class-aitp-admin.php:355
 msgid "Strings per request"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:350
+#: includes/wp/class-aitp-admin.php:356
 msgid "Source tokens per request"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:351
+#: includes/wp/class-aitp-admin.php:357
 msgid "Parallel requests"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:351
+#: includes/wp/class-aitp-admin.php:357
 msgid "Lower this if the provider reports rate limits."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:352
+#: includes/wp/class-aitp-admin.php:358
 msgid "Request timeout (seconds)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:353
+#: includes/wp/class-aitp-admin.php:359
 msgid "Keep log (days)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:359
+#: includes/wp/class-aitp-admin.php:365
 msgid "Connection test"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:360
+#: includes/wp/class-aitp-admin.php:366
 msgid "Translates two short test sentences with the saved settings and shows exactly what came back. Nothing is saved to TranslatePress."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:363
+#: includes/wp/class-aitp-admin.php:369
 msgid "Run connection test"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:372
+#: includes/wp/class-aitp-admin.php:378
 msgid "Connection test passed."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:372
+#: includes/wp/class-aitp-admin.php:378
 msgid "Connection test failed."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:382
+#: includes/wp/class-aitp-admin.php:388
 msgid "Not translated:"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:388
+#: includes/wp/class-aitp-admin.php:394
 msgid "Detected features:"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:434
+#: includes/wp/class-aitp-admin.php:440
 msgid "Engine selected in TranslatePress"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:434
-#: includes/wp/class-aitp-admin.php:436
-#: includes/wp/class-aitp-admin.php:671
+#: includes/wp/class-aitp-admin.php:440
+#: includes/wp/class-aitp-admin.php:442
+#: includes/wp/class-aitp-admin.php:677
 msgid "Yes"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:434
-#: includes/wp/class-aitp-admin.php:436
-#: includes/wp/class-aitp-admin.php:671
+#: includes/wp/class-aitp-admin.php:440
+#: includes/wp/class-aitp-admin.php:442
+#: includes/wp/class-aitp-admin.php:677
 msgid "No"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:435
+#: includes/wp/class-aitp-admin.php:441
 msgid "Automatic translation"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:435
+#: includes/wp/class-aitp-admin.php:441
 msgid "On"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:435
+#: includes/wp/class-aitp-admin.php:441
 msgid "Off"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:436
+#: includes/wp/class-aitp-admin.php:442
 msgid "Configured"
 msgstr ""
 
 #. translators: %s: time
-#: includes/wp/class-aitp-admin.php:442
+#: includes/wp/class-aitp-admin.php:448
 msgid "(next attempt %s)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:447
+#: includes/wp/class-aitp-admin.php:453
 msgid "Last error"
 msgstr ""
 
 #. translators: 1: used characters, 2: limit
-#: includes/wp/class-aitp-admin.php:450
+#: includes/wp/class-aitp-admin.php:456
 msgid "Characters sent today (TranslatePress limit)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:456
+#: includes/wp/class-aitp-admin.php:462
 msgid "Resume now"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:481
+#: includes/wp/class-aitp-admin.php:487
 msgid "Last 24 hours"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:482
+#: includes/wp/class-aitp-admin.php:488
 msgid "Engine calls"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:483
+#: includes/wp/class-aitp-admin.php:489
 msgid "Strings received"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:484
+#: includes/wp/class-aitp-admin.php:490
 msgid "Translated and handed to TranslatePress"
 msgstr ""
 
 #. translators: %s: number
-#: includes/wp/class-aitp-admin.php:484
+#: includes/wp/class-aitp-admin.php:490
 msgid "%s from cache"
 msgstr ""
 
 #. translators: %s: number
-#: includes/wp/class-aitp-admin.php:485
+#: includes/wp/class-aitp-admin.php:491
 msgid "Saved with a review flag"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:486
+#: includes/wp/class-aitp-admin.php:492
 msgid "Not translated (left for a later attempt)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:487
+#: includes/wp/class-aitp-admin.php:493
 msgid "API requests"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:488
+#: includes/wp/class-aitp-admin.php:494
 msgid "Characters sent"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:494
+#: includes/wp/class-aitp-admin.php:500
 msgid "Reasons"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:501
+#: includes/wp/class-aitp-admin.php:507
 msgid "Strings that keep failing"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:502
+#: includes/wp/class-aitp-admin.php:508
 msgid "After repeated failures a string is retried less often (5 min, 30 min, 2 h, 12 h). It stays untranslated in TranslatePress meanwhile."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:504
+#: includes/wp/class-aitp-admin.php:510
 msgid "None."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:506
+#: includes/wp/class-aitp-admin.php:512
 msgid "Strings"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:512
+#: includes/wp/class-aitp-admin.php:518
 msgid "Latest examples"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:519
+#: includes/wp/class-aitp-admin.php:525
 msgid "Retry all now"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:525
+#: includes/wp/class-aitp-admin.php:531
 msgid "Recent log"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:527
+#: includes/wp/class-aitp-admin.php:533
 msgid "Nothing logged yet."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:530
+#: includes/wp/class-aitp-admin.php:536
 msgid "Time (UTC)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:530
+#: includes/wp/class-aitp-admin.php:536
 msgid "Event"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:573
+#: includes/wp/class-aitp-admin.php:579
 msgid "translation too short"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:574
+#: includes/wp/class-aitp-admin.php:580
 msgid "translation too long"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:575
+#: includes/wp/class-aitp-admin.php:581
 msgid "sentences missing"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:576
+#: includes/wp/class-aitp-admin.php:582
 msgid "returned untranslated"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:577
+#: includes/wp/class-aitp-admin.php:583
 msgid "source language left in translation"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:578
+#: includes/wp/class-aitp-admin.php:584
 msgid "numbers changed"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:579
+#: includes/wp/class-aitp-admin.php:585
 msgid "HTML changed"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:580
+#: includes/wp/class-aitp-admin.php:586
 msgid "HTML broken"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:581
+#: includes/wp/class-aitp-admin.php:587
 msgid "placeholders changed"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:582
+#: includes/wp/class-aitp-admin.php:588
 msgid "link or e-mail changed"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:583
+#: includes/wp/class-aitp-admin.php:589
 msgid "protected term missing"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:584
+#: includes/wp/class-aitp-admin.php:590
 msgid "ordinary word written like the brand"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:585
+#: includes/wp/class-aitp-admin.php:591
 msgid "code or standard changed"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:586
+#: includes/wp/class-aitp-admin.php:592
 msgid "size label changed"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:587
+#: includes/wp/class-aitp-admin.php:593
 msgid "characters of another language"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:588
+#: includes/wp/class-aitp-admin.php:594
 msgid "source characters left in translation"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:589
+#: includes/wp/class-aitp-admin.php:595
 msgid "answer cut off"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:590
+#: includes/wp/class-aitp-admin.php:596
 msgid "missing in answer"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:591
+#: includes/wp/class-aitp-admin.php:597
 msgid "answer IDs did not match"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:592
+#: includes/wp/class-aitp-admin.php:598
 msgid "answer looked misaligned, all of it discarded"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:593
-#: includes/wp/class-aitp-admin.php:594
+#: includes/wp/class-aitp-admin.php:599
+#: includes/wp/class-aitp-admin.php:600
 msgid "unreadable answer"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:595
+#: includes/wp/class-aitp-admin.php:601
 msgid "blocked by provider safety filter"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:596
+#: includes/wp/class-aitp-admin.php:602
 msgid "time budget used up (next page view)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:597
+#: includes/wp/class-aitp-admin.php:603
 msgid "engine paused / waiting"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:598
+#: includes/wp/class-aitp-admin.php:604
 msgid "daily character limit reached"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:599
+#: includes/wp/class-aitp-admin.php:605
 msgid "waiting after repeated failures"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:600
+#: includes/wp/class-aitp-admin.php:606
 msgid "structured data (not translated)"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:601
+#: includes/wp/class-aitp-admin.php:607
 msgid "empty answer"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:602
+#: includes/wp/class-aitp-admin.php:608
 msgid "answer format leaked into text"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:603
+#: includes/wp/class-aitp-admin.php:609
 msgid "glossary term not used"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:604
+#: includes/wp/class-aitp-admin.php:610
 msgid "forbidden glossary term used"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:605
+#: includes/wp/class-aitp-admin.php:611
 msgid "brand added"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:606
+#: includes/wp/class-aitp-admin.php:612
 msgid "number written in words"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:607
+#: includes/wp/class-aitp-admin.php:613
 msgid "structured data damaged"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:608
+#: includes/wp/class-aitp-admin.php:614
 msgid "same translation as an unrelated text"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:609
+#: includes/wp/class-aitp-admin.php:615
 msgid "from imported list"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:610
+#: includes/wp/class-aitp-admin.php:616
 msgid "next to misplaced translations"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:611
+#: includes/wp/class-aitp-admin.php:617
 msgid "left exactly as the original"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:612
+#: includes/wp/class-aitp-admin.php:618
 msgid "AI: belongs to another text or incomplete"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:613
+#: includes/wp/class-aitp-admin.php:619
 msgid "control characters"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:614
+#: includes/wp/class-aitp-admin.php:620
 msgid "text marked \"do not translate\" changed"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:615
+#: includes/wp/class-aitp-admin.php:621
 msgid "no letters"
 msgstr ""
 
 #. translators: %s: concept such as guarantee
-#: includes/wp/class-aitp-admin.php:622
+#: includes/wp/class-aitp-admin.php:628
 msgid "added claim: %s"
 msgstr ""
 
 #. translators: %s: reason
-#: includes/wp/class-aitp-admin.php:626
+#: includes/wp/class-aitp-admin.php:632
 msgid "not saved, needs review: %s"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:652
+#: includes/wp/class-aitp-admin.php:658
 msgid "Translations that passed all hard checks but may change the meaning (added claims, glossary). Correct them in the TranslatePress translation editor if needed, then mark them as reviewed."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:655
+#: includes/wp/class-aitp-admin.php:661
 msgid "Reviewed"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:660
+#: includes/wp/class-aitp-admin.php:666
 msgid "Export CSV"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:663
+#: includes/wp/class-aitp-admin.php:669
 msgid "Nothing here."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:668
+#: includes/wp/class-aitp-admin.php:674
 msgid "Translation"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:668
+#: includes/wp/class-aitp-admin.php:674
 msgid "Flags"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:668
+#: includes/wp/class-aitp-admin.php:674
 msgid "Saved"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:675
+#: includes/wp/class-aitp-admin.php:681
 msgid "Mark as reviewed"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:678
+#: includes/wp/class-aitp-admin.php:684
 msgid "Dismiss"
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:789
+#: includes/wp/class-aitp-admin.php:795
 msgid "Automatic translation resumed."
 msgstr ""
 
-#: includes/wp/class-aitp-admin.php:799
+#: includes/wp/class-aitp-admin.php:805
 msgid "Failed strings will be retried on the next page view."
 msgstr ""
 

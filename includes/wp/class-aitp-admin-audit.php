@@ -75,6 +75,7 @@ final class AITP_Admin_Audit {
 			'fixed'     => __( 'Reset, waiting for new translation', 'ai-translator-for-translatepress' ),
 			'dismissed' => __( 'Dismissed', 'ai-translator-for-translatepress' ),
 			'changed'   => __( 'Changed since the scan', 'ai-translator-for-translatepress' ),
+			'accepted'  => __( 'Accepted (reviewed, never repaired)', 'ai-translator-for-translatepress' ),
 			'all'       => __( 'All', 'ai-translator-for-translatepress' ),
 		);
 		return isset( $map[ $s ] ) ? $map[ $s ] : $s;
@@ -105,6 +106,8 @@ final class AITP_Admin_Audit {
 			'missing'       => __( 'row no longer exists', 'ai-translator-for-translatepress' ),
 			'untranslated'  => __( 'already untranslated', 'ai-translator-for-translatepress' ),
 			'not_open'      => __( 'not open', 'ai-translator-for-translatepress' ),
+			'accepted'      => __( 'on the accepted list', 'ai-translator-for-translatepress' ),
+			'engine_not_selected' => __( 'nothing reset: TranslatePress is not using the AI Translator engine, so another engine would translate these rows again', 'ai-translator-for-translatepress' ),
 			'backup_failed' => __( 'backup failed', 'ai-translator-for-translatepress' ),
 		);
 		return isset( $map[ $why ] ) ? $map[ $why ] : $why;
@@ -148,6 +151,9 @@ final class AITP_Admin_Audit {
 		self::kv( __( 'Started', 'ai-translator-for-translatepress' ), $s['started'] ? wp_date( 'Y-m-d H:i', (int) $s['started'] ) : '—' );
 		self::kv( __( 'Finished', 'ai-translator-for-translatepress' ), $s['finished'] ? wp_date( 'Y-m-d H:i', (int) $s['finished'] ) : '—' );
 		self::kv( __( 'Open findings', 'ai-translator-for-translatepress' ), number_format_i18n( $counts['open'] ) );
+		if ( $counts['accepted'] ) {
+			echo '<tr><td>' . esc_html__( 'Findings on the accepted list (never repaired)', 'ai-translator-for-translatepress' ) . '</td><td><a href="' . esc_url( self::url( array( 'f_state' => 'accepted' ) ) ) . '">' . esc_html( number_format_i18n( $counts['accepted'] ) ) . '</a></td></tr>';
+		}
 		echo '</tbody></table>';
 
 		echo '<p>';
@@ -193,7 +199,7 @@ final class AITP_Admin_Audit {
 		echo '<h2>' . esc_html__( 'Findings', 'ai-translator-for-translatepress' ) . '</h2>';
 		echo '<form method="get" action="' . esc_url( admin_url( 'options-general.php' ) ) . '" class="aitp-filters"><input type="hidden" name="page" value="' . esc_attr( AITP_Admin::PAGE ) . '"><input type="hidden" name="tab" value="audit">';
 		$opts = array(
-			'state'    => array( 'open' => self::state_label( 'open' ), 'fixed' => self::state_label( 'fixed' ), 'dismissed' => self::state_label( 'dismissed' ), 'changed' => self::state_label( 'changed' ), 'all' => self::state_label( 'all' ) ),
+			'state'    => array( 'open' => self::state_label( 'open' ), 'fixed' => self::state_label( 'fixed' ), 'dismissed' => self::state_label( 'dismissed' ), 'changed' => self::state_label( 'changed' ), 'accepted' => self::state_label( 'accepted' ), 'all' => self::state_label( 'all' ) ),
 			'lang'     => array( '' => __( 'All languages', 'ai-translator-for-translatepress' ) ) + array_combine( AITP_Queue::tp_languages(), AITP_Queue::tp_languages() ),
 			'severity' => array( '' => __( 'All problems', 'ai-translator-for-translatepress' ), 'error' => self::severity_label( 'error' ), 'suspect' => self::severity_label( 'suspect' ), 'review' => self::severity_label( 'review' ) ),
 			'kind'     => array( '' => __( 'Page text and interface text', 'ai-translator-for-translatepress' ), 'dictionary' => __( 'Page text', 'ai-translator-for-translatepress' ), 'gettext' => __( 'Interface text (gettext)', 'ai-translator-for-translatepress' ) ),
@@ -291,6 +297,37 @@ final class AITP_Admin_Audit {
 		echo '<form method="post" enctype="multipart/form-data" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="aitp_audit"><input type="hidden" name="do" value="import">';
 		wp_nonce_field( 'aitp_audit' );
 		echo '<input type="file" name="list" accept=".json,.csv,application/json,text/csv"> <button class="button">' . esc_html__( 'Import', 'ai-translator-for-translatepress' ) . '</button></form>';
+
+		echo '<h2>' . esc_html__( 'Accepted list', 'ai-translator-for-translatepress' ) . '</h2>';
+		echo '<p class="description" style="max-width:860px;">' . esc_html__( 'Translations people have already reviewed (for example rows corrected by hand or by an earlier repair). The check still lists them, but they never count as open and can never be repaired. JSON or CSV with the columns language, id, original and translated (or new); optional table = gettext. An entry is kept only when it matches the current row exactly; when the row changes later, the protection no longer applies.', 'ai-translator-for-translatepress' ) . '</p>';
+		$lists = AITP_Audit::protected_lists();
+		if ( $lists ) {
+			echo '<table class="widefat striped" style="max-width:820px;"><thead><tr><th>' . esc_html__( 'List', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Rows', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Added', 'ai-translator-for-translatepress' ) . '</th><th></th></tr></thead><tbody>';
+			foreach ( $lists as $l ) {
+				echo '<tr><td>' . esc_html( $l['label'] ) . '</td><td>' . esc_html( number_format_i18n( (int) $l['n'] ) ) . '</td><td>' . esc_html( get_date_from_gmt( $l['created'], 'Y-m-d H:i' ) ) . '</td><td>';
+				echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" onsubmit="return confirm(this.dataset.q)" data-q="' . esc_attr__( 'Remove this accepted list? Its rows can then be repaired again.', 'ai-translator-for-translatepress' ) . '"><input type="hidden" name="action" value="aitp_audit"><input type="hidden" name="do" value="unprotect"><input type="hidden" name="label" value="' . esc_attr( $l['label'] ) . '">';
+				wp_nonce_field( 'aitp_audit' );
+				echo '<button class="button button-link-delete">' . esc_html__( 'Remove', 'ai-translator-for-translatepress' ) . '</button></form></td></tr>';
+			}
+			echo '</tbody></table>';
+		}
+		echo '<form method="post" enctype="multipart/form-data" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="margin-top:8px;"><input type="hidden" name="action" value="aitp_audit"><input type="hidden" name="do" value="protect">';
+		wp_nonce_field( 'aitp_audit' );
+		echo '<input type="text" name="label" maxlength="64" placeholder="' . esc_attr__( 'Name of the list', 'ai-translator-for-translatepress' ) . '"> <input type="file" name="list" accept=".json,.csv,application/json,text/csv"> <button class="button">' . esc_html__( 'Add to the accepted list', 'ai-translator-for-translatepress' ) . '</button></form>';
+	}
+
+	/**
+	 * Read an uploaded list (max. 10 MB).
+	 *
+	 * @return string|null
+	 */
+	private static function uploaded() {
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated, WordPress.Security.NonceVerification.Missing
+		$file = isset( $_FILES['list'] ) && is_array( $_FILES['list'] ) ? $_FILES['list'] : null;
+		if ( ! $file || ! empty( $file['error'] ) || ! is_uploaded_file( $file['tmp_name'] ) || (int) $file['size'] > 10 * MB_IN_BYTES ) {
+			return null;
+		}
+		return (string) file_get_contents( $file['tmp_name'] ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 	}
 
 	/** @param array $set Settings. */
@@ -402,17 +439,32 @@ final class AITP_Admin_Audit {
 				}
 				break;
 			case 'import':
-				// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated
-				$file = isset( $_FILES['list'] ) && is_array( $_FILES['list'] ) ? $_FILES['list'] : null;
-				if ( ! $file || ! empty( $file['error'] ) || ! is_uploaded_file( $file['tmp_name'] ) || (int) $file['size'] > 10 * MB_IN_BYTES ) {
+				$content = self::uploaded();
+				if ( $content === null ) {
 					$msg  = __( 'No file, or the file is larger than 10 MB.', 'ai-translator-for-translatepress' );
 					$type = 'warning';
 					break;
 				}
-				$r = AITP_Audit::import( (string) file_get_contents( $file['tmp_name'] ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
-				/* translators: 1: rows read, 2: rows added, 3: changed, 4: manual, 5: missing or unreadable */
-				$msg = sprintf( __( 'Import: %1$s rows read, %2$s added. Not added — changed since: %3$s, translated manually: %4$s, missing or unreadable: %5$s.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['read'] ), number_format_i18n( $r['added'] ), number_format_i18n( $r['changed'] + $r['untranslated'] ), number_format_i18n( $r['manual'] ), number_format_i18n( $r['missing'] + $r['bad'] ) );
+				$r = AITP_Audit::import( $content );
+				/* translators: 1: rows read, 2: rows added, 3: changed, 4: manual, 5: missing or unreadable, 6: on the accepted list */
+				$msg = sprintf( __( 'Import: %1$s rows read, %2$s added. Not added — changed since: %3$s, translated manually: %4$s, missing or unreadable: %5$s, on the accepted list: %6$s.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['read'] ), number_format_i18n( $r['added'] ), number_format_i18n( $r['changed'] + $r['untranslated'] ), number_format_i18n( $r['manual'] ), number_format_i18n( $r['missing'] + $r['bad'] ), number_format_i18n( $r['accepted'] ) );
 				$f   = array( 'source' => 'import' ) + $f;
+				break;
+			case 'protect':
+				$content = self::uploaded();
+				if ( $content === null ) {
+					$msg  = __( 'No file, or the file is larger than 10 MB.', 'ai-translator-for-translatepress' );
+					$type = 'warning';
+					break;
+				}
+				$r = AITP_Audit::protect( $content, isset( $_POST['label'] ) ? sanitize_text_field( wp_unslash( $_POST['label'] ) ) : '' );
+				/* translators: 1: rows read, 2: added, 3: already on the list, 4: changed, 5: manual, 6: missing or unreadable */
+				$msg = sprintf( __( 'Accepted list: %1$s rows read, %2$s added, %3$s already on the list. Not added — text differs from the site: %4$s, translated manually (protected anyway): %5$s, missing or unreadable: %6$s.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['read'] ), number_format_i18n( $r['added'] ), number_format_i18n( $r['already'] ), number_format_i18n( $r['changed'] + $r['untranslated'] ), number_format_i18n( $r['manual'] ), number_format_i18n( $r['missing'] + $r['bad'] ) );
+				break;
+			case 'unprotect':
+				$n = AITP_Audit::unprotect( isset( $_POST['label'] ) ? sanitize_text_field( wp_unslash( $_POST['label'] ) ) : '' );
+				/* translators: %s: number of rows */
+				$msg = sprintf( __( '%s rows removed from the accepted list.', 'ai-translator-for-translatepress' ), number_format_i18n( $n ) );
 				break;
 			case 'settings':
 				$in = isset( $_POST['a'] ) && is_array( $_POST['a'] ) ? wp_unslash( $_POST['a'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- only checked for presence.

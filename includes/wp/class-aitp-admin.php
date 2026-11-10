@@ -125,7 +125,13 @@ final class AITP_Admin {
 			echo '<div class="notice notice-error"><p>' . esc_html__( 'AI Translator for TranslatePress needs the TranslatePress plugin to be installed and active.', 'ai-translator-for-translatepress' ) . '</p></div>';
 			return;
 		}
-		if ( defined( 'HHGFOTR_PLUGIN_DIR' ) || class_exists( 'HHGFOTR_Plugin' ) || class_exists( 'TRP_HHGFOTR_Gemini_Machine_Translator' ) ) {
+		$hhg = defined( 'HHGFOTR_PLUGIN_DIR' ) || class_exists( 'HHGFOTR_TranslatePress' ) || class_exists( 'HHGFOTR_Plugin' ) || class_exists( 'TRP_HHGFOTR_Gemini_Machine_Translator' );
+		$mt  = get_option( 'trp_machine_translation_settings', array() );
+		$eng = is_array( $mt ) && isset( $mt['translation-engine'] ) ? (string) $mt['translation-engine'] : '';
+		if ( $hhg && strpos( $eng, 'hhgfotr_' ) === 0 ) {
+			/* translators: %s: engine id */
+			echo '<div class="notice notice-error"><p>' . esc_html( sprintf( __( 'TranslatePress is still translating with the HHG engine (%s). AI Translator is installed but not in use: choose "AI Translator" under TranslatePress → Automatic Translation, then deactivate HHG.', 'ai-translator-for-translatepress' ), $eng ) ) . '</p></div>';
+		} elseif ( $hhg ) {
 			echo '<div class="notice notice-warning"><p>' . esc_html__( 'The plugin "HHG for TranslatePress" is also active. Only one translation engine is used at a time (TranslatePress → Automatic Translation → engine). Deactivate HHG after switching to AI Translator to avoid confusion.', 'ai-translator-for-translatepress' ) . '</p></div>';
 		}
 		if ( AITP_Settings::key_unreadable() ) {

@@ -160,6 +160,18 @@ test( 'validator: claim markers do not match inside other words', function () {
 	has( 'added_claim:all_items', vcheck( 'Check our models', 'تحقق من جميع موديلاتنا', 'ar' )['soft'] );
 } );
 
+test( 'validator: Arabic "include" is not "guarantee" (cases from the HHG repair)', function () {
+	$soft = function ( $s, $t ) {
+		return vcheck( $s, $t, 'ar' )['soft'];
+	};
+	not_has( 'added_claim:guarantee', $soft( 'Long-term risks linked to unprotected exposure include', 'وتتضمن المخاطر طويلة الأجل المرتبطة بالتعرض دون حماية' ) );
+	not_has( 'added_claim:guarantee', $soft( 'The kit includes a case', 'تتضمن المجموعة علبة' ) );
+	not_has( 'added_claim:guarantee', $soft( 'The kit includes a case', 'يتضمن الطقم علبة' ) );
+	has( 'added_claim:guarantee', $soft( 'Quality checks', 'فحوصات الجودة تضمن السلامة' ) );
+	has( 'added_claim:guarantee', $soft( 'Quality checks', 'فحوصات الجودة وضمان السلامة' ) );
+	not_has( 'added_claim:guarantee', $soft( 'Quality guarantee', 'ضمان الجودة' ) );
+} );
+
 test( 'text: URL boundaries with quotes, markdown and parentheses', function () {
 	$m = function ( $s ) {
 		return AITP_Text::matches( $s, array( AITP_Text::URL_REGEX ) );

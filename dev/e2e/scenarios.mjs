@@ -345,6 +345,36 @@ const S = {
 		} );
 	},
 
+	async guard() {
+		// The queue must not drive another engine (e.g. HHG) or run with automatic translation off.
+		const q = ( ...a ) => wp( 'aitp', 'queue', ...a );
+		const qs = () => json( wp( 'eval', 'echo wp_json_encode(AITP_Queue::state());' ) );
+		const eng = ( v ) => wp( 'eval', `$m = get_option('trp_machine_translation_settings'); $m['translation-engine'] = '${ v }'; update_option('trp_machine_translation_settings', $m); echo 1;` );
+		const auto = ( v ) => wp( 'eval', `$m = get_option('trp_machine_translation_settings'); $m['machine-translation'] = '${ v }'; update_option('trp_machine_translation_settings', $m); echo 1;` );
+		const before = wp( 'eval', '$m = get_option("trp_machine_translation_settings"); echo $m["translation-engine"] . "|" . $m["machine-translation"];' ).trim().split( '|' );
+		q( 'sync' );
+		q( 'start' );
+		const tpBefore = state().tp_counter;
+		eng( 'hhgfotr_gemini' );
+		const r1 = json( q( 'run', '--ignore-rate', '--pages=3' ) );
+		const s1 = qs();
+		const rep = json( wp( 'aitp', 'audit', 'repair', '--ids=1,2,3' ) );
+		eng( before[ 0 ] );
+		wp( 'eval', '$s = get_option("aitp_queue_state"); $s["wait_until"] = 0; $s["wait_reason"] = ""; update_option("aitp_queue_state", $s); echo 1;' );
+		auto( 'no' );
+		const r2 = json( q( 'run', '--ignore-rate', '--pages=3' ) );
+		const s2 = qs();
+		auto( before[ 1 ] );
+		wp( 'eval', '$s = get_option("aitp_queue_state"); $s["wait_until"] = 0; $s["wait_reason"] = ""; update_option("aitp_queue_state", $s); echo 1;' );
+		q( 'pause' );
+		record( 'guard: queue waits when another engine is selected or automatic translation is off', { other_engine: { run: r1, reason: s1.wait_reason, repair: rep }, automatic_off: { run: r2, reason: s2.wait_reason }, tp_chars: state().tp_counter - tpBefore }, {
+			no_visit_other_engine: r1.visited === 0 && s1.wait_reason === 'engine_not_selected',
+			repair_refused_other_engine: rep.reset === 0 && rep.skipped.engine_not_selected === 3,
+			no_visit_automatic_off: r2.visited === 0 && s2.wait_reason === 'automatic_off',
+			nothing_sent: state().tp_counter === tpBefore,
+		} );
+	},
+
 	async audit() {
 		const q = ( ...a ) => wp( 'aitp', 'queue', ...a );
 		const a = ( ...x ) => json( wp( 'aitp', 'audit', ...x ) );
@@ -441,6 +471,29 @@ const S = {
 			restored_all_but_manual: rb.restored === rep.reset - 1 && restored.length === rep.reset - 1,
 			manual_kept: ( rb.skipped.manual || 0 ) === 1 && chk.rows.find( ( r ) => r.id === hand.id && r.lang === hand.lang ).status === 2,
 			original_manual_rows_untouched: chk.rows.filter( ( r ) => r.type === 'manual' ).every( ( r ) => r.status === 2 && r.is_bad ),
+		} );
+
+		// 5b. Accepted list: rows people reviewed are listed but never repaired.
+		const accRows = restored.slice( 0, 3 ).map( ( r ) => seed.rows.find( ( x ) => x.id === r.id && x.lang === r.lang && x.kind === r.kind ) );
+		const accB64 = Buffer.from( JSON.stringify( { rows: accRows.map( ( r ) => ( { language: r.lang, id: r.id, original: r.original, new: r.bad, table: r.kind } ) ) } ) ).toString( 'base64' );
+		wp( 'eval', `file_put_contents(WP_CONTENT_DIR . "/e2e-state/accepted.json", base64_decode("${ accB64 }")); echo 1;` );
+		const prot = a( 'protect', '/var/www/html/wp-content/e2e-state/accepted.json', '--label=e2e reviewed' );
+		a( 'scan', '--minutes=5' );
+		const accKeys = new Set( accRows.map( ( r ) => key( r.kind, r.lang, r.id ) ) );
+		const accFound = list( '--state=accepted' ).filter( ( f ) => accKeys.has( key( f.kind, f.lang, f.row_id ) ) );
+		const openAcc = list().filter( ( f ) => accKeys.has( key( f.kind, f.lang, f.row_id ) ) );
+		const accIds = list( '--state=all' ).filter( ( f ) => accKeys.has( key( f.kind, f.lang, f.row_id ) ) ).map( ( f ) => f.id );
+		const accRep = a( 'repair', `--ids=${ accIds.join( ',' ) }` );
+		chk = seedc( 'check' );
+		const stillBad = chk.rows.filter( ( r ) => accKeys.has( key( r.kind, r.lang, r.id ) ) && r.is_bad && r.status === 1 );
+		wp( 'aitp', 'audit', 'unprotect', '--label=e2e reviewed' );
+		const reopened = list().filter( ( f ) => accKeys.has( key( f.kind, f.lang, f.row_id ) ) );
+		record( 'audit: accepted list is listed but never repaired', { protect: prot, accepted_found: accFound.length, open_while_accepted: openAcc.length, repair: accRep, unchanged: stillBad.length, reopened: reopened.length }, {
+			all_added: prot.added === 3,
+			listed_as_accepted: accFound.length === 3 && openAcc.length === 0,
+			repair_refused: accRep.reset === 0 && ( accRep.skipped.accepted || 0 ) === 3,
+			text_unchanged: stillBad.length === 3,
+			reopened_after_removal: reopened.length === 3,
 		} );
 
 		// 6. Import of a candidate list.

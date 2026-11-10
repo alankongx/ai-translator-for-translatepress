@@ -102,8 +102,9 @@ final class AITP_Audit {
 	 * @return array|null Table entry.
 	 */
 	private static function table_for( $kind, $lang ) {
+		$norm = strtolower( str_replace( '-', '_', (string) $lang ) );
 		foreach ( self::tables() as $t ) {
-			if ( $t['kind'] === $kind && $t['lang'] === $lang ) {
+			if ( $t['kind'] === $kind && strtolower( $t['lang'] ) === $norm ) {
 				return $t;
 			}
 		}
@@ -460,19 +461,20 @@ final class AITP_Audit {
 			'scan'            => (int) $scan,
 			'updated_at'      => current_time( 'mysql', true ),
 		);
+		$fresh = AITP_Audit_Logic::is_accepted( $r, self::accepted( $t['kind'], $t['lang'], array( (int) $r['id'] ) )[ (int) $r['id'] ] ?? array() ) ? 'accepted' : 'open';
 		if ( ! $old ) {
-			$data['state'] = 'open';
+			$data['state'] = $fresh;
 			$data['ai']    = '';
 			$wpdb->insert( $table, $data ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			return;
 		}
 		if ( ! $same ) {
 			// The row changed since it was last recorded: a new finding.
-			$data['state'] = 'open';
+			$data['state'] = $fresh;
 			$data['ai']    = '';
 			$data['batch'] = 0;
-		} elseif ( $old['state'] === 'fixed' ) {
-			$data['state'] = 'open';
+		} elseif ( in_array( $old['state'], array( 'fixed', 'open', 'accepted' ), true ) ) {
+			$data['state'] = $fresh;
 		}
 		$wpdb->update( $table, $data, array( 'id' => (int) $old['id'] ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 	}
@@ -532,7 +534,9 @@ final class AITP_Audit {
 			$by[ $r['lang'] ][ $r['severity'] ] = (int) $r['n'];
 			$open                              += (int) $r['n'];
 		}
-		return array( 'open' => $open, 'by' => $by );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$accepted = (int) $wpdb->get_var( "SELECT COUNT(*) FROM $table WHERE state = 'accepted'" );
+		return array( 'open' => $open, 'by' => $by, 'accepted' => $accepted );
 	}
 
 	/**
@@ -666,7 +670,7 @@ final class AITP_Audit {
 	 */
 	public static function import( $content ) {
 		$p   = AITP_Audit_Logic::parse_import( $content );
-		$out = array( 'read' => count( $p['rows'] ) + $p['bad'], 'bad' => $p['bad'], 'added' => 0, 'manual' => 0, 'changed' => 0, 'missing' => 0, 'untranslated' => 0 );
+		$out = array( 'read' => count( $p['rows'] ) + $p['bad'], 'bad' => $p['bad'], 'added' => 0, 'manual' => 0, 'changed' => 0, 'missing' => 0, 'untranslated' => 0, 'accepted' => 0 );
 		$by  = array();
 		foreach ( $p['rows'] as $c ) {
 			$by[ $c['table'] . '|' . $c['lang'] ][] = $c;
@@ -682,9 +686,10 @@ final class AITP_Audit {
 			}
 			foreach ( array_chunk( $list, 500 ) as $chunk ) {
 				$cur = self::rows( $t, wp_list_pluck( $chunk, 'id' ) );
+				$acc = self::accepted( $t['kind'], $t['lang'], wp_list_pluck( $chunk, 'id' ) );
 				foreach ( $chunk as $c ) {
 					$r     = isset( $cur[ $c['id'] ] ) ? $cur[ $c['id'] ] : null;
-					$block = AITP_Audit_Logic::reset_block( array( 'original_hash' => sha1( $c['original'] ), 'translated_hash' => sha1( $c['old'] ) ), $r );
+					$block = AITP_Audit_Logic::reset_block( array( 'original_hash' => sha1( $c['original'] ), 'translated_hash' => sha1( $c['old'] ) ), $r, isset( $acc[ $c['id'] ] ) ? $acc[ $c['id'] ] : array() );
 					if ( $block !== '' ) {
 						$out[ $block ]++;
 						continue;
@@ -701,6 +706,127 @@ final class AITP_Audit {
 		}
 		( new AITP_WP_Log() )->log( 'info', 'audit_import', $out );
 		return $out;
+	}
+
+	/* -------------------------------------------------------------------------------------
+	 * Accepted list: translations people have reviewed. Listed by the check, never repaired.
+	 * ----------------------------------------------------------------------------------- */
+
+	/**
+	 * Accepted entries of some rows.
+	 *
+	 * @param string $kind dictionary|gettext.
+	 * @param string $lang Language.
+	 * @param int[]  $ids  Row ids.
+	 * @return array<int,array<int,array{0:string,1:string}>> row id => [[original_hash, translated_hash]...]
+	 */
+	private static function accepted( $kind, $lang, array $ids ) {
+		global $wpdb;
+		$ids = array_values( array_unique( array_filter( array_map( 'intval', $ids ) ) ) );
+		$out = array();
+		if ( ! $ids ) {
+			return $out;
+		}
+		$table = AITP_Schema::table( 'protect' );
+		foreach ( array_chunk( $ids, 500 ) as $chunk ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+			$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT row_id, original_hash, translated_hash FROM $table WHERE kind = %s AND lang = %s AND row_id IN (" . implode( ',', $chunk ) . ')', $kind, $lang ), ARRAY_A );
+			foreach ( $rows as $a ) {
+				$out[ (int) $a['row_id'] ][] = array( $a['original_hash'], $a['translated_hash'] );
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Add reviewed translations to the accepted list. Only entries whose id, original and
+	 * text still match the current row are kept; manual translations are protected anyway.
+	 *
+	 * @param string $content File content (JSON or CSV): language, id, original, translated (or new).
+	 * @param string $label   Name of the list (shown in the admin page).
+	 * @return array{read:int,bad:int,added:int,already:int,manual:int,changed:int,missing:int,untranslated:int}
+	 */
+	public static function protect( $content, $label ) {
+		global $wpdb;
+		$label = substr( sanitize_text_field( (string) $label ), 0, 64 );
+		$label = $label !== '' ? $label : gmdate( 'Y-m-d H:i' );
+		$p     = AITP_Audit_Logic::parse_import( $content, array( 'new', 'translated', 'translation', 'text', 'old' ) );
+		$out   = array( 'read' => count( $p['rows'] ) + $p['bad'], 'bad' => $p['bad'], 'added' => 0, 'already' => 0, 'manual' => 0, 'changed' => 0, 'missing' => 0, 'untranslated' => 0 );
+		$table = AITP_Schema::table( 'protect' );
+		$by    = array();
+		foreach ( $p['rows'] as $c ) {
+			$by[ $c['table'] . '|' . $c['lang'] ][] = $c;
+		}
+		foreach ( $by as $k => $list ) {
+			list( $kind, $lang ) = explode( '|', $k );
+			$t                   = self::table_for( $kind, $lang );
+			if ( ! $t ) {
+				$out['missing'] += count( $list );
+				continue;
+			}
+			foreach ( array_chunk( $list, 500 ) as $chunk ) {
+				$cur = self::rows( $t, wp_list_pluck( $chunk, 'id' ) );
+				foreach ( $chunk as $c ) {
+					$r = isset( $cur[ $c['id'] ] ) ? $cur[ $c['id'] ] : null;
+					if ( ! $r ) {
+						$out['missing']++;
+						continue;
+					}
+					if ( (string) $r['original'] !== $c['original'] || (string) $r['translated'] !== $c['old'] ) {
+						$out['changed']++;
+						continue;
+					}
+					if ( (int) $r['status'] === 2 ) {
+						$out['manual']++;
+						continue;
+					}
+					if ( (int) $r['status'] !== 1 ) {
+						$out['untranslated']++;
+						continue;
+					}
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+					$n = $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO $table (kind, lang, row_id, original_hash, translated_hash, label, created_at) VALUES (%s, %s, %d, %s, %s, %s, %s)", $t['kind'], $t['lang'], (int) $r['id'], sha1( (string) $r['original'] ), sha1( (string) $r['translated'] ), $label, current_time( 'mysql', true ) ) );
+					$out[ $n ? 'added' : 'already' ]++;
+				}
+			}
+		}
+		self::sync_accepted();
+		( new AITP_WP_Log() )->log( 'info', 'audit_protect', array( 'label' => $label ) + $out );
+		return $out;
+	}
+
+	/**
+	 * Remove one accepted list.
+	 *
+	 * @param string $label List name.
+	 * @return int Entries removed.
+	 */
+	public static function unprotect( $label ) {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$n = (int) $wpdb->delete( AITP_Schema::table( 'protect' ), array( 'label' => (string) $label ) );
+		self::sync_accepted();
+		( new AITP_WP_Log() )->log( 'notice', 'audit_unprotect', array( 'label' => $label, 'removed' => $n ) );
+		return $n;
+	}
+
+	/** @return array<int,array{label:string,n:int,created:string}> */
+	public static function protected_lists() {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		return (array) $wpdb->get_results( 'SELECT label, COUNT(*) n, MIN(created_at) created FROM ' . AITP_Schema::table( 'protect' ) . ' GROUP BY label ORDER BY created', ARRAY_A );
+	}
+
+	/** Bring finding states in line with the accepted list. */
+	private static function sync_accepted() {
+		global $wpdb;
+		$a = AITP_Schema::table( 'audit' );
+		$p = AITP_Schema::table( 'protect' );
+		$j = "$p p ON p.kind = a.kind AND p.lang = a.lang AND p.row_id = a.row_id AND p.original_hash = a.original_hash AND p.translated_hash = a.translated_hash";
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$wpdb->query( "UPDATE $a a JOIN $j SET a.state = 'accepted' WHERE a.state = 'open'" );
+		$wpdb->query( "UPDATE $a a LEFT JOIN $j SET a.state = 'open' WHERE a.state = 'accepted' AND p.id IS NULL" );
+		// phpcs:enable
 	}
 
 	/* -------------------------------------------------------------------------------------
@@ -740,6 +866,11 @@ final class AITP_Audit {
 		global $wpdb;
 		$batch    = (int) round( microtime( true ) * 1000 );
 		$out      = array( 'batch' => $batch, 'reset' => 0, 'skipped' => array(), 'pages' => 0, 'all_pages' => array() );
+		if ( ! AITP_Plugin::engine_selected() ) {
+			// Reset rows would be translated again by whatever engine TranslatePress uses.
+			$out['skipped']['engine_not_selected'] = count( $ids );
+			return $out;
+		}
 		$audit    = AITP_Schema::table( 'audit' );
 		$repair   = AITP_Schema::table( 'repair' );
 		$touched  = array(); // lang => [original_id...]
@@ -753,7 +884,7 @@ final class AITP_Audit {
 		$by = array();
 		foreach ( self::findings( $ids ) as $f ) {
 			if ( $f['state'] !== 'open' ) {
-				$skip( 'not_open' );
+				$skip( $f['state'] === 'accepted' ? 'accepted' : 'not_open' );
 				continue;
 			}
 			$by[ $f['kind'] . '|' . $f['lang'] ][] = $f;
@@ -768,10 +899,16 @@ final class AITP_Audit {
 				continue;
 			}
 			$cur = self::rows( $t, wp_list_pluck( $list, 'row_id' ) );
+			$acc = self::accepted( $kind, $lang, wp_list_pluck( $list, 'row_id' ) );
 			$src = $kind === 'gettext' ? 'en_US' : self::default_language();
 			foreach ( $list as $f ) {
 				$r     = isset( $cur[ (int) $f['row_id'] ] ) ? $cur[ (int) $f['row_id'] ] : null;
-				$block = AITP_Audit_Logic::reset_block( $f, $r );
+				$block = AITP_Audit_Logic::reset_block( $f, $r, isset( $acc[ (int) $f['row_id'] ] ) ? $acc[ (int) $f['row_id'] ] : array() );
+				if ( $block === 'accepted' ) {
+					$skip( 'accepted' );
+					$wpdb->update( $audit, array( 'state' => 'accepted' ), array( 'id' => (int) $f['id'] ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+					continue;
+				}
 				if ( $block !== '' ) {
 					$skip( $block, (int) $f['id'] );
 					continue;

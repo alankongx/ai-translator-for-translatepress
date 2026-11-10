@@ -1530,3 +1530,60 @@ msgstr "标为「不翻译」的文字被改了"
 #: includes/wp/class-aitp-admin.php:615
 msgid "no letters"
 msgstr "没有文字"
+
+msgid "Accepted (reviewed, never repaired)"
+msgstr "已验收（人工核过，永不修复）"
+
+msgid "on the accepted list"
+msgstr "在已验收清单里"
+
+msgid "nothing reset: TranslatePress is not using the AI Translator engine, so another engine would translate these rows again"
+msgstr "一行都没改：TranslatePress 现在用的不是 AI Translator 引擎，改回后会被别的引擎重新翻译"
+
+msgid "Findings on the accepted list (never repaired)"
+msgstr "已验收清单里的问题（永不修复）"
+
+msgid "Accepted list"
+msgstr "已验收清单"
+
+msgid "Translations people have already reviewed (for example rows corrected by hand or by an earlier repair). The check still lists them, but they never count as open and can never be repaired. JSON or CSV with the columns language, id, original and translated (or new); optional table = gettext. An entry is kept only when it matches the current row exactly; when the row changes later, the protection no longer applies."
+msgstr "人工已经核过的译文（例如手工改正的、之前修复过的）。体检照样列出它们，但不算待处理，也永远不能被修复。JSON 或 CSV，列为 language、id、original、translated（或 new），可选 table = gettext。只有和网站当前这一行完全一致才会加入；这一行以后被改了，保护就不再生效。"
+
+msgid "List"
+msgstr "清单"
+
+msgid "Rows"
+msgstr "行数"
+
+msgid "Added"
+msgstr "加入时间"
+
+msgid "Remove this accepted list? Its rows can then be repaired again."
+msgstr "移除这份已验收清单？移除后其中的行又可以被修复。"
+
+msgid "Remove"
+msgstr "移除"
+
+msgid "Name of the list"
+msgstr "清单名称"
+
+msgid "Add to the accepted list"
+msgstr "加入已验收清单"
+
+msgid "Import: %1$s rows read, %2$s added. Not added — changed since: %3$s, translated manually: %4$s, missing or unreadable: %5$s, on the accepted list: %6$s."
+msgstr "导入：读到 %1$s 行，加入 %2$s 行。未加入——已变动：%3$s，已人工翻译：%4$s，找不到或读不懂：%5$s，在已验收清单里：%6$s。"
+
+msgid "Accepted list: %1$s rows read, %2$s added, %3$s already on the list. Not added — text differs from the site: %4$s, translated manually (protected anyway): %5$s, missing or unreadable: %6$s."
+msgstr "已验收清单：读到 %1$s 行，加入 %2$s 行，已在清单里 %3$s 行。未加入——和网站当前文字不一致：%4$s，已人工翻译（本来就受保护）：%5$s，找不到或读不懂：%6$s。"
+
+msgid "%s rows removed from the accepted list."
+msgstr "已从已验收清单移除 %s 行。"
+
+msgid "TranslatePress is not using the AI Translator engine (TranslatePress → Automatic Translation); the queue does not visit pages for another engine"
+msgstr "TranslatePress 现在用的不是 AI Translator 引擎（TranslatePress → 自动翻译），补翻队列不会替别的引擎访问页面"
+
+msgid "automatic translation is switched off in TranslatePress"
+msgstr "TranslatePress 的自动翻译已关闭"
+
+msgid "TranslatePress is still translating with the HHG engine (%s). AI Translator is installed but not in use: choose \"AI Translator\" under TranslatePress → Automatic Translation, then deactivate HHG."
+msgstr "TranslatePress 仍在用 HHG 引擎（%s）翻译。AI Translator 已安装但没有在用：请在 TranslatePress → 自动翻译里选「AI Translator」，再停用 HHG。"

@@ -4,7 +4,7 @@ Tags: translatepress, translation, gemini, openai, multilingual
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.3.0
+Stable tag: 0.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -61,6 +61,8 @@ Translations saved earlier by another engine may be misaligned, left in English 
 * Optional AI check (off by default): asks the model whether selected or suspicious pairs belong together. Counted against the daily character limit.
 * Repair: the selected rows are backed up to the plugin's own table (downloadable per batch), then set back to untranslated — only if they are still machine translated with the same text as when checked. Their pages are queued in the backfill queue and translated again with full validation. Page caches of known cache plugins are purged; a CDN has to be purged by hand.
 * Rollback per batch restores the backed-up text exactly; rows translated by hand in between are kept.
+* Accepted list: translations people have already reviewed (for example rows fixed in an earlier clean-up) can be imported by ID, original and text. The check still lists them, but they are never counted as open and never repaired while their text is unchanged.
+* Repair is refused, and the backfill queue waits, while TranslatePress uses another engine or automatic translation is off — otherwise another engine would translate the reset rows.
 * Human translations (status "manually translated") are never listed, changed or restored over. No table is emptied, no row deleted, at most 500 rows per action.
 * WP-CLI: `wp aitp audit scan|status|list|repair|rollback|import|ai-check|dismiss`.
 
@@ -100,6 +102,11 @@ Not by itself. The engine only translates strings TranslatePress sends to it, wh
 Updates come from the GitHub releases of this plugin. To turn update checks off: `add_filter( 'aitp_github_updates', '__return_false' );`
 
 == Changelog ==
+
+= 0.4.0 =
+* Accepted list for reviewed translations (admin page and `wp aitp audit protect|unprotect|protected`): listed by the check, never repaired.
+* The backfill queue and repair stop while TranslatePress uses another engine (for example HHG) or automatic translation is off.
+* Clearer notice when HHG is still the selected engine. Languages in imported lists are matched case-insensitively.
 
 = 0.3.0 =
 * Audit & repair: checks old machine translations (misaligned, English, cut short, broken structured data, lost placeholders), candidate list import, optional AI check, backed-up repair through the backfill queue, exact rollback per batch, WP-CLI commands.

@@ -29,6 +29,12 @@ function has( $needle, array $haystack, $msg = '' ) {
 	}
 }
 
+function not_has( $needle, array $haystack, $msg = '' ) {
+	if ( in_array( $needle, $haystack, true ) ) {
+		throw new AITP_Assert_Failure( ( $msg !== '' ? $msg . ': ' : '' ) . json_encode( $needle, JSON_UNESCAPED_UNICODE ) . ' unexpectedly in ' . json_encode( $haystack, JSON_UNESCAPED_UNICODE ) );
+	}
+}
+
 function run_tests( $filter = '' ) {
 	foreach ( $GLOBALS['aitp_tests'] as $t ) {
 		list( $name, $fn ) = $t;
