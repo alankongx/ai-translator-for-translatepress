@@ -888,13 +888,20 @@ final class AITP_Audit {
 	/**
 	 * Back up and reset findings to "not translated", then queue their pages.
 	 *
-	 * @param int[] $ids Finding ids (at most MAX_ACTION_ROWS are used).
-	 * @return array{batch:int,reset:int,skipped:array<string,int>,pages:int,all_pages:string[]}
+	 * Only rows on a known page are reset: a page TranslatePress links the string to
+	 * (post content) or a mapped page that shows it. Other rows are skipped as "no_page"
+	 * (the finding stays open) unless $opts['unlinked'] is set; then every page of that
+	 * language is queued again.
+	 *
+	 * @param int[] $ids  Finding ids (at most MAX_ACTION_ROWS are used).
+	 * @param array $opts unlinked: also reset rows on no known page.
+	 * @return array{batch:int,reset:int,skipped:array<string,int>,pages:int,all_pages:string[],urls:array,no_page:int[]}
 	 */
-	public static function repair( array $ids ) {
+	public static function repair( array $ids, array $opts = array() ) {
 		global $wpdb;
 		$batch    = (int) round( microtime( true ) * 1000 );
-		$out      = array( 'batch' => $batch, 'reset' => 0, 'skipped' => array(), 'pages' => 0, 'all_pages' => array() );
+		$unlinked = ! empty( $opts['unlinked'] );
+		$out      = array( 'batch' => $batch, 'reset' => 0, 'skipped' => array(), 'pages' => 0, 'all_pages' => array(), 'urls' => array(), 'no_page' => array() );
 		if ( ! AITP_Plugin::engine_selected() ) {
 			// Reset rows would be translated again by whatever engine TranslatePress uses.
 			$out['skipped']['engine_not_selected'] = count( $ids );
@@ -902,7 +909,8 @@ final class AITP_Audit {
 		}
 		$audit    = AITP_Schema::table( 'audit' );
 		$repair   = AITP_Schema::table( 'repair' );
-		$touched  = array(); // lang => [original_id...]
+		$pages_of = array(); // row key => pages showing the row.
+		$all_lang = array(); // Languages with reset rows on no known page.
 		$failures = new AITP_WP_Failures();
 		$skip     = function ( $why, $fid = 0 ) use ( &$out, $wpdb, $audit ) {
 			$out['skipped'][ $why ] = ( isset( $out['skipped'][ $why ] ) ? $out['skipped'][ $why ] : 0 ) + 1;
@@ -929,7 +937,8 @@ final class AITP_Audit {
 			}
 			$cur = self::rows( $t, wp_list_pluck( $list, 'row_id' ) );
 			$acc = self::accepted( $kind, $lang, wp_list_pluck( $list, 'row_id' ) );
-			$src = $kind === 'gettext' ? 'en_US' : self::default_language();
+			$src   = $kind === 'gettext' ? 'en_US' : self::default_language();
+			$pages = self::row_pages( $t, $cur );
 			foreach ( $list as $f ) {
 				$r     = isset( $cur[ (int) $f['row_id'] ] ) ? $cur[ (int) $f['row_id'] ] : null;
 				$block = AITP_Audit_Logic::reset_block( $f, $r, isset( $acc[ (int) $f['row_id'] ] ) ? $acc[ (int) $f['row_id'] ] : array() );
@@ -940,6 +949,12 @@ final class AITP_Audit {
 				}
 				if ( $block !== '' ) {
 					$skip( $block, (int) $f['id'] );
+					continue;
+				}
+				$rp = isset( $pages[ (int) $r['id'] ] ) ? $pages[ (int) $r['id'] ] : array();
+				if ( ! $rp && ! $unlinked ) {
+					$skip( 'no_page' ); // The finding stays open: map its page first, or opt in.
+					$out['no_page'][] = (int) $f['id'];
 					continue;
 				}
 				// phpcs:disable WordPress.DB.DirectDatabaseQuery
@@ -973,22 +988,33 @@ final class AITP_Audit {
 				$wpdb->update( $audit, array( 'state' => 'fixed', 'batch' => $batch ), array( 'id' => (int) $f['id'] ) );
 				// phpcs:enable
 				$failures->clear( AITP_Translator::failure_key( (string) $r['original'], $src, $lang ) );
-				$touched[ $lang ][ $kind ][] = (int) $r['original_id'];
+				if ( $rp ) {
+					$pages_of[ $kind . '|' . $lang . '|' . (int) $r['id'] ] = $rp;
+				} else {
+					$all_lang[ $lang ] = true;
+				}
 				$out['reset']++;
 			}
 		}
 		if ( $out['reset'] ) {
-			$pages            = self::requeue_pages( $touched );
-			$out['pages']     = $pages['pages'];
-			$out['all_pages'] = $pages['all_langs'];
+			$visit        = AITP_Audit_Logic::cover_pages( $pages_of );
+			$out['urls']  = array_values( array_map( function ( $p ) { return array( 'url' => $p['url'], 'lang' => $p['lang'] ); }, $visit ) );
+			$out['pages'] = AITP_Queue::requeue_urls( array_values( $visit ) );
+			foreach ( array_keys( $all_lang ) as $lang ) {
+				$out['all_pages'][] = $lang;
+				$out['pages']      += AITP_Queue::requeue_lang( $lang, null );
+			}
+			AITP_Cache_Purge::urls( self::all_urls( $pages_of ) );
 			self::save_batch(
 				$batch,
 				array(
-					'time'    => time(),
-					'user'    => get_current_user_id(),
-					'reset'   => $out['reset'],
-					'skipped' => $out['skipped'],
-					'pages'   => $out['pages'],
+					'time'      => time(),
+					'user'      => get_current_user_id(),
+					'reset'     => $out['reset'],
+					'skipped'   => $out['skipped'],
+					'pages'     => $out['pages'],
+					'urls'      => $out['urls'],
+					'all_pages' => $out['all_pages'],
 				)
 			);
 		}
@@ -997,55 +1023,113 @@ final class AITP_Audit {
 	}
 
 	/**
-	 * Queue the pages that show the reset strings (TranslatePress links strings to the
-	 * posts they appear on). Strings without such a link (menus, widgets, gettext) are
-	 * on many pages: every page of that language is checked again.
-	 *
-	 * @param array $touched lang => kind => original ids.
-	 * @return array{pages:int,all_langs:string[]}
+	 * @param array $pages_of row key => pages.
+	 * @return string[] Every address showing one of the rows.
 	 */
-	private static function requeue_pages( array $touched ) {
-		global $wpdb;
-		$q        = self::tp_query();
-		$meta     = $q && method_exists( $q, 'get_table_name_for_original_meta' ) ? (string) $q->get_table_name_for_original_meta() : '';
-		$meta     = $meta !== '' && self::exists( $meta ) ? $meta : '';
-		$out      = array( 'pages' => 0, 'all_langs' => array() );
-		$urls     = array();
-		foreach ( $touched as $lang => $kinds ) {
-			$posts    = array();
-			$unlinked = ! empty( $kinds['gettext'] );
-			$ids      = isset( $kinds['dictionary'] ) ? array_values( array_unique( array_filter( $kinds['dictionary'] ) ) ) : array();
-			if ( isset( $kinds['dictionary'] ) && count( $ids ) < count( $kinds['dictionary'] ) ) {
-				$unlinked = true;
+	private static function all_urls( array $pages_of ) {
+		$urls = array();
+		foreach ( $pages_of as $list ) {
+			foreach ( $list as $p ) {
+				$urls[ $p['url'] ] = true;
 			}
-			if ( $ids && $meta !== '' ) {
-				foreach ( array_chunk( $ids, 500 ) as $chunk ) {
-					// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
-					$rows = (array) $wpdb->get_results( "SELECT original_id, meta_value FROM `$meta` WHERE meta_key = 'post_parent_id' AND original_id IN (" . implode( ',', $chunk ) . ')', ARRAY_A );
-					$seen = array();
-					foreach ( $rows as $r ) {
-						$posts[]                         = (int) $r['meta_value'];
-						$seen[ (int) $r['original_id'] ] = true;
-					}
-					if ( count( $seen ) < count( $chunk ) ) {
-						$unlinked = true;
+		}
+		return array_keys( $urls );
+	}
+
+	/**
+	 * Known pages that show some rows: pages TranslatePress links the string to (post
+	 * content, via post_parent_id) and mapped pages (see AITP_Pagemap). Interface text
+	 * (gettext) has no known page.
+	 *
+	 * @param array $t    Table entry.
+	 * @param array $rows id => row (with original_id).
+	 * @return array<int,array<string,array{url:string,source_url:string,lang:string,object_type:string,object_id:int}>> row id => key => page
+	 */
+	public static function row_pages( array $t, array $rows ) {
+		$out = array();
+		if ( $t['kind'] !== 'dictionary' || ! $rows ) {
+			return $out;
+		}
+		$lang = $t['lang'];
+		$add  = function ( $row_id, array $p ) use ( &$out ) {
+			$out[ (int) $row_id ][ sha1( $p['source_url'] . '|' . $p['lang'] ) ] = $p;
+		};
+		$by_original = array();
+		foreach ( $rows as $id => $r ) {
+			$by_original[ (int) $r['original_id'] ][] = (int) $id;
+		}
+		foreach ( self::meta_posts( array_keys( $by_original ) ) as $oid => $posts ) {
+			foreach ( $posts as $post_id ) {
+				$p = self::post_page( $lang, $post_id );
+				if ( $p ) {
+					foreach ( $by_original[ $oid ] as $row_id ) {
+						$add( $row_id, $p );
 					}
 				}
-			} elseif ( $ids ) {
-				$unlinked = true;
-			}
-			if ( $unlinked ) {
-				$out['all_langs'][] = $lang;
-				$out['pages']      += AITP_Queue::requeue_lang( $lang, null );
-			} elseif ( $posts ) {
-				$out['pages'] += AITP_Queue::requeue_lang( $lang, array_values( array_unique( $posts ) ) );
-				$urls          = array_merge( $urls, AITP_Queue::urls_for( $lang, array_values( array_unique( $posts ) ) ) );
 			}
 		}
-		if ( $urls ) {
-			AITP_Cache_Purge::urls( $urls );
+		foreach ( AITP_Pagemap::pages_of_rows( $lang, array_keys( $rows ) ) as $row_id => $list ) {
+			foreach ( $list as $p ) {
+				$add( $row_id, $p );
+			}
 		}
 		return $out;
+	}
+
+	/**
+	 * Posts TranslatePress links some strings to.
+	 *
+	 * @param int[] $original_ids TranslatePress original ids.
+	 * @return array<int,int[]> original id => post ids
+	 */
+	private static function meta_posts( array $original_ids ) {
+		global $wpdb;
+		$meta = self::meta_table();
+		$ids  = array_values( array_unique( array_filter( array_map( 'intval', $original_ids ) ) ) );
+		$out  = array();
+		if ( $meta === '' || ! $ids ) {
+			return $out;
+		}
+		foreach ( array_chunk( $ids, 500 ) as $chunk ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+			$rows = (array) $wpdb->get_results( "SELECT DISTINCT original_id, meta_value FROM `$meta` WHERE meta_key = 'post_parent_id' AND original_id IN (" . implode( ',', $chunk ) . ')', ARRAY_A );
+			foreach ( $rows as $r ) {
+				if ( (int) $r['meta_value'] > 0 ) {
+					$out[ (int) $r['original_id'] ][] = (int) $r['meta_value'];
+				}
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Translated page of a published post (from the queue's page list, else its permalink).
+	 *
+	 * @param string $lang    Language.
+	 * @param int    $post_id Post.
+	 * @return array|null
+	 */
+	private static function post_page( $lang, $post_id ) {
+		global $wpdb;
+		static $cache = array();
+		$k = $lang . '|' . $post_id;
+		if ( array_key_exists( $k, $cache ) ) {
+			return $cache[ $k ];
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$q = $wpdb->get_row( $wpdb->prepare( 'SELECT source_url, url FROM ' . AITP_Schema::table( 'queue' ) . " WHERE lang = %s AND object_type = 'post' AND object_id = %d LIMIT 1", $lang, (int) $post_id ), ARRAY_A );
+		$p = null;
+		if ( $q ) {
+			$p = array( 'url' => (string) $q['url'], 'source_url' => (string) $q['source_url'], 'lang' => $lang, 'object_type' => 'post', 'object_id' => (int) $post_id );
+		} elseif ( get_post_status( $post_id ) === 'publish' && ! post_password_required( $post_id ) ) {
+			$src  = (string) get_permalink( $post_id );
+			$turl = $src !== '' ? AITP_Queue::translated_url( $src, $lang ) : '';
+			if ( $turl !== '' && $turl !== $src ) {
+				$p = array( 'url' => $turl, 'source_url' => $src, 'lang' => $lang, 'object_type' => 'post', 'object_id' => (int) $post_id );
+			}
+		}
+		$cache[ $k ] = $p;
+		return $p;
 	}
 
 	/**
@@ -1065,7 +1149,7 @@ final class AITP_Audit {
 		foreach ( $rows as $b ) {
 			$by[ $b['kind'] . '|' . $b['lang'] ][] = $b;
 		}
-		$touched = array();
+		$restored = array();
 		foreach ( $by as $k => $list ) {
 			list( $kind, $lang ) = explode( '|', $k );
 			$t                   = self::table_for( $kind, $lang );
@@ -1091,12 +1175,22 @@ final class AITP_Audit {
 				$wpdb->update( $repair, array( 'restored' => 'yes' ), array( 'id' => (int) $b['id'] ) );
 				$wpdb->update( $audit, array( 'state' => 'open', 'batch' => 0, 'original_hash' => sha1( (string) $b['original'] ), 'translated_hash' => sha1( (string) $b['translated'] ) ), array( 'id' => (int) $b['finding_id'] ) );
 				// phpcs:enable
-				$touched[ $lang ][ $kind ][] = $r ? (int) $r['original_id'] : 0;
+				if ( $r && $t ) {
+					$restored[ $kind . '|' . $lang ][ (int) $r['id'] ] = $r;
+				}
 				$out['restored']++;
 			}
 		}
-		if ( $out['restored'] ) {
-			self::requeue_pages( $touched );
+		if ( $restored ) {
+			// Restored rows are translated: nothing to queue, only cached copies to refresh.
+			$pages_of = array();
+			foreach ( $restored as $k => $rows ) {
+				list( $kind, $lang ) = explode( '|', $k );
+				foreach ( self::row_pages( self::table_for( $kind, $lang ), $rows ) as $id => $list ) {
+					$pages_of[ $k . '|' . $id ] = $list;
+				}
+			}
+			AITP_Cache_Purge::urls( self::all_urls( $pages_of ) );
 		}
 		$info = self::batches();
 		if ( isset( $info[ $batch ] ) ) {
@@ -1148,35 +1242,9 @@ final class AITP_Audit {
 	}
 
 	/**
-	 * Posts of one language that show these strings and are in the queue's page list.
-	 *
-	 * @param string $lang         Language.
-	 * @param int[]  $original_ids TranslatePress original ids.
-	 * @return array<int,int[]> original id => post ids (only strings with at least one such post).
-	 */
-	private static function queued_posts( $lang, array $original_ids ) {
-		global $wpdb;
-		$meta = self::meta_table();
-		$ids  = array_values( array_unique( array_filter( array_map( 'intval', $original_ids ) ) ) );
-		$out  = array();
-		if ( $meta === '' || ! $ids ) {
-			return $out;
-		}
-		$queue = AITP_Schema::table( 'queue' );
-		foreach ( array_chunk( $ids, 500 ) as $chunk ) {
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
-			$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT DISTINCT m.original_id, q.object_id FROM `$meta` m JOIN $queue q ON q.object_type = 'post' AND q.object_id = m.meta_value AND q.lang = %s WHERE m.meta_key = 'post_parent_id' AND m.original_id IN (" . implode( ',', $chunk ) . ')', $lang ), ARRAY_A );
-			foreach ( $rows as $r ) {
-				$out[ (int) $r['original_id'] ][] = (int) $r['object_id'];
-			}
-		}
-		return $out;
-	}
-
-	/**
 	 * The next batch for the auto repair: open "wrong" findings of page text in one
-	 * language (the first of $langs that has any), whose rows are on a page the queue
-	 * knows, so the batch can be translated again by visiting just those pages.
+	 * language (the first of $langs that has any), whose rows are on a known page (see
+	 * row_pages()), so the batch can be translated again by visiting just those pages.
 	 * Structured data and strings without such a page are left for a person.
 	 *
 	 * @param string[] $langs Languages in order (empty = all).
@@ -1206,7 +1274,7 @@ final class AITP_Audit {
 				}
 				$last  = (int) end( $list )['id'];
 				$cur   = self::rows( $t, wp_list_pluck( $list, 'row_id' ) );
-				$posts = self::queued_posts( $t['lang'], wp_list_pluck( $cur, 'original_id' ) );
+				$pages = self::row_pages( $t, $cur );
 				foreach ( $list as $f ) {
 					$r = isset( $cur[ (int) $f['row_id'] ] ) ? $cur[ (int) $f['row_id'] ] : null;
 					if ( ! $r ) {
@@ -1216,7 +1284,7 @@ final class AITP_Audit {
 						$skip['structured']++;
 						continue;
 					}
-					if ( empty( $posts[ (int) $r['original_id'] ] ) ) {
+					if ( empty( $pages[ (int) $r['id'] ] ) ) {
 						$skip['no_page']++;
 						continue;
 					}
@@ -1245,26 +1313,30 @@ final class AITP_Audit {
 	 */
 	public static function batch_urls( $batch ) {
 		global $wpdb;
+		$info = self::batches();
+		if ( isset( $info[ $batch ]['urls'] ) ) {
+			return (array) $info[ $batch ]['urls']; // Chosen when the batch was reset.
+		}
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$rows = (array) $wpdb->get_results( $wpdb->prepare( 'SELECT kind, lang, row_id FROM ' . AITP_Schema::table( 'repair' ) . ' WHERE batch = %d', (int) $batch ), ARRAY_A );
 		$by   = array();
 		foreach ( $rows as $b ) {
 			$by[ $b['kind'] . '|' . $b['lang'] ][] = (int) $b['row_id'];
 		}
-		$out = array();
+		$pages_of = array();
 		foreach ( $by as $k => $ids ) {
 			list( $kind, $lang ) = explode( '|', $k );
 			$t                   = self::table_for( $kind, $lang );
-			if ( ! $t || $kind !== 'dictionary' ) {
+			if ( ! $t ) {
 				continue;
 			}
-			$posts = array();
-			foreach ( self::queued_posts( $lang, wp_list_pluck( self::rows( $t, $ids ), 'original_id' ) ) as $p ) {
-				$posts = array_merge( $posts, $p );
+			foreach ( self::row_pages( $t, self::rows( $t, $ids ) ) as $id => $list ) {
+				$pages_of[ $k . '|' . $id ] = $list;
 			}
-			foreach ( AITP_Queue::urls_for( $lang, array_values( array_unique( $posts ) ) ) as $u ) {
-				$out[] = array( 'url' => (string) $u, 'lang' => $lang );
-			}
+		}
+		$out = array();
+		foreach ( AITP_Audit_Logic::cover_pages( $pages_of ) as $p ) {
+			$out[] = array( 'url' => $p['url'], 'lang' => $p['lang'] );
 		}
 		return $out;
 	}

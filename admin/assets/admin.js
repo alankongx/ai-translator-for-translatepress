@@ -113,4 +113,5 @@
 	loop( 'aitp-queue-live', 'aitp-queue-live-status', 'aitp_queue_step', window.aitpQueue );
 	loop( 'aitp-audit-live', 'aitp-audit-live-status', 'aitp_audit_step', window.aitpAudit );
 	loop( 'aitp-autofix-live', 'aitp-autofix-live-status', 'aitp_autofix_step', window.aitpAutofix );
+	loop( 'aitp-map-live', 'aitp-map-live-status', 'aitp_map_step', window.aitpMap );
 } )();

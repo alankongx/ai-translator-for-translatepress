@@ -133,9 +133,6 @@ final class AITP_Autofix {
 		if ( $audit['status'] !== 'done' ) {
 			return 'no_scan';
 		}
-		if ( ! AITP_Queue::progress() ) {
-			AITP_Queue::sync(); // The auto repair finds page addresses in the queue's page list.
-		}
 		$s                = self::state();
 		$s['status']      = 'running';
 		$s['reason']      = '';

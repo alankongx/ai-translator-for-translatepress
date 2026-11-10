@@ -3,6 +3,8 @@
  * WP-CLI: wp aitp queue <sync|start|pause|status|run|retry|clear>
  *         wp aitp audit <scan|status|list|repair|rollback|import|ai-check|dismiss>
  *         wp aitp autofix <status|settings|start|stop|run>
+ *         wp aitp map <start|run|stop|status|list|export|clear>
+ *         wp aitp journal <start|stop|status|undo|new-rows>
  *
  * @package AI_Translator_For_TranslatePress
  */
@@ -130,6 +132,10 @@ final class AITP_CLI {
 	 * [--yes]
 	 * : Confirm "repair" without --ids (applies to every match of the filters, at most 500).
 	 *
+	 * [--include-unlinked]
+	 * : For "repair": also reset rows on no known page (not linked by TranslatePress, not
+	 * found by page mapping); every page of their language is then queued again.
+	 *
 	 * ## EXAMPLES
 	 *
 	 *     wp aitp audit scan
@@ -168,7 +174,7 @@ final class AITP_CLI {
 					}
 					$ids = AITP_Audit::ids_for( $f );
 				}
-				WP_CLI::log( wp_json_encode( AITP_Audit::repair( $ids ) ) );
+				WP_CLI::log( wp_json_encode( AITP_Audit::repair( $ids, array( 'unlinked' => ! empty( $assoc['include-unlinked'] ) ) ) ) );
 				break;
 			case 'rollback':
 				WP_CLI::log( wp_json_encode( AITP_Audit::rollback( isset( $args[1] ) ? (int) $args[1] : 0 ) ) );
@@ -290,6 +296,164 @@ final class AITP_CLI {
 			case 'status':
 			default:
 				WP_CLI::log( wp_json_encode( array( 'settings' => AITP_Autofix::settings(), 'state' => AITP_Autofix::state() ), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) );
+		}
+	}
+
+	/**
+	 * Page mapping: which page-text rows each translated page shows (read-only visits:
+	 * nothing is translated or saved).
+	 *
+	 * ## OPTIONS
+	 *
+	 * <action>
+	 * : start | run | stop | status | list | export | clear
+	 *
+	 * [--urls=<urls>]
+	 * : For "start": default-language addresses, comma separated, or a file with one per line.
+	 * Without it every page of the backfill queue's page list is mapped.
+	 *
+	 * [--languages=<languages>]
+	 * : For "start" and "list": languages, comma separated (default all).
+	 *
+	 * [--minutes=<minutes>]
+	 * : For "run": how long to work (default 10).
+	 *
+	 * [--ignore-rate]
+	 * : For "run": no pause between pages (testing).
+	 *
+	 * [--pages=<ids>]
+	 * : For "export": mapped page ids, comma separated (default all).
+	 *
+	 * [--file=<file>]
+	 * : For "export": write the candidate list to this file instead of the screen.
+	 *
+	 * ## EXAMPLES
+	 *
+	 *     wp aitp map start --urls=https://example.com/,https://example.com/shop/
+	 *     wp aitp map run --minutes=15
+	 *     wp aitp map list
+	 *     wp aitp map export --pages=1,2,3 --file=candidates.json
+	 *
+	 * @param array $args  Positional.
+	 * @param array $assoc Named.
+	 */
+	public function map( $args, $assoc ) {
+		$action = isset( $args[0] ) ? $args[0] : 'status';
+		$langs  = isset( $assoc['languages'] ) ? array_filter( explode( ',', (string) $assoc['languages'] ) ) : array();
+		switch ( $action ) {
+			case 'start':
+				$urls = array();
+				if ( isset( $assoc['urls'] ) ) {
+					$u    = (string) $assoc['urls'];
+					$urls = is_readable( $u ) ? preg_split( '~\R~', (string) file_get_contents( $u ) ) : explode( ',', $u ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+				}
+				$r = AITP_Pagemap::start( $urls, $langs );
+				if ( $r['error'] !== '' ) {
+					WP_CLI::error( 'Cannot start: ' . $r['error'] . ( $r['bad'] ? ' (not usable: ' . implode( ', ', $r['bad'] ) . ')' : '' ) );
+				}
+				WP_CLI::success( sprintf( '%d pages to map.', $r['pages'] ) . ( $r['bad'] ? ' Not usable: ' . implode( ', ', $r['bad'] ) : '' ) );
+				break;
+			case 'run':
+				if ( ! empty( $assoc['ignore-rate'] ) ) {
+					AITP_Pagemap::$gap = 0;
+				}
+				$end = time() + 60 * ( isset( $assoc['minutes'] ) ? max( 1, (int) $assoc['minutes'] ) : 10 );
+				do {
+					$r = AITP_Pagemap::step( max( 20, min( 120, $end - time() ) ) );
+					if ( in_array( $r['result'], array( 'running', 'busy' ), true ) && $r['wait'] && time() < $end ) {
+						sleep( max( 1, min( (int) $r['wait'], $end - time() ) ) );
+					}
+				} while ( in_array( $r['result'], array( 'running', 'busy' ), true ) && time() < $end );
+				$s = $r['state'];
+				WP_CLI::log( wp_json_encode( array( 'result' => $r['result'], 'status' => $s['status'], 'done' => $s['i'], 'pages' => count( $s['items'] ), 'ok' => $s['ok'], 'failed' => $s['failed'] ) ) );
+				break;
+			case 'stop':
+				AITP_Pagemap::stop();
+				WP_CLI::success( 'Page mapping stopped.' );
+				break;
+			case 'list':
+				$res = AITP_Pagemap::pages( array( 'lang' => $langs ? reset( $langs ) : '', 'per_page' => 1000 ) );
+				foreach ( $res['rows'] as &$r ) {
+					unset( $r['ukey'] );
+				}
+				unset( $r );
+				WP_CLI::log( wp_json_encode( $res, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) );
+				break;
+			case 'export':
+				$ids  = isset( $assoc['pages'] ) ? array_map( 'intval', explode( ',', (string) $assoc['pages'] ) ) : array();
+				$json = wp_json_encode( AITP_Pagemap::export( $ids ), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+				if ( ! empty( $assoc['file'] ) ) {
+					file_put_contents( (string) $assoc['file'], $json ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+					WP_CLI::success( 'Written to ' . $assoc['file'] );
+				} else {
+					WP_CLI::log( $json );
+				}
+				break;
+			case 'clear':
+				AITP_Pagemap::clear();
+				WP_CLI::success( 'Page map cleared (TranslatePress data untouched).' );
+				break;
+			case 'status':
+			default:
+				$s = AITP_Pagemap::state();
+				WP_CLI::log( wp_json_encode( array( 'status' => $s['status'], 'reason' => $s['reason'], 'done' => $s['i'], 'pages' => count( $s['items'] ), 'ok' => $s['ok'], 'failed' => $s['failed'] ) ) );
+		}
+	}
+
+	/**
+	 * Test journal: record what this engine translates, undo it after a test.
+	 *
+	 * ## OPTIONS
+	 *
+	 * <action>
+	 * : start | stop | status | undo | new-rows
+	 *
+	 * [--label=<label>]
+	 * : For "start": name of the test.
+	 *
+	 * [--file=<file>]
+	 * : For "new-rows": write the rows to this file instead of the screen.
+	 *
+	 * ## EXAMPLES
+	 *
+	 *     wp aitp journal start --label="staging test"
+	 *     wp aitp journal stop
+	 *     wp aitp journal undo
+	 *
+	 * @param array $args  Positional.
+	 * @param array $assoc Named.
+	 */
+	public function journal( $args, $assoc ) {
+		$action = isset( $args[0] ) ? $args[0] : 'status';
+		switch ( $action ) {
+			case 'start':
+				$why = AITP_Journal::start( isset( $assoc['label'] ) ? (string) $assoc['label'] : '' );
+				if ( $why !== '' ) {
+					WP_CLI::error( 'Cannot start: ' . $why );
+				}
+				WP_CLI::success( 'Test journal on.' );
+				break;
+			case 'stop':
+				AITP_Journal::stop();
+				WP_CLI::success( 'Test journal off.' );
+				break;
+			case 'undo':
+				WP_CLI::log( wp_json_encode( AITP_Journal::undo() ) );
+				break;
+			case 'new-rows':
+				$json = wp_json_encode( array( 'rows' => AITP_Journal::new_rows() ), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE );
+				if ( ! empty( $assoc['file'] ) ) {
+					file_put_contents( (string) $assoc['file'], $json ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+					WP_CLI::success( 'Written to ' . $assoc['file'] );
+				} else {
+					WP_CLI::log( $json );
+				}
+				break;
+			case 'status':
+			default:
+				$s = AITP_Journal::state();
+				unset( $s['max'] );
+				WP_CLI::log( wp_json_encode( array( 'state' => $s ) + AITP_Journal::summary() ) );
 		}
 	}
 

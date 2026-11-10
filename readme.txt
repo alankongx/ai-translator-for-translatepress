@@ -4,7 +4,7 @@ Tags: translatepress, translation, gemini, openai, multilingual
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.5.0
+Stable tag: 0.6.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -59,13 +59,15 @@ Translations saved earlier by another engine may be misaligned, left in English 
 * Check: scans every machine translation in the TranslatePress tables (page text and interface strings) with the same validation as new translations, plus a cross-row check for one translation saved on unrelated texts and for runs of misplaced rows. No AI cost; runs in chunks through WP-Cron, from the admin page or with WP-CLI.
 * Review: filter by language, problem and severity, compare original and translation side by side, select the rows to repair. A candidate list from another tool can be imported; a row counts only when its ID, original and old translation still match.
 * Optional AI check (off by default): asks the model whether selected or suspicious pairs belong together. Counted against the daily character limit.
-* Repair: the selected rows are backed up to the plugin's own table (downloadable per batch), then set back to untranslated — only if they are still machine translated with the same text as when checked. Their pages are queued in the backfill queue and translated again with full validation. Page caches of known cache plugins are purged; a CDN has to be purged by hand.
+* Repair: the selected rows are backed up to the plugin's own table (downloadable per batch), then set back to untranslated — only if they are still machine translated with the same text as when checked, and only if they are on a known page (a page TranslatePress links the string to, or a mapped page that shows it). One such page per row is queued and translated again with full validation; rows on no known page are left as they are unless you tick "also reset rows on no known page", which queues every page of that language. Page caches of known cache plugins are purged; a CDN has to be purged by hand.
+* Page map: TranslatePress links a string to a page only when it is inside the post content, so headings, menus and theme or page-builder text belong to no page. Mapping opens selected pages once in read-only mode (machine translation off, TranslatePress saves nothing for that request) and records which page-text rows each page shows, matched by the complete original text. Repairs and the auto repair use it to visit only those pages; selected pages can be downloaded as a candidate list for a page-by-page comparison.
+* Test journal (for staging tests): while on, every translation this engine hands to TranslatePress is recorded with the exact state of the row before. "Undo translations of the test" puts rows that still hold exactly that translation back; rows TranslatePress added during the test are listed and downloadable, never deleted.
 * Rollback per batch restores the backed-up text exactly; rows translated by hand in between are kept.
 * Accepted list: translations people have already reviewed (for example rows fixed in an earlier clean-up) can be imported by ID, original and text. The check still lists them, but they are never counted as open and never repaired while their text is unchanged.
 * Repair is refused, and the backfill queue waits, while TranslatePress uses another engine or automatic translation is off — otherwise another engine would translate the reset rows.
 * Batch auto repair (off by default): works through the "wrong" findings of page text one batch at a time (20–500 rows, one language at a time). Each batch is backed up and reset, only the pages that show those strings are visited until they are translated again, the new translations are checked, and the next batch starts only if the batch came out clean. It stops by itself when more than 5% of a batch is still wrong or untranslated, when English is stored as a translation, on provider errors or failed page loads, when TranslatePress stops using this engine, or when a batch is rolled back. It has its own daily character cap (default: half the TranslatePress limit). "Probably misplaced" and "check meaning" findings, the accepted list, manual translations, structured data and interface text are never touched; rows still wrong afterwards are left for a person. Every batch can be rolled back.
 * Human translations (status "manually translated") are never listed, changed or restored over. No table is emptied, no row deleted, at most 500 rows per action.
-* WP-CLI: `wp aitp audit scan|status|list|repair|rollback|import|ai-check|dismiss`, `wp aitp autofix status|settings|start|stop|run`.
+* WP-CLI: `wp aitp audit scan|status|list|repair|rollback|import|ai-check|dismiss`, `wp aitp autofix status|settings|start|stop|run`, `wp aitp map start|run|stop|status|list|export|clear`, `wp aitp journal start|stop|status|undo|new-rows`.
 
 = Security =
 
@@ -97,7 +99,7 @@ Sites that used another AI engine often have pages that were never translated an
 5. Settings → AI Translator → Backfill queue → "Build page list and start" to translate pages nobody has visited yet.
 6. Settings → AI Translator → Audit & repair → "Start check". The check is read-only and costs nothing.
 7. If you have translations people already reviewed, add them to the accepted list first; they are never repaired.
-8. Repair a small batch first (one language, "error" findings, a few dozen rows), let the queue translate them again, check the pages, then continue in batches of at most 500. Purge your CDN yourself.
+8. Map the pages you care about (Page map & test journal), so repairs know which pages show which strings. Then repair a small batch first (one language, "error" findings, a few dozen rows), let the queue translate them again, check the pages, then continue in batches of at most 500. Purge your CDN yourself.
 9. If a batch looks wrong, roll it back under "Repairs"; the old text is restored exactly.
 
 == Frequently Asked Questions ==
@@ -115,6 +117,11 @@ Not by itself. The engine only translates strings TranslatePress sends to it, wh
 Updates come from the GitHub releases of this plugin. To turn update checks off: `add_filter( 'aitp_github_updates', '__return_false' );`
 
 == Changelog ==
+
+= 0.6.0 =
+* Page map (new tab "Page map & test journal", `wp aitp map`): read-only visits record which page-text rows each page shows, including text outside the post content; candidate list per page for page-by-page comparisons.
+* Repairs and the auto repair reset only rows on a known page and queue or visit only one such page per row; rows on no known page are left as they are unless you opt in (then every page of that language is queued, as before). A rollback no longer queues pages.
+* Test journal (`wp aitp journal`): records what this engine translates during a test and undoes it exactly; rows TranslatePress added are listed, never deleted.
 
 = 0.5.0 =
 * Batch auto repair (off by default) on the Audit & repair page and `wp aitp autofix`: batch by batch, checked after each batch, stops by itself on failures; every batch can be rolled back.

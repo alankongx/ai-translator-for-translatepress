@@ -50,3 +50,30 @@ add_filter(
 		}
 	);
 } )();
+
+/*
+ * 3. Text printed outside the post content (like theme or page-builder text): TranslatePress
+ *    links it to no post. Option aitp_e2e_footer: array of [text, page slug or '' for every page].
+ * 4. Log of signed internal visits (option aitp_e2e_visit_log on): one line per request URI in
+ *    wp-content/e2e-state/visits.log.
+ */
+add_action(
+	'wp_footer',
+	function () {
+		foreach ( (array) get_option( 'aitp_e2e_footer', array() ) as $f ) {
+			if ( is_array( $f ) && ( $f[1] === '' || is_page( $f[1] ) ) ) {
+				echo '<p class="aitp-e2e-footer">' . esc_html( $f[0] ) . '</p>';
+			}
+		}
+	}
+);
+add_action(
+	'plugins_loaded',
+	function () {
+		if ( ! empty( $_SERVER['HTTP_X_AITP_WARM'] ) && get_option( 'aitp_e2e_visit_log' ) ) {
+			@mkdir( WP_CONTENT_DIR . '/e2e-state', 0777, true );
+			@file_put_contents( WP_CONTENT_DIR . '/e2e-state/visits.log', $_SERVER['REQUEST_URI'] . "\n", FILE_APPEND );
+		}
+	},
+	0
+);

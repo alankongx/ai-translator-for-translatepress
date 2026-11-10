@@ -110,6 +110,7 @@ final class AITP_Admin_Audit {
 			'accepted'      => __( 'on the accepted list', 'ai-translator-for-translatepress' ),
 			'engine_not_selected' => __( 'nothing reset: TranslatePress is not using the AI Translator engine, so another engine would translate these rows again', 'ai-translator-for-translatepress' ),
 			'backup_failed' => __( 'backup failed', 'ai-translator-for-translatepress' ),
+			'no_page'       => __( 'on no known page (not reset)', 'ai-translator-for-translatepress' ),
 		);
 		return isset( $map[ $why ] ) ? $map[ $why ] : $why;
 	}
@@ -281,7 +282,7 @@ final class AITP_Admin_Audit {
 		self::kv( __( 'Done so far', 'ai-translator-for-translatepress' ), sprintf( __( '%1$s batches, %2$s rows translated again and passing the checks', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $s['batches'] ), number_format_i18n( (int) $s['rows_ok'] ) ) );
 		if ( $s['left']['structured'] || $s['left']['no_page'] ) {
 			/* translators: 1: structured data rows, 2: rows without a known page */
-			self::kv( __( 'Left for a person', 'ai-translator-for-translatepress' ), sprintf( __( '%1$s structured data, %2$s not on a page of the queue (menus, widgets, pages not in the page list)', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $s['left']['structured'] ), number_format_i18n( (int) $s['left']['no_page'] ) ) );
+			self::kv( __( 'Left for a person', 'ai-translator-for-translatepress' ), sprintf( __( '%1$s structured data, %2$s on no known page (map the pages that show them first)', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $s['left']['structured'] ), number_format_i18n( (int) $s['left']['no_page'] ) ) );
 		}
 		echo '</tbody></table><p>';
 		if ( $s['status'] === 'running' ) {
@@ -363,6 +364,7 @@ final class AITP_Admin_Audit {
 		/* translators: %s: maximum number of rows */
 		echo '<button class="button" name="do" value="repair_filter" onclick="return confirm(' . esc_attr( wp_json_encode( $all_q ) ) . ');">' . esc_html( sprintf( __( 'Reset all matching (at most %s)', 'ai-translator-for-translatepress' ), $max ) ) . '</button> ';
 		echo '<button class="button" name="do" value="dismiss">' . esc_html__( 'Not a problem', 'ai-translator-for-translatepress' ) . '</button> ';
+		echo '<br><label><input type="checkbox" name="unlinked" value="1" onchange="if(this.checked&&!confirm(this.dataset.q)){this.checked=false;}" data-q="' . esc_attr__( 'Also reset rows that are on no known page? Their pages are unknown, so every page of their language is queued again (and visited when the backfill queue runs). Usually it is better to map the pages that show them first.', 'ai-translator-for-translatepress' ) . '"> ' . esc_html__( 'Also reset rows on no known page (queues every page of their language again)', 'ai-translator-for-translatepress' ) . '</label><br>';
 		echo '<button class="button" name="do" value="reopen">' . esc_html__( 'Reopen', 'ai-translator-for-translatepress' ) . '</button> ';
 		if ( $set['ai_check'] ) {
 			echo '<button class="button" name="do" value="ai">' . esc_html__( 'AI check selected', 'ai-translator-for-translatepress' ) . '</button> ';
@@ -370,7 +372,7 @@ final class AITP_Admin_Audit {
 			echo '<button class="button" name="do" value="ai_filter">' . esc_html( sprintf( __( 'AI check all matching (at most %s)', 'ai-translator-for-translatepress' ), $max ) ) . '</button>';
 		}
 		echo '</p></form>';
-		echo '<p class="description">' . esc_html__( 'After a reset the pages showing these strings are queued again; start the backfill queue (or wait for visitors) to get new translations. Clear CDN or server caches outside WordPress yourself.', 'ai-translator-for-translatepress' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Only rows on a known page are reset: a page TranslatePress links the string to, or a mapped page that shows it. One such page per row is queued again; start the backfill queue (or open those pages, or wait for visitors) to get new translations. Clear CDN or server caches outside WordPress yourself.', 'ai-translator-for-translatepress' ) . '</p>';
 
 		$pages = (int) ceil( $res['total'] / 50 );
 		if ( $pages > 1 ) {
@@ -505,16 +507,19 @@ final class AITP_Admin_Audit {
 					$type = 'warning';
 					break;
 				}
-				$r = AITP_Audit::repair( $sel );
+				$r = AITP_Audit::repair( $sel, array( 'unlinked' => ! empty( $_POST['unlinked'] ) ) );
 				/* translators: 1: rows reset, 2: pages queued */
 				$msg = sprintf( __( '%1$s translations backed up and reset; %2$s pages queued again.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['reset'] ), number_format_i18n( $r['pages'] ) );
 				if ( $r['skipped'] ) {
 					/* translators: %s: reasons and counts */
 					$msg .= ' ' . sprintf( __( 'Skipped: %s.', 'ai-translator-for-translatepress' ), self::skipped_text( $r['skipped'] ) );
 				}
+				if ( $r['no_page'] ) {
+					$msg .= ' ' . __( 'Rows on no known page stay as they are: map the pages that show them (tab "Page map & test journal"), or tick "also reset rows on no known page".', 'ai-translator-for-translatepress' );
+				}
 				if ( $r['all_pages'] ) {
 					/* translators: %s: languages */
-					$msg .= ' ' . sprintf( __( 'Some strings are not linked to a page (menus, widgets, interface text): every page of %s was queued again.', 'ai-translator-for-translatepress' ), implode( ', ', $r['all_pages'] ) );
+					$msg .= ' ' . sprintf( __( 'Rows on no known page were reset as requested: every page of %s was queued again.', 'ai-translator-for-translatepress' ), implode( ', ', $r['all_pages'] ) );
 				}
 				if ( AITP_Queue::state()['status'] !== 'running' ) {
 					$msg .= ' ' . __( 'The backfill queue is paused: start it, or the strings are translated again when visitors open the pages.', 'ai-translator-for-translatepress' );

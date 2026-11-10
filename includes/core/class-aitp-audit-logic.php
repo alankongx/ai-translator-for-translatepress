@@ -288,6 +288,49 @@ final class AITP_Audit_Logic {
 	}
 
 	/**
+	 * Fewest pages that together show every row (greedy set cover). A reset row is
+	 * translated again on any page that shows it, so one such page per row is enough.
+	 * On a tie the page listed first wins (the post the string belongs to comes first).
+	 *
+	 * @param array<string,array<string,array>> $pages_of row key => page key => page.
+	 * @return array<string,array> page key => page
+	 */
+	public static function cover_pages( array $pages_of ) {
+		$left    = array();
+		$all     = array();
+		$rows_of = array();
+		foreach ( $pages_of as $rk => $list ) {
+			if ( ! $list ) {
+				continue;
+			}
+			$left[ $rk ] = true;
+			foreach ( $list as $pk => $p ) {
+				$all[ $pk ]            = $p;
+				$rows_of[ $pk ][ $rk ] = true;
+			}
+		}
+		$out = array();
+		while ( $left ) {
+			$best = '';
+			$n    = 0;
+			foreach ( $rows_of as $pk => $rs ) {
+				$c = count( array_intersect_key( $rs, $left ) );
+				if ( $c > $n ) {
+					$n    = $c;
+					$best = (string) $pk;
+				}
+			}
+			if ( $best === '' ) {
+				break;
+			}
+			$out[ $best ] = $all[ $best ];
+			$left         = array_diff_key( $left, $rows_of[ $best ] );
+			unset( $rows_of[ $best ] );
+		}
+		return $out;
+	}
+
+	/**
 	 * Whether a backed-up row may be restored.
 	 * Restored: rows still reset by us, or translated again by the machine.
 	 * Never restored: manual translations, rows whose original changed, rows that are gone.

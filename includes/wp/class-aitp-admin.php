@@ -43,6 +43,7 @@ final class AITP_Admin {
 		add_action( 'trp_machine_translation_extra_settings_middle', array( $this, 'tp_status_card' ), 30, 1 );
 		AITP_Admin_Queue::boot();
 		AITP_Admin_Audit::boot();
+		AITP_Admin_Pages::boot();
 		add_filter( 'plugin_action_links_' . plugin_basename( AITP_FILE ), array( $this, 'action_links' ) );
 	}
 
@@ -111,6 +112,12 @@ final class AITP_Admin {
 				array(
 					'ajax'  => admin_url( 'admin-ajax.php' ),
 					'nonce' => wp_create_nonce( 'aitp_autofix_step' ),
+					'error' => __( 'Request failed; trying again shortly.', 'ai-translator-for-translatepress' ),
+				)
+			) . ';window.aitpMap = ' . wp_json_encode(
+				array(
+					'ajax'  => admin_url( 'admin-ajax.php' ),
+					'nonce' => wp_create_nonce( 'aitp_map_step' ),
 					'error' => __( 'Request failed; trying again shortly.', 'ai-translator-for-translatepress' ),
 				)
 			) . ';',
@@ -241,6 +248,7 @@ final class AITP_Admin {
 			'queue'    => __( 'Backfill queue', 'ai-translator-for-translatepress' ),
 			'review'   => __( 'Review list', 'ai-translator-for-translatepress' ),
 			'audit'    => __( 'Audit & repair', 'ai-translator-for-translatepress' ),
+			'pages'    => __( 'Page map & test journal', 'ai-translator-for-translatepress' ),
 		);
 		if ( ! isset( $tabs[ $tab ] ) ) {
 			$tab = 'settings';
@@ -259,6 +267,8 @@ final class AITP_Admin {
 			$this->render_review();
 		} elseif ( $tab === 'audit' ) {
 			AITP_Admin_Audit::render();
+		} elseif ( $tab === 'pages' ) {
+			AITP_Admin_Pages::render();
 		} else {
 			$this->render_settings();
 		}

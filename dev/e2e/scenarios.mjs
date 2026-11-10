@@ -437,7 +437,9 @@ const S = {
 		// 3. Repair: one planted row is fixed by someone else after the check -> skipped.
 		const other = bad.find( ( r ) => r.type === 'english' && r.lang === 'fr_FR' );
 		wp( 'eval-file', '/e2e/audit-seed.php', 'edit', other.lang, String( other.id ), other.good );
-		const rep = a( 'repair', '--severity=error', '--yes' );
+		// Planted rows include interface text and rows on no known page: opt in to reset them too
+		// (the default, known pages only, is covered by the pagemap scenario).
+		const rep = a( 'repair', '--severity=error', '--yes', '--include-unlinked' );
 		let chk = seedc( 'check' );
 		const resetRows = chk.rows.filter( ( r ) => r.type !== 'manual' && r.status === 0 && r.empty );
 		record( 'audit: repair backs up and resets only unchanged machine rows', { repair: rep, reset_rows: resetRows.length }, {
@@ -644,6 +646,166 @@ const S = {
 		af( 'settings', '--enabled=0' );
 		wp( 'eval', 'foreach (array("aitp_autofix_state","aitp_autofix_settings","aitp_audit_settings") as $o) delete_option($o); echo 1;' );
 		seedc( 'restore-gettext' );
+	},
+
+	async pagemap() {
+		// 0.6.0: page mapping (read-only visits), repairs limited to known pages, test journal.
+		const q = ( ...a ) => wp( 'aitp', 'queue', ...a );
+		const a = ( ...x ) => json( wp( 'aitp', 'audit', ...x ) );
+		const m = ( ...x ) => json( wp( 'aitp', 'map', ...x ) );
+		const j = ( ...x ) => json( wp( 'aitp', 'journal', ...x ) );
+		const af = ( ...x ) => json( wp( 'aitp', 'autofix', ...x ) );
+		const h = ( ...x ) => json( wp( 'eval-file', '/e2e/pagemap-help.php', ...x.map( String ) ) );
+		const opt = ( k, v ) => wp( 'eval', `update_option('${ k }', json_decode(base64_decode('${ Buffer.from( JSON.stringify( v ) ).toString( 'base64' ) }'), true)); echo 1;` );
+		const batches = () => json( wp( 'eval', 'echo wp_json_encode((object) AITP_Audit::batches());' ) );
+		const L = 'fr_FR';
+		const FA = 'Free shipping on every order over ninety nine dollars';
+		const FB = 'Only on the home page: ask for a free sample today';
+		const FC = 'A sentence that nobody has translated before this test';
+		const FD = 'Another new footer line that appears during the journal test';
+
+		await reset();
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings","aitp_autofix_state","aitp_autofix_settings","aitp_autofix_lock","aitp_map_state","aitp_map_lock","aitp_journal_state") as $o) delete_option($o); echo 1;' );
+		opt( 'aitp_e2e_footer', [ [ FA, '' ], [ FB, 'okay-home' ] ] );
+		wp( 'eval', `update_option('aitp_queue_settings', array_merge(AITP_Queue::defaults(), array('languages' => array('${ L }'))), false); echo 1;` );
+		q( 'sync' );
+		q( 'start' );
+		json( q( 'run', '--ignore-rate', '--minutes=6' ) );
+		q( 'pause' );
+		const rowA = h( 'find', L, FA );
+		const rowB = h( 'find', L, FB );
+		const product = h( 'permalink', 'okay-product' ).url;
+
+		// 1. Map one page: nothing translated or saved, footer text found although TranslatePress links it to no post.
+		opt( 'aitp_e2e_footer', [ [ FA, '' ], [ FB, 'okay-home' ], [ FC, 'okay-product' ] ] );
+		const metaBefore = h( 'meta', 'okay-product' ).links;
+		h( 'meta', 'okay-product', 'clear' );
+		const d0 = h( 'dict', L );
+		const o0 = h( 'originals' );
+		const req0 = ( await mockStats() ).requests;
+		const started = wp( 'aitp', 'map', 'start', `--urls=${ product }`, `--languages=${ L }` );
+		const run = m( 'run', '--ignore-rate', '--minutes=2' );
+		const d1 = h( 'dict', L );
+		const o1 = h( 'originals' );
+		const req1 = ( await mockStats() ).requests;
+		const metaAfter = h( 'meta', 'okay-product' );
+		const pages = m( 'list' ).rows;
+		const pg = pages[ 0 ] || {};
+		const exp = json( wp( 'aitp', 'map', 'export', `--pages=${ pg.id }` ) );
+		const expIds = exp.rows.map( ( r ) => Number( r.id ) );
+		record( 'pagemap: read-only visit finds the rows a page shows', {
+			started: started.slice( 0, 80 ), run, rowA: [ rowA.id, rowA.status, rowA.meta ], page: { found: pg.found, meta: pg.meta, meta_found: pg.meta_found, s1: pg.s1, s2: pg.s2, s0: pg.s0, unknown: pg.unknown, http: pg.http },
+			dict_same: d0.sum === d1.sum, originals: [ o0.rows, o1.rows ], tp_links: [ metaBefore, metaAfter.links, metaAfter.markers ], mock_requests: req1 - req0, export_rows: exp.rows.length,
+		}, {
+			footer_not_linked_by_tp: rowA.status === '1' && rowA.meta === 0,
+			one_page_mapped: run.status === 'done' && pages.length === 1 && pg.http === '200',
+			found_rows: Number( pg.found ) > 0,
+			tp_links_not_written: metaBefore > 0 && metaAfter.links === 0 && metaAfter.markers === 0,
+			new_text_counted_not_saved: Number( pg.unknown ) >= 1 && d0.rows === d1.rows && o0.rows === o1.rows,
+			nothing_changed: d0.sum === d1.sum,
+			no_ai_request: req1 === req0,
+			export_has_footer: expIds.includes( Number( rowA.id ) ) && ! expIds.includes( Number( rowB.id ) ),
+			export_is_machine_rows: exp.rows.length === Number( pg.s1 ) && exp.rows.every( ( r ) => typeof r.old === 'string' && r.old !== '' ),
+		} );
+		opt( 'aitp_e2e_footer', [ [ FA, '' ], [ FB, 'okay-home' ] ] );
+
+		// 2. Repair a mixed set: the row on a mapped page is reset and only that page is queued and visited;
+		//    the row on no known page stays as it is.
+		h( 'set', L, rowA.id, 1, FA );
+		h( 'set', L, rowB.id, 1, FB );
+		const cand = h( 'cand', L, `${ rowA.id },${ rowB.id }` );
+		const imp = a( 'import', cand.file );
+		const fnd = a( 'list', '--limit=50', '--source=import' ).rows;
+		const fid = ( row ) => ( fnd.find( ( f ) => Number( f.row_id ) === Number( row.id ) ) || {} ).id;
+		opt( 'aitp_e2e_visit_log', 1 );
+		h( 'visits', 'clear' );
+		// TranslatePress keeps a ~50 s "recently translated" lock per string; A was translated moments ago.
+		wp( 'eval', 'global $wpdb; $wpdb->query("TRUNCATE {$wpdb->prefix}trp_machine_translation_locks"); echo 1;' );
+		const r1 = a( 'repair', `--ids=${ fid( rowA ) },${ fid( rowB ) }` );
+		const qrows = h( 'queue' ).rows;
+		const pending = qrows.filter( ( r ) => r.status === 'pending' );
+		q( 'start' );
+		json( q( 'run', '--ignore-rate', '--minutes=2' ) );
+		q( 'pause' );
+		const visits = h( 'visits' ).visits;
+		const nowA = h( 'find', L, FA );
+		const nowB = h( 'find', L, FB );
+		const prodPath = new URL( r1.urls[ 0 ] ? r1.urls[ 0 ].url : 'http://x/none' ).pathname;
+		record( 'pagemap: repair resets only rows on a known page and visits only that page', {
+			import: imp, repair: r1, pending: pending.map( ( r ) => r.url ), visits, A: [ nowA.status, nowA.translated ], B: [ nowB.status, nowB.translated ],
+		}, {
+			imported_both: imp.added === 2,
+			reset_linked_only: r1.reset === 1 && r1.skipped.no_page === 1 && r1.no_page.length === 1,
+			no_whole_language: r1.all_pages.length === 0,
+			one_page_queued: pending.length === 1 && r1.urls.length === 1 && pending[ 0 ].url === r1.urls[ 0 ].url,
+			only_whitelisted_visits: visits.length >= 1 && visits.every( ( v ) => v.startsWith( prodPath ) ),
+			a_translated_again: nowA.status === '1' && nowA.translated !== FA,
+			b_untouched: nowB.status === '1' && nowB.translated === FB,
+		} );
+
+		// 3. Opt in: the unlinked row is reset and every page of the language is queued; roll both back exactly.
+		const r2 = a( 'repair', `--ids=${ fid( rowB ) }`, '--include-unlinked' );
+		const pending2 = h( 'queue' ).rows.filter( ( r ) => r.status === 'pending' );
+		const rb2 = a( 'rollback', String( r2.batch ) );
+		const rb1 = a( 'rollback', String( r1.batch ) );
+		const backA = h( 'find', L, FA );
+		const backB = h( 'find', L, FB );
+		record( 'pagemap: whole language only when asked; rollbacks exact', { repair: { reset: r2.reset, all_pages: r2.all_pages, pages: r2.pages }, pending: pending2.length, rb1, rb2 }, {
+			opt_in_resets: r2.reset === 1 && r2.all_pages.includes( L ),
+			whole_language_queued: pending2.length === qrows.length,
+			rolled_back: rb1.restored === 1 && rb2.restored === 1 && backA.translated === FA && backB.translated === FB && backA.status === '1' && backB.status === '1',
+		} );
+		wp( 'eval', 'global $wpdb; $wpdb->query("UPDATE {$wpdb->prefix}aitp_queue SET status = \'done\', note = \'\'"); echo 1;' );
+
+		// 4. Auto repair on the same rows: picks the row on a known page, leaves the other one, visits only batch pages.
+		a( 'scan', '--minutes=3' );
+		af( 'settings', '--enabled=1', `--languages=${ L }`, '--batch=20' );
+		h( 'visits', 'clear' );
+		wp( 'aitp', 'autofix', 'start' );
+		const afr = af( 'run', '--ignore-rate', '--minutes=4' );
+		const bAll = batches();
+		const auto = Object.entries( bAll ).filter( ( [ , b ] ) => b.auto );
+		const allowed = auto.flatMap( ( [ , b ] ) => ( b.urls || [] ).map( ( u ) => new URL( u.url ).pathname ) );
+		const visits2 = h( 'visits' ).visits;
+		const afA = h( 'find', L, FA );
+		const afB = h( 'find', L, FB );
+		record( 'pagemap: auto repair stays on known pages', { result: afr.result, status: afr.state.status, left: afr.state.left, batches: auto.length, allowed, visits: visits2 }, {
+			finished: afr.state.status === 'done',
+			a_fixed: afA.translated !== FA && afA.status === '1',
+			b_left_for_a_person: afB.translated === FB && afr.state.left.no_page >= 1,
+			only_batch_pages_visited: visits2.length > 0 && visits2.every( ( v ) => allowed.some( ( p ) => v.startsWith( p ) ) ),
+		} );
+		for ( const [ id ] of auto ) a( 'rollback', id );
+		af( 'settings', '--enabled=0' );
+
+		// 5. Test journal: rows translated during the test go back to their exact earlier state; new rows are listed.
+		const coll = h( 'dict', L );
+		const pick = json( wp( 'eval', `global $wpdb; echo wp_json_encode($wpdb->get_col("SELECT d.id FROM {$wpdb->prefix}trp_dictionary_en_us_${ L.toLowerCase() } d JOIN {$wpdb->prefix}trp_original_meta m ON m.original_id = d.original_id AND m.meta_key = 'post_parent_id' JOIN {$wpdb->posts} p ON p.ID = m.meta_value AND p.post_name = 'okay-collection' WHERE d.status = 1 ORDER BY d.id LIMIT 3"));` ).replace( /^\[/, '{"ids":[' ).replace( /\]$/, ']}' ) ).ids.map( Number );
+		h( 'set', L, pick[ 0 ], 0, '__NULL__' );
+		h( 'set', L, pick[ 1 ], 0, '' );
+		h( 'set', L, pick[ 2 ], 0, '__NULL__' );
+		opt( 'aitp_e2e_footer', [ [ FA, '' ], [ FB, 'okay-home' ], [ FD, 'okay-collection' ] ] );
+		const base = h( 'dict', L );
+		const js = wp( 'aitp', 'journal', 'start', '--label=e2e' );
+		await visit( L, 'okay-collection' );
+		await visit( L, 'okay-collection' );
+		wp( 'aitp', 'journal', 'stop' );
+		const mid = h( 'dict', L );
+		const sumBefore = j( 'status' );
+		const undo = j( 'undo' );
+		const after = h( 'dict', L, base.max );
+		const rowsNow = pick.map( ( id ) => json( wp( 'eval', `global $wpdb; echo wp_json_encode($wpdb->get_row("SELECT translated, status FROM {$wpdb->prefix}trp_dictionary_en_us_${ L.toLowerCase() } WHERE id = ${ id }", ARRAY_A));` ) ) );
+		const rowD = h( 'find', L, FD );
+		record( 'pagemap: test journal undoes translations exactly, lists new rows', { started: js.slice( 0, 60 ), status: sumBefore, undo, rows: rowsNow, D: [ rowD.id, rowD.status ], sums: [ base.sum, mid.sum, after.sum ], max: [ base.max, mid.max ] }, {
+			translated_during_test: mid.sum !== base.sum && rowsNow.length === 3,
+			undone: undo.restored >= 3,
+			exact_baseline: after.sum === base.sum && after.rows === base.rows,
+			null_and_empty_kept_apart: rowsNow[ 0 ].translated === null && rowsNow[ 1 ].translated === '' && rowsNow.every( ( r ) => r.status === '0' ),
+			new_row_listed_not_deleted: Number( rowD.id ) > base.max && undo.new_rows >= 1 && sumBefore.new_rows.some( ( n ) => n.lang === L && n.rows >= 1 ),
+		} );
+
+		wp( 'eval', 'foreach (array("aitp_e2e_footer","aitp_e2e_visit_log","aitp_queue_settings","aitp_autofix_settings","aitp_autofix_state","aitp_journal_state") as $o) delete_option($o); echo 1;' );
+		h( 'visits', 'clear' );
 	},
 
 	async openai() {

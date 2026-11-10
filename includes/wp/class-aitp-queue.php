@@ -25,6 +25,7 @@ final class AITP_Queue {
 	const CRON         = 'aitp_queue_tick';
 	const SCHEDULE     = 'aitp_minute';
 	const QUERY_ARG    = 'aitp_nc';
+	const MAP_ARG      = 'aitp_map';
 	const STATUSES     = array( 'pending', 'partial', 'done', 'failed' );
 
 	/** @var AITP_Queue|null */
@@ -32,6 +33,9 @@ final class AITP_Queue {
 
 	/** @var string Nonce of the signed visit being served by this request ('' if none). */
 	private $warm = '';
+
+	/** @var bool Whether the signed visit only maps the page (nothing translated or saved). */
+	private $map = false;
 
 	/** @var array Report of the signed visit being served. */
 	private $report = array();
@@ -356,7 +360,8 @@ final class AITP_Queue {
 				' ON DUPLICATE KEY UPDATE url = VALUES(url), object_type = VALUES(object_type), object_id = VALUES(object_id), priority = VALUES(priority), seen = VALUES(seen)'
 			);
 		}
-		$removed = (int) $wpdb->query( $wpdb->prepare( "DELETE FROM $table WHERE seen <> %d", $sync ) );
+		// Pages a repair queued stay until they were visited, even when not selected.
+		$removed = (int) $wpdb->query( $wpdb->prepare( "DELETE FROM $table WHERE seen <> %d AND NOT ( note = 'repair' AND status IN ('pending','partial') )", $sync ) );
 		$total   = (int) $wpdb->get_var( "SELECT COUNT(*) FROM $table" );
 		// phpcs:enable
 		self::update_state( array( 'last_sync' => $sync ) );
@@ -411,6 +416,34 @@ final class AITP_Queue {
 		}
 		return (int) $wpdb->query( $wpdb->prepare( "UPDATE $table SET $set WHERE lang = %s AND object_type = 'post' AND object_id IN (" . implode( ',', $ids ) . ')', $lang ) );
 		// phpcs:enable
+	}
+
+	/**
+	 * Put some pages back in the queue (added when missing). Used by repairs: only these
+	 * pages are visited again, not every page of the language.
+	 *
+	 * @param array $pages Each url, source_url, lang, object_type, object_id.
+	 * @return int Pages queued.
+	 */
+	public static function requeue_urls( array $pages ) {
+		global $wpdb;
+		$table = AITP_Schema::table( 'queue' );
+		$rows  = array();
+		$state = self::state();
+		foreach ( $pages as $p ) {
+			if ( empty( $p['url'] ) || empty( $p['source_url'] ) || empty( $p['lang'] ) ) {
+				continue;
+			}
+			$rows[] = $wpdb->prepare( '(%s,%s,%s,%s,%s,%d,%d,%s,%d,%s,%d,%s)', sha1( $p['source_url'] . '|' . $p['lang'] ), $p['source_url'], $p['url'], $p['lang'], (string) $p['object_type'], (int) $p['object_id'], 1, 'pending', 0, 'repair', (int) $state['last_sync'], current_time( 'mysql', true ) );
+		}
+		foreach ( array_chunk( $rows, 200 ) as $chunk ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$wpdb->query(
+				"INSERT INTO $table (ukey, source_url, url, lang, object_type, object_id, priority, status, next_at, note, seen, updated_at) VALUES " . implode( ',', $chunk ) .
+				" ON DUPLICATE KEY UPDATE status = 'pending', visits = 0, attempts = 0, passes = 0, next_at = 0, note = 'repair'"
+			);
+		}
+		return count( $rows );
 	}
 
 	/**
@@ -682,11 +715,16 @@ final class AITP_Queue {
 	 * @param string $url     Translated URL.
 	 * @param string $lang    Language.
 	 * @param int    $seconds Time budget of the visit.
-	 * @return array{http:int,report:bool,calls:int,translated:int,failed:int,sent:int,stop:string,ms:int}
+	 * @param bool   $map     Only map the page: record the page-text rows it shows, with machine
+	 *                        translation and string saving switched off for that request.
+	 * @return array{http:int,report:bool,calls:int,translated:int,failed:int,sent:int,stop:string,ms:int,rows:int[],strings:int,unknown:int}
 	 */
-	public static function visit( $url, $lang, $seconds ) {
+	public static function visit( $url, $lang, $seconds, $map = false ) {
 		$nonce = bin2hex( random_bytes( 16 ) );
 		$url   = add_query_arg( self::QUERY_ARG, substr( $nonce, 0, 8 ), $url );
+		if ( $map ) {
+			$url = add_query_arg( self::MAP_ARG, '1', $url ); // Part of the signed path: cannot be added by anyone else.
+		}
 		$path  = (string) wp_parse_url( $url, PHP_URL_PATH );
 		$query = (string) wp_parse_url( $url, PHP_URL_QUERY );
 		$path  = ( $path === '' ? '/' : $path ) . ( $query !== '' ? '?' . $query : '' );
@@ -725,6 +763,9 @@ final class AITP_Queue {
 			'sent'       => 0,
 			'stop'       => '',
 			'ms'         => $ms,
+			'rows'       => array(),
+			'strings'    => 0,
+			'unknown'    => 0,
 		);
 		// The page writes its report while shutting down; give it a moment if needed.
 		$key = 'aitp_warm_' . $nonce;
@@ -801,13 +842,24 @@ final class AITP_Queue {
 		set_transient( 'aitp_used_' . $nonce, 1, AITP_Queue_Logic::TOKEN_TTL * 2 );
 
 		$this->warm   = $nonce;
+		$this->map    = (bool) preg_match( '~[?&]' . self::MAP_ARG . '=1(&|$)~', $uri );
 		$this->report = array(
 			'calls'      => 0,
 			'translated' => 0,
 			'failed'     => 0,
 			'sent'       => 0,
 			'stop'       => '',
+			'rows'       => array(),
+			'strings'    => 0,
+			'unknown'    => 0,
 		);
+		if ( $this->map ) {
+			// Read only: whatever engine is selected (also another plugin's), nothing is machine
+			// translated and TranslatePress saves no strings during this request.
+			add_filter( 'trp_machine_translator_is_available', '__return_false', PHP_INT_MAX );
+			add_filter( 'trp_allow_string_saving', '__return_false', PHP_INT_MAX );
+			add_action( 'trp_translateable_information', array( $this, 'map_strings' ), 10, 3 );
+		}
 		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
 			define( 'DONOTCACHEPAGE', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- convention honoured by page caches.
 		}
@@ -838,6 +890,50 @@ final class AITP_Queue {
 		if ( $r['stop'] === '' && $stop !== '' ) {
 			$r['stop'] = $stop;
 		}
+	}
+
+	/**
+	 * Map visit: page-text rows of this language that the rendered page shows.
+	 *
+	 * @param array  $info       TranslatePress: translateable_strings, nodes.
+	 * @param array  $translated Translations served.
+	 * @param string $lang       Language code.
+	 */
+	public function map_strings( $info, $translated, $lang ) {
+		global $wpdb;
+		$strings = array_values( array_unique( array_filter( array_map( 'strval', isset( $info['translateable_strings'] ) ? (array) $info['translateable_strings'] : array() ), 'strlen' ) ) );
+		if ( ! $strings || ! class_exists( 'TRP_Translate_Press' ) ) {
+			return;
+		}
+		// TranslatePress writes its post_parent_id links right after this action, once per
+		// address per day: report "already done today" so this visit writes nothing there either.
+		if ( function_exists( 'get_permalink' ) && in_array( 'md4', hash_algos(), true ) ) {
+			add_filter( 'pre_transient_processed_original_string_meta_post_id_for_' . hash( 'md4', (string) get_permalink() ), array( __CLASS__, 'already_done' ) );
+		}
+		$q     = TRP_Translate_Press::get_trp_instance()->get_component( 'query' );
+		$table = $q ? (string) $q->get_table_name( $lang ) : '';
+		if ( $table === '' ) {
+			return;
+		}
+		$seen = array();
+		foreach ( array_chunk( $strings, 200 ) as $chunk ) {
+			$ph = implode( ',', array_fill( 0, count( $chunk ), '%s' ) );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+			foreach ( (array) $wpdb->get_results( $wpdb->prepare( "SELECT id, original FROM `$table` WHERE original IN ($ph)", $chunk ), ARRAY_A ) as $r ) {
+				if ( in_array( (string) $r['original'], $chunk, true ) ) { // Exact (binary) match only.
+					$this->report['rows'][] = (int) $r['id'];
+					$seen[ (string) $r['original'] ] = true;
+				}
+			}
+		}
+		$this->report['strings'] += count( $strings );
+		$this->report['unknown'] += count( $strings ) - count( $seen );
+		$this->report['rows']     = array_values( array_unique( $this->report['rows'] ) );
+	}
+
+	/** @return string Value of a transient that is already set. */
+	public static function already_done() {
+		return 'done';
 	}
 
 	/** Store the report for the worker that requested this page. */

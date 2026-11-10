@@ -1770,3 +1770,204 @@ msgstr "当前批次：第 %1$s / %2$s 页，第 %3$s 轮"
 
 msgid "still wrong after the auto repair (left for a person)"
 msgstr "自动修复后仍然错误（留给人工）"
+
+msgid "on no known page (not reset)"
+msgstr "不在任何已知页面上（未改回）"
+
+msgid "%1$s structured data, %2$s on no known page (map the pages that show them first)"
+msgstr "结构化数据 %1$s 行，不在任何已知页面上的 %2$s 行（先给显示它们的页面做映射）"
+
+msgid "Also reset rows that are on no known page? Their pages are unknown, so every page of their language is queued again (and visited when the backfill queue runs). Usually it is better to map the pages that show them first."
+msgstr "连不在任何已知页面上的行也改回？不知道它们在哪些页面，所以会把该语言的全部页面重新排进补翻队列（补翻队列运行时都会被访问）。通常更好的做法是先给显示它们的页面做映射。"
+
+msgid "Also reset rows on no known page (queues every page of their language again)"
+msgstr "连不在已知页面上的行也改回（会把该语言全部页面重新排队）"
+
+msgid "Only rows on a known page are reset: a page TranslatePress links the string to, or a mapped page that shows it. One such page per row is queued again; start the backfill queue (or open those pages, or wait for visitors) to get new translations. Clear CDN or server caches outside WordPress yourself."
+msgstr "只有在已知页面上的行才会被改回：TranslatePress 把这条文字关联到的页面，或做过映射、显示这条文字的页面。每行只挑一个这样的页面重新排队；启动补翻队列（或直接打开这些页面，或等访客访问）就会得到新译文。WordPress 以外的 CDN 或服务器缓存请自己清。"
+
+msgid "Rows on no known page stay as they are: map the pages that show them (tab \"Page map & test journal\"), or tick \"also reset rows on no known page\"."
+msgstr "不在任何已知页面上的行保持原样：先给显示它们的页面做映射（「页面映射与测试记录」标签页），或者勾选「连不在已知页面上的行也改回」。"
+
+msgid "Rows on no known page were reset as requested: every page of %s was queued again."
+msgstr "按你的选择，不在已知页面上的行也已改回：%s 的全部页面已重新排队。"
+
+msgid "a run is already in progress"
+msgstr "已经有一轮在进行"
+
+msgid "TranslatePress is not active"
+msgstr "TranslatePress 没有启用"
+
+msgid "no usable page address"
+msgstr "没有可用的页面地址"
+
+msgid "more than %s pages × languages; choose fewer"
+msgstr "页面 × 语言超过 %s 个，请少选一些"
+
+msgid "not undone yet"
+msgstr "还没撤销"
+
+msgid "undone"
+msgstr "已撤销"
+
+msgid "changed since (kept)"
+msgstr "之后被改过（保留）"
+
+msgid "translated manually since (kept)"
+msgstr "之后被人工翻译（保留）"
+
+msgid "never saved by TranslatePress"
+msgstr "TranslatePress 没有保存过"
+
+msgid "new row (listed below, not deleted)"
+msgstr "新行（在下面列出，不删除）"
+
+msgid "machine translated"
+msgstr "机器翻译"
+
+msgid "not translated"
+msgstr "未翻译"
+
+msgid "Page map"
+msgstr "页面映射"
+
+msgid "TranslatePress links a string to a page only when it is inside the post content, so headings, menus, theme and page-builder text belong to no page and a repair cannot know which pages to visit. Mapping opens each page once in read-only mode – machine translation is switched off for that request and TranslatePress saves no strings – and records which page-text rows of that language the page shows, matched by their complete original text. Repairs then reset only rows on a known page and visit only those pages. Selected pages can be downloaded as a candidate list for a page-by-page comparison. Mapping costs no AI characters; it loads pages like a visitor (one every 5 seconds)."
+msgstr "TranslatePress 只在文字位于文章正文里时，才把它和页面关联起来；标题、菜单、主题和页面构建器里的文字不属于任何页面，修复时就不知道该访问哪些页面。页面映射会以「只看不翻」的方式把每个页面打开一次——这次请求里关掉机器翻译，TranslatePress 也不保存任何文字——记录页面上显示了该语言的哪些页面文字行，按完整原文精确匹配。之后修复只改回在已知页面上的行，也只访问这些页面。选中的页面可以下载成候选清单，用来逐页对比。映射不花 AI 字符，只像访客一样加载页面（每 5 秒一页）。"
+
+msgid "%1$s of %2$s pages (%3$s read, %4$s failed)"
+msgstr "第 %1$s / %2$s 页（读到 %3$s 页，失败 %4$s 页）"
+
+msgid "Stop mapping"
+msgstr "停止映射"
+
+msgid "Advance the mapping from this page now"
+msgstr "从本页立即推进映射"
+
+msgid "Addresses in the default language, one per line. Empty = every page of the backfill queue's page list (generate it there first)."
+msgstr "填默认语言的地址，每行一个。留空 = 补翻队列页面列表里的全部页面（先到那里生成列表）。"
+
+msgid "None ticked = all languages."
+msgstr "一个都不勾 = 所有语言。"
+
+msgid "Map these pages"
+msgstr "映射这些页面"
+
+msgid "Mapped pages"
+msgstr "已映射的页面"
+
+msgid "address contains"
+msgstr "地址包含"
+
+msgid "%s mapped pages match."
+msgstr "符合条件的已映射页面：%s 个。"
+
+msgid "Linked by TranslatePress"
+msgstr "TranslatePress 关联的行"
+
+msgid "Found on the page"
+msgstr "页面上找到的行"
+
+msgid "Machine / manual / not translated"
+msgstr "机器 / 人工 / 未翻译"
+
+msgid "Text with no row"
+msgstr "没有对应行的文字"
+
+msgid "Mapped"
+msgstr "映射时间"
+
+msgid "not covered"
+msgstr "未覆盖"
+
+msgid "last visit failed (HTTP %s)"
+msgstr "上次访问失败（HTTP %s）"
+
+msgid "%s of them on the page"
+msgstr "其中 %s 行在页面上"
+
+msgid "Download candidate list of the selected pages"
+msgstr "下载选中页面的候选清单"
+
+msgid "Download candidate list of all mapped pages"
+msgstr "下载全部已映射页面的候选清单"
+
+msgid "The list holds the machine-translated rows the pages show (manual translations and untranslated rows are left out), in the format of \"Import a candidate list\" under Audit & repair. Rows linked by TranslatePress but no longer shown on the page are not in it: visiting the page would not translate them again."
+msgstr "清单里是这些页面上显示的机器翻译行（人工翻译和未翻译的行不在里面），格式和「体检与修复」里「导入候选清单」一致。TranslatePress 关联了、但页面上已经不显示的行不在清单里：访问页面也不会把它们重新翻译。"
+
+msgid "Forget every mapped page? TranslatePress data is not touched; repairs then only know the pages TranslatePress links."
+msgstr "清空全部页面映射？TranslatePress 的数据不受影响；之后修复只认得 TranslatePress 自己关联的页面。"
+
+msgid "Clear the page map"
+msgstr "清空页面映射"
+
+msgid "Test journal"
+msgstr "测试记录"
+
+msgid "For tests on a staging site. While the journal is on, every translation this engine hands to TranslatePress is written down with the exact state the row had before. After the test, roll back the repair batches first, then \"Undo translations of the test\": rows that still hold exactly our translation get their earlier state back (usually \"not translated\"). Rows TranslatePress added during the test (strings it saw for the first time) are listed and can be downloaded; they are never deleted. Restoring a full database backup stays a decision for the site owner."
+msgstr "用于测试站测试。测试记录打开期间，本引擎交给 TranslatePress 的每一条译文都会被记下来，连同这一行之前的准确状态。测试结束后，先回滚各个修复批次，再点「撤销测试期间的译文」：仍然完全是我们译文的行会恢复到之前的状态（通常是「未翻译」）。测试期间 TranslatePress 新增的行（第一次见到的文字）会列出来、可以下载，但绝不删除。是否用整库备份恢复，由站长决定。"
+
+msgid "on — recording"
+msgstr "已打开——正在记录"
+
+msgid "off"
+msgstr "已关闭"
+
+msgid "Test"
+msgstr "测试"
+
+msgid "Translations recorded"
+msgstr "已记录的译文"
+
+msgid "Rows TranslatePress added since the start"
+msgstr "开始以来 TranslatePress 新增的行"
+
+msgid "Switch the journal off"
+msgstr "关闭测试记录"
+
+msgid "Start a new test? What the previous test recorded can then no longer be undone here."
+msgstr "开始新的测试？上一次测试记录的内容之后就不能在这里撤销了。"
+
+msgid "Name of the test"
+msgstr "测试名称"
+
+msgid "Switch the journal on"
+msgstr "打开测试记录"
+
+msgid "Put every row this engine translated during the test back to its state before? Roll back the repair batches of the test first. Rows changed since are kept."
+msgstr "把本引擎在测试期间翻译的每一行恢复到之前的状态？请先回滚这次测试的修复批次。之后被改过的行会保留。"
+
+msgid "Undo translations of the test"
+msgstr "撤销测试期间的译文"
+
+msgid "Download the new rows"
+msgstr "下载新增的行"
+
+msgid "Mapping cannot start: %s."
+msgstr "映射无法开始：%s。"
+
+msgid "Mapping %s pages. It continues in the background; you can also advance it from this page."
+msgstr "正在映射 %s 个页面。会在后台继续；也可以从本页推进。"
+
+msgid "Not usable (not on this site, or no translated address): %s"
+msgstr "不能用（不是本站地址，或没有译文地址）：%s"
+
+msgid "Mapping stopped. Pages mapped so far are kept."
+msgstr "映射已停止，已映射的页面保留。"
+
+msgid "Page map cleared."
+msgstr "页面映射已清空。"
+
+msgid "Test journal on."
+msgstr "测试记录已打开。"
+
+msgid "Test journal off. What it recorded can still be undone."
+msgstr "测试记录已关闭，记下的内容仍然可以撤销。"
+
+msgid "%1$s rows put back to their state before the test; %2$s translations were new rows (listed, not deleted)."
+msgstr "%1$s 行已恢复到测试前的状态；%2$s 条译文是新增的行（已列出，不删除）。"
+
+msgid "Page map & test journal"
+msgstr "页面映射与测试记录"
+
+msgid "Page addresses"
+msgstr "页面地址"

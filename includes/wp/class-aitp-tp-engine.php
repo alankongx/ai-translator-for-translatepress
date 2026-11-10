@@ -52,6 +52,8 @@ class AITP_TP_Engine extends TRP_Machine_Translator {
 		 */
 		do_action( 'aitp_translated_batch', $result, $target_language_code );
 
+		AITP_Journal::record( $new_strings, $result['translations'], $target_language_code );
+
 		return $result['translations'];
 	}
 

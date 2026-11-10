@@ -52,3 +52,24 @@ test( 'autofix: engine stop reasons', function () {
 	eq( true, AITP_Autofix_Logic::is_english( array( 'untranslated' ) ) );
 	eq( false, AITP_Autofix_Logic::is_english( array( 'number_mismatch' ) ) );
 } );
+
+test( 'repair: fewest pages that show every reset row', function () {
+	$p = function ( $u ) {
+		return array( 'url' => $u, 'lang' => 'de_DE' );
+	};
+	// Row a: own post page A and the home page; b and c: only on the home page (menu text);
+	// d: only on page D.
+	$cover = AITP_Audit_Logic::cover_pages(
+		array(
+			'a' => array( 'A' => $p( 'A' ), 'H' => $p( 'H' ) ),
+			'b' => array( 'H' => $p( 'H' ) ),
+			'c' => array( 'H' => $p( 'H' ), 'X' => $p( 'X' ) ),
+			'd' => array( 'D' => $p( 'D' ) ),
+			'e' => array(),
+		)
+	);
+	eq( array( 'H', 'D' ), array_keys( $cover ), 'home covers a, b, c; D covers d; rows without a page add nothing' );
+	$cover = AITP_Audit_Logic::cover_pages( array( 'a' => array( 'A' => $p( 'A' ), 'H' => $p( 'H' ) ) ) );
+	eq( array( 'A' ), array_keys( $cover ), 'on a tie the first page (the post the string belongs to) wins' );
+	eq( array(), AITP_Audit_Logic::cover_pages( array() ) );
+} );

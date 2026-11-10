@@ -44,16 +44,27 @@ TranslatePress 的 AI 翻译引擎，支持 **Google Gemini 原生接口**和**�
 7. 「设置 → AI 翻译 → 体检与修复」：点「开始体检」。体检只读，不改任何数据，也不花 AI 费用。
 8. 有人工核过、确认没问题的译文清单，先用「加入已验收清单」导入（按编号 + 原文 + 译文；编号对不上时按原文找）。这些行永远不会被修复。
 9. 有外部整理的错译候选清单，可以用「导入候选清单」导入，只有和网站当前内容完全一致的才会加入。
-10. **先小批试**：筛选一种语言、「错误」这一档，勾几十条，点「改回未翻译（先备份）」。被改回的页面会自动进补翻队列重翻。
-11. 等重翻完，打开前台看这些页面，确认没问题，再按批扩大（「筛选结果全部改回」每次最多 500 条）。
+10. **先给要修的页面做映射**：「设置 → AI 翻译 → 页面映射与测试记录」，填页面地址（默认语言，每行一个）、选语言，点「映射这些页面」。它以「只看不翻」的方式打开每个页面一次（不花 AI 费用、不改数据），记下页面上显示的是哪些文字行。
+    - 为什么要做：TranslatePress 只把**文章正文里**的文字和页面关联起来；标题、菜单、主题和页面构建器里的文字不属于任何页面，不映射的话，修复时不知道该去哪个页面重翻。
+    - 表格里每个页面 × 语言会显示：TranslatePress 关联的行数、页面上实际找到的行数（机器 / 人工 / 未翻译）、没有对应行的文字数；找到 0 行的标「未覆盖」。
+    - 勾选页面可以「下载候选清单」（只含机器翻译的行），再用「导入候选清单」导入，就能按页对比、按页修复。
+11. **先小批试**：筛选一种语言、「错误」这一档，勾几十条，点「改回未翻译（先备份）」。只有在已知页面上的行会被改回，每行挑一个显示它的页面进补翻队列重翻；不在任何已知页面上的行保持原样并单独报数（要连它们一起改，需勾选「连不在已知页面上的行也改回」，那样会把该语言的全部页面重新排队）。
+12. 等重翻完，打开前台看这些页面，确认没问题，再按批扩大（「筛选结果全部改回」每次最多 500 条）。
     - 「疑似错位」「待看意思」两档不一定是错的，要人看过再修；可以对它们用「AI 复查」（设置里打开，计入每日字符上限）。
     - 修复后会自动清 LiteSpeed、W3 Total Cache、WP Super Cache、WP Rocket 里的相关页面；**CDN 要自己清**。
-12. 哪一批有问题，到「修复记录」里点「回滚」，这一批原样恢复；其间被人手工改过的行保留不动。每批也可以「下载备份」。
-13. 手工小批试过、确认没问题后，错误多的网站可以打开**「分批自动修复」**（同一页上，默认关闭）：选语言、每批条数（默认 200，最多 500）和每天字符上限（默认是 TranslatePress 每日上限的一半），点「开始自动修复」。
+13. 哪一批有问题，到「修复记录」里点「回滚」，这一批原样恢复；其间被人手工改过的行保留不动。每批也可以「下载备份」。
+14. 手工小批试过、确认没问题后，错误多的网站可以打开**「分批自动修复」**（同一页上，默认关闭）：选语言、每批条数（默认 200，最多 500）和每天字符上限（默认是 TranslatePress 每日上限的一半），点「开始自动修复」。
     - 它一次只做一种语言的一批：先备份、改回未翻译，只访问显示这些文字的页面直到重新翻好，再用体检规则检查新译文；这一批合格才做下一批。不需要开补翻队列。
     - 自己会停下的情况：一批重翻后仍有超过 5% 是错的或没翻、有英文被存成译文、AI 接口出错、页面打不开、TranslatePress 不再用本引擎、某一批被回滚，或者有人点了「停止」。到了每日上限就等到第二天继续。
     - 只修「错误」这一档的页面文字；「疑似错位」「待看意思」、已验收清单、人工翻译、结构化数据和界面文字一律不碰。一批做完仍然错的行标成「自动修复后仍然错误」，留给人看，不会反复重试。
     - 每一批都在「修复记录」里标着「自动修复」，可以单独回滚。
+    - 只挑在已知页面上的行（同上，先做页面映射）；其余的计入「留给人工处理」。
+
+### 四、在测试站上试（测试记录）
+
+15. 测试前先做整站备份。到「页面映射与测试记录」打开**测试记录**，再开始测试。打开期间本引擎交给 TranslatePress 的每条译文都会连同这一行之前的准确状态记下来。
+16. 测完：先到「修复记录」把这次测试的批次都**回滚**，再点**「撤销测试期间的译文」**——仍然完全是我们译文的行恢复到测试前的状态（多半是「未翻译」），之后被人改过的保留。
+17. 测试期间 TranslatePress 新增的行（页面上第一次出现的文字）只列出、可下载，**不删除**；要不要用整库备份恢复，由站长决定。
 
 ### 不会做的事
 
@@ -63,7 +74,7 @@ TranslatePress 的 AI 翻译引擎，支持 **Google Gemini 原生接口**和**�
 
 ## English
 
-A translation engine for TranslatePress using Google Gemini or any OpenAI-compatible API. Translations are mapped by ID, whole answers are checked for misalignment, and every string is validated before TranslatePress saves it; strings that fail stay untranslated and are retried later. Old machine translations can be checked, repaired through the backfill queue with a backup, and rolled back exactly. See [readme.txt](readme.txt).
+A translation engine for TranslatePress using Google Gemini or any OpenAI-compatible API. Translations are mapped by ID, whole answers are checked for misalignment, and every string is validated before TranslatePress saves it; strings that fail stay untranslated and are retried later. Old machine translations can be checked, repaired page by page (with a page map of which strings each page shows) with a backup, and rolled back exactly; a test journal undoes what was translated during a staging test. See [readme.txt](readme.txt).
 
 ## 开发
 
