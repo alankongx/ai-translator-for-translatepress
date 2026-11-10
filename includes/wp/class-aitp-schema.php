@@ -182,7 +182,7 @@ final class AITP_Schema {
 		foreach ( array( 'cache', 'failures', 'review', 'log', 'queue', 'audit', 'repair', 'protect' ) as $t ) {
 			$wpdb->query( 'DROP TABLE IF EXISTS ' . self::table( $t ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
 		}
-		foreach ( array( 'aitp_settings', 'aitp_db_version', 'aitp_breaker', 'aitp_caps', 'aitp_notice', 'aitp_queue_settings', 'aitp_queue_state', 'aitp_queue_lock', 'aitp_audit_state', 'aitp_audit_lock', 'aitp_audit_settings', 'aitp_repair_batches' ) as $o ) {
+		foreach ( array( 'aitp_settings', 'aitp_db_version', 'aitp_breaker', 'aitp_caps', 'aitp_notice', 'aitp_queue_settings', 'aitp_queue_state', 'aitp_queue_lock', 'aitp_audit_state', 'aitp_audit_lock', 'aitp_audit_settings', 'aitp_repair_batches', 'aitp_autofix_settings', 'aitp_autofix_state', 'aitp_autofix_lock' ) as $o ) {
 			delete_option( $o );
 		}
 		delete_site_transient( 'aitp_github_release' );

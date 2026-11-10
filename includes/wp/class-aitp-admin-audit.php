@@ -17,6 +17,7 @@ final class AITP_Admin_Audit {
 		add_action( 'admin_post_aitp_audit', array( __CLASS__, 'handle' ) );
 		add_action( 'admin_post_aitp_audit_backup', array( __CLASS__, 'download_backup' ) );
 		add_action( 'wp_ajax_aitp_audit_step', array( __CLASS__, 'ajax_step' ) );
+		add_action( 'wp_ajax_aitp_autofix_step', array( __CLASS__, 'ajax_autofix_step' ) );
 	}
 
 	/**
@@ -184,10 +185,125 @@ final class AITP_Admin_Audit {
 			echo '</tbody></table>';
 		}
 
+		self::render_autofix();
 		self::render_list( $set );
 		self::render_batches();
 		self::render_import();
 		self::render_settings( $set );
+	}
+
+	/**
+	 * @param string $r Stop or wait reason of the auto repair.
+	 * @return string
+	 */
+	public static function autofix_reason( $r ) {
+		$map = array(
+			''                    => '',
+			'manual'              => __( 'stopped by a person', 'ai-translator-for-translatepress' ),
+			'disabled'            => __( 'the switch is off', 'ai-translator-for-translatepress' ),
+			'engine_not_selected' => __( 'TranslatePress is not using the AI Translator engine', 'ai-translator-for-translatepress' ),
+			'automatic_off'       => __( 'automatic translation is off in TranslatePress', 'ai-translator-for-translatepress' ),
+			'not_configured'      => __( 'API key or model missing', 'ai-translator-for-translatepress' ),
+			'no_scan'             => __( 'run a full check first', 'ai-translator-for-translatepress' ),
+			'scan_running'        => __( 'a check is running; wait until it has finished', 'ai-translator-for-translatepress' ),
+			'too_many_failures'   => __( 'more than 5% of the last batch is still wrong or untranslated', 'ai-translator-for-translatepress' ),
+			'english_saved'       => __( 'English was stored as a translation in the last batch', 'ai-translator-for-translatepress' ),
+			'visit_failed'        => __( 'pages of the batch could not be loaded (loopback, cache or server error)', 'ai-translator-for-translatepress' ),
+			'rolled_back'         => __( 'the current batch was rolled back', 'ai-translator-for-translatepress' ),
+			'no_pages'            => __( 'no page address found for the batch', 'ai-translator-for-translatepress' ),
+			'backup_failed'       => __( 'backup failed', 'ai-translator-for-translatepress' ),
+			'provider_breaker'    => __( 'the AI provider is failing (engine paused)', 'ai-translator-for-translatepress' ),
+			'cap'                 => __( 'daily character cap of the auto repair reached; continues tomorrow', 'ai-translator-for-translatepress' ),
+			'tp_limit'            => __( 'TranslatePress daily limit (minus the share kept for visitors) reached; continues tomorrow', 'ai-translator-for-translatepress' ),
+			'quota'               => __( 'TranslatePress daily limit reached; continues tomorrow', 'ai-translator-for-translatepress' ),
+		);
+		if ( isset( $map[ $r ] ) ) {
+			return $map[ $r ];
+		}
+		if ( strpos( $r, 'provider_' ) === 0 ) {
+			/* translators: %s: provider error */
+			return sprintf( __( 'AI provider error: %s', 'ai-translator-for-translatepress' ), AITP_Admin::code_label( substr( $r, 9 ) ) );
+		}
+		return $r;
+	}
+
+	/** Batch auto repair. */
+	private static function render_autofix() {
+		$set   = AITP_Autofix::settings();
+		$s     = AITP_Autofix::state();
+		$langs = AITP_Queue::tp_languages();
+		echo '<h2>' . esc_html__( 'Batch auto repair', 'ai-translator-for-translatepress' ) . '</h2>';
+		echo '<p class="description" style="max-width:860px;">' . esc_html__( 'Off by default. Works through "wrong" findings of page text one batch at a time: backs up and resets one batch, visits only the pages that show those strings until they are translated again, checks the new translations, and starts the next batch only when the batch came out clean. It stops by itself when more than 5% of a batch is still wrong or untranslated, when English is stored as a translation, on provider errors or failed page loads, when TranslatePress no longer uses this engine, or when a batch is rolled back. "Probably misplaced" and "check meaning" findings, the accepted list, manual translations, structured data and interface text are never touched. Every batch can be rolled back under "Repairs". Try a few batches by hand first.', 'ai-translator-for-translatepress' ) . '</p>';
+
+		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="aitp_audit"><input type="hidden" name="do" value="autofix_settings">';
+		wp_nonce_field( 'aitp_audit' );
+		echo '<table class="form-table" role="presentation"><tbody>';
+		echo '<tr><th>' . esc_html__( 'Switch', 'ai-translator-for-translatepress' ) . '</th><td><label><input type="checkbox" name="x[enabled]" value="1"' . checked( $set['enabled'], true, false ) . '> ' . esc_html__( 'Allow the batch auto repair', 'ai-translator-for-translatepress' ) . '</label></td></tr>';
+		echo '<tr><th>' . esc_html__( 'Languages', 'ai-translator-for-translatepress' ) . '</th><td>';
+		foreach ( $langs as $l ) {
+			echo '<label style="margin-right:12px;"><input type="checkbox" name="x[languages][]" value="' . esc_attr( $l ) . '"' . checked( in_array( $l, $set['languages'], true ), true, false ) . '> ' . esc_html( $l ) . '</label>';
+		}
+		echo '<br><span class="description">' . esc_html__( 'None ticked = all languages, one language after another.', 'ai-translator-for-translatepress' ) . '</span></td></tr>';
+		/* translators: 1: smallest, 2: largest batch */
+		echo '<tr><th>' . esc_html__( 'Rows per batch', 'ai-translator-for-translatepress' ) . '</th><td><input type="number" name="x[batch]" min="' . (int) AITP_Autofix_Logic::MIN_BATCH . '" max="' . (int) AITP_Autofix_Logic::MAX_BATCH . '" value="' . (int) $set['batch'] . '" class="small-text"> <span class="description">' . esc_html( sprintf( __( '%1$s–%2$s; smaller batches stop sooner when something goes wrong.', 'ai-translator-for-translatepress' ), number_format_i18n( AITP_Autofix_Logic::MIN_BATCH ), number_format_i18n( AITP_Autofix_Logic::MAX_BATCH ) ) ) . '</span></td></tr>';
+		echo '<tr><th>' . esc_html__( 'Characters per day', 'ai-translator-for-translatepress' ) . '</th><td><input type="number" name="x[cap]" min="1" value="' . (int) $set['cap'] . '" class="regular-text" style="width:140px;"> <span class="description">' . esc_html__( 'Own cap of the auto repair (default: half the TranslatePress daily limit). The TranslatePress limit and the share kept for visitors apply as well.', 'ai-translator-for-translatepress' ) . '</span></td></tr>';
+		echo '</tbody></table>';
+		submit_button( __( 'Save', 'ai-translator-for-translatepress' ), 'secondary' );
+		echo '</form>';
+
+		if ( ! $set['enabled'] && $s['status'] === 'idle' ) {
+			return;
+		}
+		$labels = array(
+			'idle'    => __( 'not started', 'ai-translator-for-translatepress' ),
+			'running' => __( 'running', 'ai-translator-for-translatepress' ),
+			'stopped' => __( 'stopped', 'ai-translator-for-translatepress' ),
+			'done'    => __( 'finished — nothing left it may repair', 'ai-translator-for-translatepress' ),
+		);
+		echo '<table class="widefat striped aitp-kv"><tbody>';
+		$state = isset( $labels[ $s['status'] ] ) ? $labels[ $s['status'] ] : $s['status'];
+		if ( $s['status'] === 'stopped' && $s['reason'] !== '' ) {
+			$state .= ' — ' . self::autofix_reason( $s['reason'] );
+		}
+		if ( $s['status'] === 'running' && time() < (int) $s['wait_until'] ) {
+			/* translators: 1: reason, 2: time */
+			$state .= ' — ' . sprintf( __( 'waiting: %1$s (until %2$s)', 'ai-translator-for-translatepress' ), self::autofix_reason( $s['wait_reason'] ), wp_date( 'Y-m-d H:i', (int) $s['wait_until'] ) );
+		}
+		self::kv( __( 'State', 'ai-translator-for-translatepress' ), $state );
+		if ( $s['batch'] ) {
+			$b = $s['batch'];
+			/* translators: 1: language, 2: rows, 3: pages visited, 4: pages, 5: round, 6: max rounds */
+			self::kv( __( 'Current batch', 'ai-translator-for-translatepress' ), sprintf( __( '%1$s, %2$s rows — page %3$s of %4$s, round %5$s of %6$s', 'ai-translator-for-translatepress' ), $b['lang'], number_format_i18n( (int) $b['reset'] ), number_format_i18n( min( (int) $b['ui'], count( $b['urls'] ) ) ), number_format_i18n( count( $b['urls'] ) ), number_format_i18n( (int) $b['pass'] ), number_format_i18n( AITP_Autofix_Logic::MAX_PASSES ) ) );
+		}
+		/* translators: 1: used, 2: cap */
+		self::kv( __( 'Characters today', 'ai-translator-for-translatepress' ), sprintf( __( '%1$s of %2$s', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $s['day_chars'] ), number_format_i18n( (int) $set['cap'] ) ) );
+		/* translators: 1: batches, 2: rows */
+		self::kv( __( 'Done so far', 'ai-translator-for-translatepress' ), sprintf( __( '%1$s batches, %2$s rows translated again and passing the checks', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $s['batches'] ), number_format_i18n( (int) $s['rows_ok'] ) ) );
+		if ( $s['left']['structured'] || $s['left']['no_page'] ) {
+			/* translators: 1: structured data rows, 2: rows without a known page */
+			self::kv( __( 'Left for a person', 'ai-translator-for-translatepress' ), sprintf( __( '%1$s structured data, %2$s not on a page of the queue (menus, widgets, pages not in the page list)', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $s['left']['structured'] ), number_format_i18n( (int) $s['left']['no_page'] ) ) );
+		}
+		echo '</tbody></table><p>';
+		if ( $s['status'] === 'running' ) {
+			self::button( 'autofix_stop', __( 'Stop auto repair', 'ai-translator-for-translatepress' ), 'secondary' );
+			echo '</p><p><button type="button" class="button" id="aitp-autofix-live" data-label-stop="' . esc_attr__( 'Stop advancing from this page', 'ai-translator-for-translatepress' ) . '">' . esc_html__( 'Advance the auto repair from this page now', 'ai-translator-for-translatepress' ) . '</button> <span id="aitp-autofix-live-status" class="description"></span>';
+		} elseif ( $set['enabled'] ) {
+			$q = $s['batch'] ? __( 'Resume the auto repair with the current batch?', 'ai-translator-for-translatepress' ) : __( 'Start the batch auto repair? Each batch is backed up first and can be rolled back.', 'ai-translator-for-translatepress' );
+			echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline-block;" onsubmit="return confirm(this.dataset.q)" data-q="' . esc_attr( $q ) . '"><input type="hidden" name="action" value="aitp_audit"><input type="hidden" name="do" value="autofix_start">';
+			wp_nonce_field( 'aitp_audit' );
+			echo '<button class="button button-primary">' . esc_html( $s['batch'] ? __( 'Resume auto repair', 'ai-translator-for-translatepress' ) : __( 'Start auto repair', 'ai-translator-for-translatepress' ) ) . '</button></form>';
+		}
+		echo '</p>';
+
+		if ( $s['history'] ) {
+			echo '<table class="widefat striped" style="max-width:1100px;"><thead><tr><th>' . esc_html__( 'Time', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Language', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Reset', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Pass the checks', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Still wrong', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Still untranslated', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Changed by a person', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Pages', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Characters', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Result', 'ai-translator-for-translatepress' ) . '</th></tr></thead><tbody>';
+			foreach ( array_slice( $s['history'], 0, 20 ) as $h ) {
+				$res = $h['result'] === 'ok' ? __( 'OK', 'ai-translator-for-translatepress' ) : self::autofix_reason( $h['result'] );
+				echo '<tr><td>' . esc_html( wp_date( 'Y-m-d H:i', (int) $h['time'] ) ) . '</td><td>' . esc_html( $h['lang'] ) . '</td><td>' . esc_html( number_format_i18n( (int) $h['reset'] ) ) . '</td><td>' . esc_html( number_format_i18n( (int) $h['ok'] ) ) . '</td><td>' . esc_html( number_format_i18n( (int) $h['wrong'] ) . ( $h['english'] ? ' (' . __( 'English', 'ai-translator-for-translatepress' ) . ': ' . number_format_i18n( (int) $h['english'] ) . ')' : '' ) ) . '</td><td>' . esc_html( number_format_i18n( (int) $h['untranslated'] ) ) . '</td><td>' . esc_html( number_format_i18n( (int) $h['manual'] + (int) $h['gone'] ) ) . '</td><td>' . esc_html( number_format_i18n( (int) $h['pages'] ) ) . '</td><td>' . esc_html( number_format_i18n( (int) $h['chars'] ) ) . '</td><td>' . ( $h['result'] === 'ok' ? '' : '<strong>' ) . esc_html( $res ) . ( $h['result'] === 'ok' ? '' : '</strong>' ) . '</td></tr>';
+			}
+			echo '</tbody></table>';
+			echo '<p class="description">' . esc_html__( 'Rows still wrong after a batch are listed under Findings with the note "still wrong after the auto repair" and are not picked again. To undo a batch, use "Roll back" under Repairs (batches of the auto repair are marked there).', 'ai-translator-for-translatepress' ) . '</p>';
+		}
 	}
 
 	/** @param array $set Settings. */
@@ -278,7 +394,8 @@ final class AITP_Admin_Audit {
 			if ( ! empty( $info['rolled_back'] ) ) {
 				$rolled = wp_date( 'Y-m-d H:i', (int) $info['rolled_back'] ) . ' — ' . number_format_i18n( (int) $info['restored'] ) . ( ! empty( $info['restore_skipped'] ) ? ' (' . self::skipped_text( $info['restore_skipped'] ) . ')' : '' );
 			}
-			echo '<tr><td>' . esc_html( wp_date( 'Y-m-d H:i:s', (int) $info['time'] ) ) . '</td><td>' . esc_html( number_format_i18n( (int) $info['reset'] ) ) . '</td><td>' . esc_html( self::skipped_text( (array) $info['skipped'] ) ) . '</td><td>' . esc_html( number_format_i18n( (int) $info['pages'] ) ) . '</td><td>' . esc_html( $rolled ) . '</td><td>';
+			$auto = ! empty( $info['auto'] ) ? ' · ' . __( 'auto repair', 'ai-translator-for-translatepress' ) . ( isset( $info['auto_result'] ) && $info['auto_result'] !== 'ok' ? ' (' . self::autofix_reason( $info['auto_result'] ) . ')' : '' ) : '';
+			echo '<tr><td>' . esc_html( wp_date( 'Y-m-d H:i:s', (int) $info['time'] ) . $auto ) . '</td><td>' . esc_html( number_format_i18n( (int) $info['reset'] ) ) . '</td><td>' . esc_html( self::skipped_text( (array) $info['skipped'] ) ) . '</td><td>' . esc_html( number_format_i18n( (int) $info['pages'] ) ) . '</td><td>' . esc_html( $rolled ) . '</td><td>';
 			echo '<a class="button" href="' . esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=aitp_audit_backup&batch=' . rawurlencode( (string) $id ) ), 'aitp_audit_backup' ) ) . '">' . esc_html__( 'Download backup', 'ai-translator-for-translatepress' ) . '</a> ';
 			if ( empty( $info['rolled_back'] ) ) {
 				echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline-block;" onsubmit="return confirm(' . esc_attr( wp_json_encode( __( 'Put the old translations of this repair back? Rows translated manually since then are kept.', 'ai-translator-for-translatepress' ) ) ) . ');"><input type="hidden" name="action" value="aitp_audit"><input type="hidden" name="do" value="rollback"><input type="hidden" name="batch" value="' . esc_attr( (string) $id ) . '">';
@@ -466,6 +583,26 @@ final class AITP_Admin_Audit {
 				/* translators: %s: number of rows */
 				$msg = sprintf( __( '%s rows removed from the accepted list.', 'ai-translator-for-translatepress' ), number_format_i18n( $n ) );
 				break;
+			case 'autofix_settings':
+				$in  = isset( $_POST['x'] ) && is_array( $_POST['x'] ) ? map_deep( wp_unslash( $_POST['x'] ), 'sanitize_text_field' ) : array();
+				$out = AITP_Autofix::save_settings( $in );
+				$msg = $out['enabled'] ? __( 'Saved. The auto repair is allowed; start it below.', 'ai-translator-for-translatepress' ) : __( 'Saved. The auto repair is off.', 'ai-translator-for-translatepress' );
+				break;
+			case 'autofix_start':
+				$why = AITP_Autofix::start();
+				if ( $why !== '' ) {
+					/* translators: %s: reason */
+					$msg  = sprintf( __( 'The auto repair cannot start: %s.', 'ai-translator-for-translatepress' ), self::autofix_reason( $why ) );
+					$type = 'warning';
+					break;
+				}
+				AITP_Autofix::step( 15 );
+				$msg = __( 'Auto repair started. It continues in the background (WP-Cron); you can also advance it from this page.', 'ai-translator-for-translatepress' );
+				break;
+			case 'autofix_stop':
+				AITP_Autofix::stop( 'manual' );
+				$msg = __( 'Auto repair stopped. The current batch stays as it is: roll it back under Repairs, or resume later.', 'ai-translator-for-translatepress' );
+				break;
 			case 'settings':
 				$in = isset( $_POST['a'] ) && is_array( $_POST['a'] ) ? wp_unslash( $_POST['a'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- only checked for presence.
 				AITP_Audit::save_settings( $in );
@@ -491,6 +628,39 @@ final class AITP_Admin_Audit {
 		header( 'Content-Disposition: attachment; filename="aitp-repair-' . $batch . '.json"' );
 		echo wp_json_encode( array( 'batch' => $batch, 'rows' => AITP_Audit::backup_rows( $batch ) ), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT );
 		exit;
+	}
+
+	/** One auto repair step from the open admin page (AJAX). */
+	public static function ajax_autofix_step() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( null, 403 );
+		}
+		check_ajax_referer( 'aitp_autofix_step' );
+		$r = AITP_Autofix::step( 25 );
+		$s = $r['state'];
+		/* translators: 1: batches, 2: rows */
+		$text = sprintf( __( '%1$s batches done, %2$s rows passing', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $s['batches'] ), number_format_i18n( (int) $s['rows_ok'] ) );
+		if ( $s['batch'] ) {
+			/* translators: 1: pages visited, 2: pages, 3: round */
+			$text .= ' — ' . sprintf( __( 'current batch: page %1$s of %2$s, round %3$s', 'ai-translator-for-translatepress' ), number_format_i18n( min( (int) $s['batch']['ui'], count( $s['batch']['urls'] ) ) ), number_format_i18n( count( $s['batch']['urls'] ) ), number_format_i18n( (int) $s['batch']['pass'] ) );
+		}
+		if ( $s['status'] === 'stopped' ) {
+			$text .= ' — ' . __( 'stopped', 'ai-translator-for-translatepress' ) . ': ' . self::autofix_reason( $s['reason'] );
+		} elseif ( $s['status'] === 'done' ) {
+			$text .= ' — ' . __( 'finished', 'ai-translator-for-translatepress' );
+		} elseif ( $r['result'] === 'waiting' ) {
+			$text .= ' — ' . self::autofix_reason( $s['wait_reason'] );
+		} elseif ( $r['result'] === 'busy' ) {
+			$text .= ' — ' . __( 'another run is in progress', 'ai-translator-for-translatepress' );
+		}
+		wp_send_json_success(
+			array(
+				'result' => $r['result'],
+				'wait'   => min( 60, max( 2, (int) $r['wait'] ) ),
+				'text'   => $text,
+				'stop'   => in_array( $s['status'], array( 'stopped', 'done', 'idle' ), true ),
+			)
+		);
 	}
 
 	/** One scan step from the open admin page (AJAX). */

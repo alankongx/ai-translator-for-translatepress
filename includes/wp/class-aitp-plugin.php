@@ -39,6 +39,7 @@ final class AITP_Plugin {
 		AITP_Updater::instance()->boot();
 		AITP_Queue::instance()->boot();
 		AITP_Audit::boot();
+		AITP_Autofix::boot();
 		if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( 'WP_CLI' ) ) {
 			require_once AITP_DIR . 'includes/wp/class-aitp-cli.php';
 			WP_CLI::add_command( 'aitp', 'AITP_CLI' );
@@ -163,5 +164,6 @@ final class AITP_Plugin {
 		wp_clear_scheduled_hook( 'aitp_daily' );
 		wp_clear_scheduled_hook( AITP_Queue::CRON );
 		wp_clear_scheduled_hook( AITP_Audit::CRON );
+		wp_clear_scheduled_hook( AITP_Autofix::CRON );
 	}
 }

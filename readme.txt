@@ -4,7 +4,7 @@ Tags: translatepress, translation, gemini, openai, multilingual
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.4.0
+Stable tag: 0.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,8 +63,9 @@ Translations saved earlier by another engine may be misaligned, left in English 
 * Rollback per batch restores the backed-up text exactly; rows translated by hand in between are kept.
 * Accepted list: translations people have already reviewed (for example rows fixed in an earlier clean-up) can be imported by ID, original and text. The check still lists them, but they are never counted as open and never repaired while their text is unchanged.
 * Repair is refused, and the backfill queue waits, while TranslatePress uses another engine or automatic translation is off — otherwise another engine would translate the reset rows.
+* Batch auto repair (off by default): works through the "wrong" findings of page text one batch at a time (20–500 rows, one language at a time). Each batch is backed up and reset, only the pages that show those strings are visited until they are translated again, the new translations are checked, and the next batch starts only if the batch came out clean. It stops by itself when more than 5% of a batch is still wrong or untranslated, when English is stored as a translation, on provider errors or failed page loads, when TranslatePress stops using this engine, or when a batch is rolled back. It has its own daily character cap (default: half the TranslatePress limit). "Probably misplaced" and "check meaning" findings, the accepted list, manual translations, structured data and interface text are never touched; rows still wrong afterwards are left for a person. Every batch can be rolled back.
 * Human translations (status "manually translated") are never listed, changed or restored over. No table is emptied, no row deleted, at most 500 rows per action.
-* WP-CLI: `wp aitp audit scan|status|list|repair|rollback|import|ai-check|dismiss`.
+* WP-CLI: `wp aitp audit scan|status|list|repair|rollback|import|ai-check|dismiss`, `wp aitp autofix status|settings|start|stop|run`.
 
 = Security =
 
@@ -114,6 +115,9 @@ Not by itself. The engine only translates strings TranslatePress sends to it, wh
 Updates come from the GitHub releases of this plugin. To turn update checks off: `add_filter( 'aitp_github_updates', '__return_false' );`
 
 == Changelog ==
+
+= 0.5.0 =
+* Batch auto repair (off by default) on the Audit & repair page and `wp aitp autofix`: batch by batch, checked after each batch, stops by itself on failures; every batch can be rolled back.
 
 = 0.4.0 =
 * Accepted list for reviewed translations (admin page and `wp aitp audit protect|unprotect|protected`): listed by the check, never repaired.

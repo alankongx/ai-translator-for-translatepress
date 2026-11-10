@@ -1122,6 +1122,215 @@ final class AITP_Audit {
 	}
 
 	/* -------------------------------------------------------------------------------------
+	 * Helpers of the batch auto repair (AITP_Autofix).
+	 * ----------------------------------------------------------------------------------- */
+
+	/**
+	 * Add fields to the stored info of a repair batch.
+	 *
+	 * @param int   $batch Batch id.
+	 * @param array $extra Fields.
+	 */
+	public static function tag_batch( $batch, array $extra ) {
+		$b = self::batches();
+		if ( isset( $b[ $batch ] ) ) {
+			self::save_batch( $batch, array_merge( $b[ $batch ], $extra ) );
+		}
+	}
+
+	/**
+	 * @return string TranslatePress table linking strings to the posts they appear on ('' if none).
+	 */
+	private static function meta_table() {
+		$q    = self::tp_query();
+		$meta = $q && method_exists( $q, 'get_table_name_for_original_meta' ) ? (string) $q->get_table_name_for_original_meta() : '';
+		return $meta !== '' && self::exists( $meta ) ? $meta : '';
+	}
+
+	/**
+	 * Posts of one language that show these strings and are in the queue's page list.
+	 *
+	 * @param string $lang         Language.
+	 * @param int[]  $original_ids TranslatePress original ids.
+	 * @return array<int,int[]> original id => post ids (only strings with at least one such post).
+	 */
+	private static function queued_posts( $lang, array $original_ids ) {
+		global $wpdb;
+		$meta = self::meta_table();
+		$ids  = array_values( array_unique( array_filter( array_map( 'intval', $original_ids ) ) ) );
+		$out  = array();
+		if ( $meta === '' || ! $ids ) {
+			return $out;
+		}
+		$queue = AITP_Schema::table( 'queue' );
+		foreach ( array_chunk( $ids, 500 ) as $chunk ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+			$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT DISTINCT m.original_id, q.object_id FROM `$meta` m JOIN $queue q ON q.object_type = 'post' AND q.object_id = m.meta_value AND q.lang = %s WHERE m.meta_key = 'post_parent_id' AND m.original_id IN (" . implode( ',', $chunk ) . ')', $lang ), ARRAY_A );
+			foreach ( $rows as $r ) {
+				$out[ (int) $r['original_id'] ][] = (int) $r['object_id'];
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * The next batch for the auto repair: open "wrong" findings of page text in one
+	 * language (the first of $langs that has any), whose rows are on a page the queue
+	 * knows, so the batch can be translated again by visiting just those pages.
+	 * Structured data and strings without such a page are left for a person.
+	 *
+	 * @param string[] $langs Languages in order (empty = all).
+	 * @param int      $limit Rows.
+	 * @return array{lang:string,ids:int[],structured:int,no_page:int} ids: finding ids.
+	 */
+	public static function autofix_pick( array $langs, $limit ) {
+		global $wpdb;
+		$audit = AITP_Schema::table( 'audit' );
+		$out   = array( 'lang' => '', 'ids' => array(), 'structured' => 0, 'no_page' => 0 );
+		if ( ! $langs ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$langs = (array) $wpdb->get_col( "SELECT DISTINCT lang FROM $audit WHERE state = 'open' AND severity = 'error' AND kind = 'dictionary' AND NOT FIND_IN_SET('auto_retried', codes) ORDER BY lang" );
+		}
+		foreach ( $langs as $lang ) {
+			$t = self::table_for( 'dictionary', $lang );
+			if ( ! $t ) {
+				continue;
+			}
+			$last = 0;
+			$skip = array( 'structured' => 0, 'no_page' => 0 );
+			while ( count( $out['ids'] ) < $limit ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$list = (array) $wpdb->get_results( $wpdb->prepare( "SELECT id, row_id FROM $audit WHERE state = 'open' AND severity = 'error' AND kind = 'dictionary' AND lang = %s AND id > %d AND NOT FIND_IN_SET('auto_retried', codes) ORDER BY id LIMIT 1000", $t['lang'], $last ), ARRAY_A );
+				if ( ! $list ) {
+					break;
+				}
+				$last  = (int) end( $list )['id'];
+				$cur   = self::rows( $t, wp_list_pluck( $list, 'row_id' ) );
+				$posts = self::queued_posts( $t['lang'], wp_list_pluck( $cur, 'original_id' ) );
+				foreach ( $list as $f ) {
+					$r = isset( $cur[ (int) $f['row_id'] ] ) ? $cur[ (int) $f['row_id'] ] : null;
+					if ( ! $r ) {
+						continue; // Gone: repair() will mark it.
+					}
+					if ( AITP_Text::is_structured_data( (string) $r['original'] ) ) {
+						$skip['structured']++;
+						continue;
+					}
+					if ( empty( $posts[ (int) $r['original_id'] ] ) ) {
+						$skip['no_page']++;
+						continue;
+					}
+					if ( count( $out['ids'] ) < $limit ) {
+						$out['ids'][] = (int) $f['id'];
+					}
+				}
+			}
+			if ( $out['ids'] ) {
+				$out['lang']       = $t['lang'];
+				$out['structured'] = $skip['structured'];
+				$out['no_page']    = $skip['no_page'];
+				return $out;
+			}
+			$out['structured'] += $skip['structured'];
+			$out['no_page']    += $skip['no_page'];
+		}
+		return $out;
+	}
+
+	/**
+	 * Translated addresses of the pages that show the rows of a repair batch.
+	 *
+	 * @param int $batch Batch id.
+	 * @return array<int,array{url:string,lang:string}>
+	 */
+	public static function batch_urls( $batch ) {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$rows = (array) $wpdb->get_results( $wpdb->prepare( 'SELECT kind, lang, row_id FROM ' . AITP_Schema::table( 'repair' ) . ' WHERE batch = %d', (int) $batch ), ARRAY_A );
+		$by   = array();
+		foreach ( $rows as $b ) {
+			$by[ $b['kind'] . '|' . $b['lang'] ][] = (int) $b['row_id'];
+		}
+		$out = array();
+		foreach ( $by as $k => $ids ) {
+			list( $kind, $lang ) = explode( '|', $k );
+			$t                   = self::table_for( $kind, $lang );
+			if ( ! $t || $kind !== 'dictionary' ) {
+				continue;
+			}
+			$posts = array();
+			foreach ( self::queued_posts( $lang, wp_list_pluck( self::rows( $t, $ids ), 'original_id' ) ) as $p ) {
+				$posts = array_merge( $posts, $p );
+			}
+			foreach ( AITP_Queue::urls_for( $lang, array_values( array_unique( $posts ) ) ) as $u ) {
+				$out[] = array( 'url' => (string) $u, 'lang' => $lang );
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * State of the rows of a repair batch now.
+	 *
+	 * With $judge the new translations are checked with the audit rules and recorded as
+	 * findings again when still wrong (so they show up in the list and are never picked
+	 * by the auto repair twice without a new check).
+	 *
+	 * @param int  $batch Batch id.
+	 * @param bool $judge Check new translations.
+	 * @return array{reset:int,ok:int,wrong:int,english:int,untranslated:int,manual:int,gone:int}
+	 */
+	public static function batch_check( $batch, $judge ) {
+		global $wpdb;
+		$out = array( 'reset' => 0, 'ok' => 0, 'wrong' => 0, 'english' => 0, 'untranslated' => 0, 'manual' => 0, 'gone' => 0 );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$rows = (array) $wpdb->get_results( $wpdb->prepare( 'SELECT kind, lang, row_id, original FROM ' . AITP_Schema::table( 'repair' ) . ' WHERE batch = %d', (int) $batch ), ARRAY_A );
+		$by   = array();
+		foreach ( $rows as $b ) {
+			$by[ $b['kind'] . '|' . $b['lang'] ][] = $b;
+		}
+		$v    = $judge ? new AITP_Validator( AITP_Settings::rules() ) : null;
+		$scan = (int) self::state()['scan'];
+		foreach ( $by as $k => $list ) {
+			list( $kind, $lang ) = explode( '|', $k );
+			$t                   = self::table_for( $kind, $lang );
+			$cur                 = $t ? self::rows( $t, wp_list_pluck( $list, 'row_id' ) ) : array();
+			foreach ( $list as $b ) {
+				$out['reset']++;
+				$r = isset( $cur[ (int) $b['row_id'] ] ) ? $cur[ (int) $b['row_id'] ] : null;
+				if ( ! $r || (string) $r['original'] !== (string) $b['original'] ) {
+					$out['gone']++;
+					continue;
+				}
+				if ( (int) $r['status'] === 2 ) {
+					$out['manual']++;
+					continue;
+				}
+				if ( (int) $r['status'] !== 1 || $r['translated'] === null || (string) $r['translated'] === '' ) {
+					$out['untranslated']++;
+					continue;
+				}
+				if ( ! $judge ) {
+					$out['ok']++;
+					continue;
+				}
+				$f = AITP_Audit_Logic::check_row( $v, (string) $r['original'], $r['translated'], self::source_info( $kind ), AITP_Languages::info( $lang ) );
+				if ( $f && $f['severity'] === AITP_Audit_Logic::ERROR ) {
+					$out['wrong']++;
+					if ( AITP_Autofix_Logic::is_english( $f['codes'] ) ) {
+						$out['english']++;
+					}
+					$f['codes'][] = 'auto_retried'; // Not picked by the auto repair again; a person decides.
+					self::record( $t, $r, $f, 'scan', $scan );
+					continue;
+				}
+				$out['ok']++;
+			}
+		}
+		return $out;
+	}
+
+	/* -------------------------------------------------------------------------------------
 	 * Optional AI check.
 	 * ----------------------------------------------------------------------------------- */
 

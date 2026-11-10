@@ -576,14 +576,18 @@ final class AITP_Queue {
 	 * @return string '' or block reason.
 	 */
 	private static function budget_block( array $s, array $set ) {
-		$counter = 0;
+		return AITP_Queue_Logic::budget_block( (int) $s['day_bytes'], (int) $set['queue_cap'], self::tp_counter(), AITP_TP_Quota::limit(), (int) $set['reserve'] / 100 );
+	}
+
+	/** @return int Characters TranslatePress counted today. */
+	public static function tp_counter() {
 		if ( class_exists( 'TRP_Translate_Press' ) ) {
 			$logger = TRP_Translate_Press::get_trp_instance()->get_component( 'machine_translator_logger' );
 			if ( $logger && method_exists( $logger, 'get_current_counter' ) ) {
-				$counter = (int) $logger->get_current_counter();
+				return (int) $logger->get_current_counter();
 			}
 		}
-		return AITP_Queue_Logic::budget_block( (int) $s['day_bytes'], (int) $set['queue_cap'], $counter, AITP_TP_Quota::limit(), (int) $set['reserve'] / 100 );
+		return 0;
 	}
 
 	/** @return array|null Next due item. */

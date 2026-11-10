@@ -107,6 +107,12 @@ final class AITP_Admin {
 					'nonce' => wp_create_nonce( 'aitp_audit_step' ),
 					'error' => __( 'Request failed; trying again shortly.', 'ai-translator-for-translatepress' ),
 				)
+			) . ';window.aitpAutofix = ' . wp_json_encode(
+				array(
+					'ajax'  => admin_url( 'admin-ajax.php' ),
+					'nonce' => wp_create_nonce( 'aitp_autofix_step' ),
+					'error' => __( 'Request failed; trying again shortly.', 'ai-translator-for-translatepress' ),
+				)
 			) . ';',
 			'before'
 		);
@@ -619,6 +625,7 @@ final class AITP_Admin {
 			'control_chars'             => __( 'control characters', 'ai-translator-for-translatepress' ),
 			'no_translate_changed'      => __( 'text marked "do not translate" changed', 'ai-translator-for-translatepress' ),
 			'no_letters'                => __( 'no letters', 'ai-translator-for-translatepress' ),
+			'auto_retried'              => __( 'still wrong after the auto repair (left for a person)', 'ai-translator-for-translatepress' ),
 		);
 		if ( isset( $map[ $code ] ) ) {
 			return $map[ $code ];

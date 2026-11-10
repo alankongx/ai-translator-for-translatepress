@@ -11,3 +11,4 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 require_once __DIR__ . '/includes/wp/class-aitp-schema.php';
 AITP_Schema::uninstall();
 wp_clear_scheduled_hook( 'aitp_daily' );
+wp_clear_scheduled_hook( 'aitp_autofix_tick' );

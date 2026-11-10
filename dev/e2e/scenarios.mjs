@@ -524,6 +524,128 @@ const S = {
 		wp( 'eval', 'delete_option("aitp_audit_settings"); echo 1;' );
 	},
 
+	async autofix() {
+		// Batch auto repair: off by default, fixes "wrong" page text one batch at a time by
+		// visiting only those pages (queue stays paused), leaves everything else alone,
+		// stops by itself on failures or engine switches, batches roll back exactly.
+		const q = ( ...a ) => wp( 'aitp', 'queue', ...a );
+		const a = ( ...x ) => json( wp( 'aitp', 'audit', ...x ) );
+		const af = ( ...x ) => json( wp( 'aitp', 'autofix', ...x ) );
+		const afTry = ( ...x ) => { try { return wp( 'aitp', 'autofix', ...x ); } catch ( e ) { return 'ERR ' + String( e.stdout || '' ) + String( e.stderr || '' ).split( '\n' ).filter( ( l ) => ! /Container /.test( l ) ).join( ' ' ); } };
+		const seedc = ( ...x ) => json( wp( 'eval-file', '/e2e/audit-seed.php', ...x ) );
+		const eng = ( v ) => wp( 'eval', `$m = get_option('trp_machine_translation_settings'); $m['translation-engine'] = '${ v }'; update_option('trp_machine_translation_settings', $m); echo 1;` );
+		const engine0 = wp( 'eval', '$m = get_option("trp_machine_translation_settings"); echo $m["translation-engine"];' ).trim();
+		const key = ( k, l, id ) => `${ k }|${ l }|${ id }`;
+		const qstate = () => json( wp( 'eval', 'echo wp_json_encode(AITP_Queue::state());' ) );
+		const batches = () => json( wp( 'eval', 'echo wp_json_encode((object) AITP_Audit::batches());' ) );
+
+		await reset();
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings","aitp_autofix_state","aitp_autofix_settings","aitp_autofix_lock") as $o) delete_option($o); echo 1;' );
+		q( 'sync' );
+		q( 'start' );
+		json( q( 'run', '--ignore-rate', '--minutes=8' ) );
+		q( 'pause' );
+		seedc( 'seed' );
+		const seed = seedc( 'dump' );
+		a( 'scan', '--minutes=5' );
+		const found = a( 'list', '--limit=5000', '--state=all' ).rows;
+		const sev = Object.fromEntries( found.map( ( f ) => [ key( f.kind, f.lang, f.row_id ), f.severity ] ) );
+		const errRows = seed.rows.filter( ( r ) => r.kind === 'dictionary' && r.type !== 'manual' && r.type !== 'structured' && sev[ key( r.kind, r.lang, r.id ) ] === 'error' );
+		const otherRows = seed.rows.filter( ( r ) => r.type !== 'manual' && ! errRows.includes( r ) );
+		const batchesBefore = Object.keys( batches() ).length;
+
+		// 1. Off by default.
+		const refused = afTry( 'start' );
+		af( 'settings', '--enabled=1', '--batch=20' );
+
+		// 2. Run until there is nothing left it may repair.
+		const started = afTry( 'start' );
+		const tp0 = state().tp_counter;
+		const t0 = Date.now();
+		const run = af( 'run', '--ignore-rate', '--minutes=15' );
+		const secs = ( Date.now() - t0 ) / 1000;
+		let st = run.state;
+		let chk = seedc( 'check' );
+		const byKey = ( rows ) => Object.fromEntries( rows.map( ( r ) => [ key( r.kind, r.lang, r.id ), r ] ) );
+		let cur = byKey( chk.rows );
+		const fixed = errRows.filter( ( r ) => cur[ key( r.kind, r.lang, r.id ) ].is_good );
+		const others = otherRows.filter( ( r ) => ! ( cur[ key( r.kind, r.lang, r.id ) ].is_bad && cur[ key( r.kind, r.lang, r.id ) ].status === 1 ) );
+		const bAll = batches();
+		const autoIds = Object.keys( bAll ).filter( ( id ) => bAll[ id ].auto );
+		record( 'autofix: repairs wrong page text batch by batch, leaves the rest', {
+			refused_before_switch: refused.slice( 0, 120 ), started: started.slice( 0, 120 ), result: run.result, status: st.status, reason: st.reason, secs,
+			wrong_rows: errRows.length, fixed: fixed.length, left: st.left, batches: st.batches, history: st.history.map( ( h ) => [ h.lang, h.reset, h.ok, h.wrong, h.untranslated, h.result ] ),
+			other_rows_touched: others.map( ( r ) => r.type + ':' + r.lang ), tp_chars: state().tp_counter - tp0, queue: qstate().status,
+		}, {
+			off_by_default: /disabled/.test( refused ),
+			finished: st.status === 'done',
+			every_batch_ok: st.history.length > 0 && st.history.every( ( h ) => h.result === 'ok' ),
+			wrong_rows_fixed_or_reported: fixed.length + st.left.no_page >= errRows.length && fixed.length > 0,
+			suspects_gettext_structured_untouched: others.length === 0,
+			manual_untouched: chk.manual_sum === seed.manual_sum,
+			batches_marked_auto: autoIds.length === st.history.length && Object.keys( bAll ).length === batchesBefore + st.history.length,
+			structured_left_for_a_person: st.left.structured >= 1,
+			queue_stayed_paused: qstate().status === 'stopped',
+		} );
+
+		// 3. Roll back one auto batch: exact.
+		const frEntry = st.history.find( ( h ) => h.lang === 'fr_FR' ) || st.history[ 0 ];
+		if ( ! frEntry ) return;
+		const rb = a( 'rollback', String( frEntry.batch ) );
+		chk = seedc( 'check' );
+		cur = byKey( chk.rows );
+		const frErr = errRows.filter( ( r ) => r.lang === frEntry.lang );
+		const backBad = frErr.filter( ( r ) => cur[ key( r.kind, r.lang, r.id ) ].is_bad && cur[ key( r.kind, r.lang, r.id ) ].status === 1 );
+		record( 'autofix: a batch rolls back exactly', { batch: frEntry.batch, rollback: rb, rows: frErr.length, back_to_old_text: backBad.length }, {
+			restored_all: rb.restored === frEntry.reset && frErr.filter( ( r ) => fixed.includes( r ) ).every( ( r ) => backBad.includes( r ) ),
+		} );
+
+		// 4. Engine switched to another plugin: refuses to start, and a running repair stops.
+		eng( 'hhgfotr_gemini' );
+		const refused2 = afTry( 'start' );
+		eng( engine0 );
+		af( 'settings', '--enabled=1', '--batch=20', `--languages=${ frEntry.lang }` );
+		afTry( 'start' );
+		eng( 'hhgfotr_gemini' );
+		const nb = Object.keys( batches() ).length;
+		const run2 = af( 'run', '--ignore-rate', '--minutes=1' );
+		const nb2 = Object.keys( batches() ).length;
+		eng( engine0 );
+		record( 'autofix: stops when TranslatePress uses another engine', { refused: refused2.slice( 0, 120 ), status: run2.state.status, reason: run2.state.reason, new_batches: nb2 - nb }, {
+			start_refused: /engine_not_selected/.test( refused2 ),
+			running_stopped: run2.state.status === 'stopped' && run2.state.reason === 'engine_not_selected',
+			nothing_reset: nb2 === nb,
+		} );
+
+		// 5. The provider answers in English: the batch fails and the auto repair stops by itself.
+		await mock( { mode: 'english', target: '' } );
+		wp( 'eval', 'global $wpdb; $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_cache"); $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_failures"); echo 1;' );
+		const tp1 = state().tp_counter;
+		afTry( 'start' );
+		const run3 = af( 'run', '--ignore-rate', '--minutes=8' );
+		await mock( { mode: 'ok' } );
+		st = run3.state;
+		const b3 = batches();
+		const newAuto = Object.keys( b3 ).filter( ( id ) => b3[ id ].auto && ! autoIds.includes( id ) );
+		chk = seedc( 'check' );
+		cur = byKey( chk.rows );
+		const englishSaved = seed.rows.filter( ( r ) => r.lang === frEntry.lang && r.type !== 'manual' && cur[ key( r.kind, r.lang, r.id ) ].status === 1 && ! cur[ key( r.kind, r.lang, r.id ) ].is_bad && ! cur[ key( r.kind, r.lang, r.id ) ].is_good );
+		const rb3 = newAuto.length ? a( 'rollback', newAuto[ 0 ] ) : { restored: 0 };
+		chk = seedc( 'check' );
+		cur = byKey( chk.rows );
+		const restored3 = frErr.filter( ( r ) => fixed.includes( r ) && cur[ key( r.kind, r.lang, r.id ) ].is_bad && cur[ key( r.kind, r.lang, r.id ) ].status === 1 );
+		record( 'autofix: stops by itself when a batch fails', { status: st.status, reason: st.reason, history: st.history.slice( 0, 1 ).map( ( h ) => [ h.reset, h.ok, h.wrong, h.untranslated, h.result, h.rate ] ), new_batches: newAuto.length, other_saved: englishSaved.length, rollback: rb3, tp_chars: state().tp_counter - tp1 }, {
+			stopped_by_itself: st.status === 'stopped' && ( st.reason === 'too_many_failures' || st.reason.startsWith( 'provider_' ) ),
+			only_one_batch: newAuto.length === 1,
+			no_english_saved: englishSaved.length === 0,
+			rolled_back_exactly: rb3.restored > 0 && restored3.length === frErr.filter( ( r ) => fixed.includes( r ) ).length,
+		} );
+
+		af( 'settings', '--enabled=0' );
+		wp( 'eval', 'foreach (array("aitp_autofix_state","aitp_autofix_settings","aitp_audit_settings") as $o) delete_option($o); echo 1;' );
+		seedc( 'restore-gettext' );
+	},
+
 	async openai() {
 		await reset();
 		wp( 'eval-file', '/e2e/configure.php', 'openai' );

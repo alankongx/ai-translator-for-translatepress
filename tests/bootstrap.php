@@ -22,6 +22,7 @@ foreach ( array(
 	'core/class-aitp-translator.php',
 	'core/class-aitp-queue-logic.php',
 	'core/class-aitp-audit-logic.php',
+	'core/class-aitp-autofix-logic.php',
 	'core/class-aitp-pair-checker.php',
 	'providers/class-aitp-provider.php',
 	'providers/class-aitp-provider-gemini.php',

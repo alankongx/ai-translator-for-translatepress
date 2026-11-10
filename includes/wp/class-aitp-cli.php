@@ -2,6 +2,7 @@
 /**
  * WP-CLI: wp aitp queue <sync|start|pause|status|run|retry|clear>
  *         wp aitp audit <scan|status|list|repair|rollback|import|ai-check|dismiss>
+ *         wp aitp autofix <status|settings|start|stop|run>
  *
  * @package AI_Translator_For_TranslatePress
  */
@@ -202,6 +203,93 @@ final class AITP_CLI {
 			case 'status':
 			default:
 				WP_CLI::log( wp_json_encode( array( 'state' => AITP_Audit::state(), 'counts' => AITP_Audit::counts(), 'batches' => AITP_Audit::batches() ), JSON_PRETTY_PRINT ) );
+		}
+	}
+
+	/**
+	 * Batch auto repair.
+	 *
+	 * ## OPTIONS
+	 *
+	 * <action>
+	 * : status | settings | start | stop | run
+	 *
+	 * [--enabled=<0|1>]
+	 * : For "settings": allow the auto repair.
+	 *
+	 * [--languages=<langs>]
+	 * : For "settings": comma separated (empty = all).
+	 *
+	 * [--batch=<n>]
+	 * : For "settings": rows per batch (20-500).
+	 *
+	 * [--cap=<n>]
+	 * : For "settings": characters per day.
+	 *
+	 * [--minutes=<minutes>]
+	 * : For "run": how long to work (default 10).
+	 *
+	 * [--ignore-rate]
+	 * : For "run": ignore the pages-per-minute limit (testing).
+	 *
+	 * ## EXAMPLES
+	 *
+	 *     wp aitp autofix settings --enabled=1 --languages=de_DE --batch=100
+	 *     wp aitp autofix start
+	 *     wp aitp autofix run --minutes=30
+	 *     wp aitp autofix stop
+	 *
+	 * @param array $args  Positional.
+	 * @param array $assoc Named.
+	 */
+	public function autofix( $args, $assoc ) {
+		$action = isset( $args[0] ) ? $args[0] : 'status';
+		switch ( $action ) {
+			case 'settings':
+				$in = AITP_Autofix::settings();
+				if ( isset( $assoc['enabled'] ) ) {
+					$in['enabled'] = (bool) (int) $assoc['enabled'];
+				}
+				if ( isset( $assoc['languages'] ) ) {
+					$in['languages'] = array_filter( explode( ',', (string) $assoc['languages'] ) );
+				}
+				foreach ( array( 'batch', 'cap' ) as $k ) {
+					if ( isset( $assoc[ $k ] ) ) {
+						$in[ $k ] = (int) $assoc[ $k ];
+					}
+				}
+				WP_CLI::log( wp_json_encode( AITP_Autofix::save_settings( $in ) ) );
+				break;
+			case 'start':
+				$why = AITP_Autofix::start();
+				if ( $why !== '' ) {
+					WP_CLI::error( 'Cannot start: ' . $why );
+				}
+				WP_CLI::success( 'Auto repair started.' );
+				break;
+			case 'stop':
+				AITP_Autofix::stop( 'manual' );
+				WP_CLI::success( 'Auto repair stopped.' );
+				break;
+			case 'run':
+				if ( ! empty( $assoc['ignore-rate'] ) ) {
+					add_filter( 'option_' . AITP_Queue::SETTINGS, array( __CLASS__, 'no_rate' ) );
+					add_filter( 'default_option_' . AITP_Queue::SETTINGS, array( __CLASS__, 'no_rate' ) );
+				}
+				$end = time() + 60 * ( isset( $assoc['minutes'] ) ? max( 1, (int) $assoc['minutes'] ) : 10 );
+				do {
+					$r = AITP_Autofix::step( max( 20, min( 120, $end - time() ) ) );
+					if ( in_array( $r['result'], array( 'rate', 'busy' ), true ) && time() < $end ) {
+						sleep( max( 1, min( (int) $r['wait'], $end - time() ) ) );
+					}
+				} while ( in_array( $r['result'], array( 'running', 'time', 'rate', 'busy' ), true ) && time() < $end );
+				$s = $r['state'];
+				unset( $s['batch']['urls'] );
+				WP_CLI::log( wp_json_encode( array( 'result' => $r['result'], 'state' => $s ), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) );
+				break;
+			case 'status':
+			default:
+				WP_CLI::log( wp_json_encode( array( 'settings' => AITP_Autofix::settings(), 'state' => AITP_Autofix::state() ), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) );
 		}
 	}
 

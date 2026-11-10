@@ -1590,3 +1590,183 @@ msgstr "TranslatePress 仍在用 HHG 引擎（%s）翻译。AI Translator 已安
 
 msgid "Accepted list: %1$s rows read, %2$s added (%3$s of them found by their original text because the ID differs), %4$s already on the list. Not added — text differs from the site: %5$s, translated manually (protected anyway): %6$s, missing or unreadable: %7$s, original found more than once: %8$s."
 msgstr "已验收清单：读到 %1$s 行，加入 %2$s 行（其中 %3$s 行编号不同、按原文找到），已在清单里 %4$s 行。未加入——和网站当前文字不一致：%5$s，已人工翻译（本来就受保护）：%6$s，找不到或读不懂：%7$s，同一原文有多行：%8$s。"
+
+msgid "stopped by a person"
+msgstr "人工停止"
+
+msgid "the switch is off"
+msgstr "开关已关闭"
+
+msgid "TranslatePress is not using the AI Translator engine"
+msgstr "TranslatePress 现在用的不是 AI Translator 引擎"
+
+msgid "automatic translation is off in TranslatePress"
+msgstr "TranslatePress 的自动翻译已关闭"
+
+msgid "API key or model missing"
+msgstr "还没填 API 密钥或模型"
+
+msgid "run a full check first"
+msgstr "请先完整跑一次体检"
+
+msgid "a check is running; wait until it has finished"
+msgstr "体检正在进行，请等它跑完"
+
+msgid "more than 5% of the last batch is still wrong or untranslated"
+msgstr "上一批重翻后仍有超过 5% 是错的或没翻"
+
+msgid "English was stored as a translation in the last batch"
+msgstr "上一批有英文被存成了译文"
+
+msgid "pages of the batch could not be loaded (loopback, cache or server error)"
+msgstr "这一批的页面打不开（回环访问、缓存或服务器出错）"
+
+msgid "the current batch was rolled back"
+msgstr "当前这一批被回滚了"
+
+msgid "no page address found for the batch"
+msgstr "找不到这一批对应的页面地址"
+
+msgid "the AI provider is failing (engine paused)"
+msgstr "AI 接口持续出错（引擎已暂停）"
+
+msgid "daily character cap of the auto repair reached; continues tomorrow"
+msgstr "自动修复今天的字符上限已用完，明天继续"
+
+msgid "TranslatePress daily limit (minus the share kept for visitors) reached; continues tomorrow"
+msgstr "已到 TranslatePress 每日上限（扣除给访客预留的部分），明天继续"
+
+msgid "TranslatePress daily limit reached; continues tomorrow"
+msgstr "已到 TranslatePress 每日上限，明天继续"
+
+msgid "AI provider error: %s"
+msgstr "AI 接口出错：%s"
+
+msgid "Batch auto repair"
+msgstr "分批自动修复"
+
+msgid "Off by default. Works through \"wrong\" findings of page text one batch at a time: backs up and resets one batch, visits only the pages that show those strings until they are translated again, checks the new translations, and starts the next batch only when the batch came out clean. It stops by itself when more than 5% of a batch is still wrong or untranslated, when English is stored as a translation, on provider errors or failed page loads, when TranslatePress no longer uses this engine, or when a batch is rolled back. \"Probably misplaced\" and \"check meaning\" findings, the accepted list, manual translations, structured data and interface text are never touched. Every batch can be rolled back under \"Repairs\". Try a few batches by hand first."
+msgstr "默认关闭。按批处理页面文字里「错误」这一档：先备份并改回一批，只访问显示这些文字的页面直到重新翻好，再用体检规则检查新译文，这一批合格才开始下一批。遇到以下情况会自己停下：一批重翻后仍有超过 5% 是错的或没翻、有英文被存成译文、AI 接口出错或页面打不开、TranslatePress 不再用本引擎、某一批被回滚。「疑似错位」「待看意思」、已验收清单、人工翻译、结构化数据和界面文字（gettext）一律不碰。每一批都可以在「修复记录」里回滚。建议先手工小批试过几次再打开。"
+
+msgid "Switch"
+msgstr "开关"
+
+msgid "Allow the batch auto repair"
+msgstr "允许分批自动修复"
+
+msgid "None ticked = all languages, one language after another."
+msgstr "一个都不勾 = 所有语言，一种语言做完再做下一种。"
+
+msgid "Rows per batch"
+msgstr "每批条数"
+
+msgid "%1$s–%2$s; smaller batches stop sooner when something goes wrong."
+msgstr "%1$s–%2$s；批次越小，出问题时停得越早。"
+
+msgid "Characters per day"
+msgstr "每日字符上限"
+
+msgid "Own cap of the auto repair (default: half the TranslatePress daily limit). The TranslatePress limit and the share kept for visitors apply as well."
+msgstr "自动修复自己的上限（默认是 TranslatePress 每日上限的一半）。TranslatePress 的上限和给访客预留的部分同样生效。"
+
+msgid "not started"
+msgstr "未开始"
+
+msgid "finished — nothing left it may repair"
+msgstr "已完成——没有它可以修的了"
+
+msgid "Current batch"
+msgstr "当前批次"
+
+msgid "%1$s, %2$s rows — page %3$s of %4$s, round %5$s of %6$s"
+msgstr "%1$s，%2$s 行——第 %3$s / %4$s 页，第 %5$s / %6$s 轮"
+
+msgid "Characters today"
+msgstr "今天已用字符"
+
+msgid "Done so far"
+msgstr "已完成"
+
+msgid "%1$s batches, %2$s rows translated again and passing the checks"
+msgstr "%1$s 批，%2$s 行已重翻并通过检查"
+
+msgid "Left for a person"
+msgstr "留给人工处理"
+
+msgid "%1$s structured data, %2$s not on a page of the queue (menus, widgets, pages not in the page list)"
+msgstr "结构化数据 %1$s 行，不在补翻队列页面上的 %2$s 行（菜单、小工具、不在页面列表里的页面）"
+
+msgid "Stop auto repair"
+msgstr "停止自动修复"
+
+msgid "Advance the auto repair from this page now"
+msgstr "从本页立即推进自动修复"
+
+msgid "Resume the auto repair with the current batch?"
+msgstr "从当前这一批继续自动修复？"
+
+msgid "Start the batch auto repair? Each batch is backed up first and can be rolled back."
+msgstr "开始分批自动修复？每一批都会先备份，可以回滚。"
+
+msgid "Resume auto repair"
+msgstr "继续自动修复"
+
+msgid "Start auto repair"
+msgstr "开始自动修复"
+
+msgid "Pass the checks"
+msgstr "通过检查"
+
+msgid "Still wrong"
+msgstr "仍然错误"
+
+msgid "Still untranslated"
+msgstr "仍未翻译"
+
+msgid "Changed by a person"
+msgstr "被人改过"
+
+msgid "Pages"
+msgstr "页面数"
+
+msgid "Characters"
+msgstr "字符数"
+
+msgid "Result"
+msgstr "结果"
+
+msgid "OK"
+msgstr "合格"
+
+msgid "English"
+msgstr "英文"
+
+msgid "Rows still wrong after a batch are listed under Findings with the note \"still wrong after the auto repair\" and are not picked again. To undo a batch, use \"Roll back\" under Repairs (batches of the auto repair are marked there)."
+msgstr "一批做完后仍然错误的行，会在「体检结果」里标注「自动修复后仍然错误」，不会被再次挑中。要撤销某一批，到「修复记录」里点「回滚」（自动修复的批次在那里有标注）。"
+
+msgid "auto repair"
+msgstr "自动修复"
+
+msgid "Saved. The auto repair is allowed; start it below."
+msgstr "已保存。已允许自动修复，在下方点「开始」。"
+
+msgid "Saved. The auto repair is off."
+msgstr "已保存。自动修复已关闭。"
+
+msgid "The auto repair cannot start: %s."
+msgstr "自动修复无法开始：%s。"
+
+msgid "Auto repair started. It continues in the background (WP-Cron); you can also advance it from this page."
+msgstr "自动修复已开始，会在后台（WP-Cron）继续；也可以在本页手动推进。"
+
+msgid "Auto repair stopped. The current batch stays as it is: roll it back under Repairs, or resume later."
+msgstr "自动修复已停止。当前这一批保持原样：可以到「修复记录」里回滚，或者之后继续。"
+
+msgid "%1$s batches done, %2$s rows passing"
+msgstr "已完成 %1$s 批，%2$s 行通过"
+
+msgid "current batch: page %1$s of %2$s, round %3$s"
+msgstr "当前批次：第 %1$s / %2$s 页，第 %3$s 轮"
+
+msgid "still wrong after the auto repair (left for a person)"
+msgstr "自动修复后仍然错误（留给人工）"
