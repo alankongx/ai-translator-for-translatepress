@@ -33,6 +33,7 @@ final class AITP_Admin_Queue {
 			''                => '',
 			'redirect'        => __( 'page redirects elsewhere (not queued again)', 'ai-translator-for-translatepress' ),
 			'no_report'       => __( 'page answered without being processed (a page cache?)', 'ai-translator-for-translatepress' ),
+			'signature'       => __( 'internal visit signature not accepted (nothing was translated or saved)', 'ai-translator-for-translatepress' ),
 			'unreachable'     => __( 'the site could not reach its own page', 'ai-translator-for-translatepress' ),
 			'max_visits'      => __( 'still new strings after several visits; continues later', 'ai-translator-for-translatepress' ),
 			'strings_failing' => __( 'some strings keep failing; retried later', 'ai-translator-for-translatepress' ),

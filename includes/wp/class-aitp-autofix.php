@@ -392,6 +392,12 @@ final class AITP_Autofix {
 		$s['batch']['chars'] += (int) $v['sent'];
 		$s['batch']['next_at'] = time() + $gap;
 		$s['day_chars']      += (int) $v['sent'];
+		if ( $v['sig'] !== '' ) {
+			// The site refused the signed visit (nothing was translated): every page would.
+			self::save( $s );
+			self::stop( 'visit_signature' );
+			return 'stopped';
+		}
 		$ok_page               = $v['http'] >= 200 && $v['http'] < 300 && ! empty( $v['report'] );
 		if ( ! $ok_page ) {
 			$s['batch']['fails']++;

@@ -295,7 +295,7 @@ final class AITP_Pagemap {
 			'object_type' => (string) $item['object_type'],
 			'object_id'   => (int) $item['object_id'],
 			'http'        => (int) $v['http'],
-			'note'        => $ok ? '' : ( empty( $v['report'] ) && $v['http'] >= 200 && $v['http'] < 300 ? 'no_report' : 'http' ),
+			'note'        => $ok ? '' : ( $v['sig'] !== '' ? 'signature' : ( empty( $v['report'] ) && $v['http'] >= 200 && $v['http'] < 300 ? 'no_report' : 'http' ) ),
 			'mapped_at'   => current_time( 'mysql', true ),
 		);
 		if ( $ok ) {

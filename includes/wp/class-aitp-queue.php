@@ -717,7 +717,8 @@ final class AITP_Queue {
 	 * @param int    $seconds Time budget of the visit.
 	 * @param bool   $map     Only map the page: record the page-text rows it shows, with machine
 	 *                        translation and string saving switched off for that request.
-	 * @return array{http:int,report:bool,calls:int,translated:int,failed:int,sent:int,stop:string,ms:int,rows:int[],strings:int,unknown:int}
+	 * @return array{http:int,report:bool,calls:int,translated:int,failed:int,sent:int,stop:string,ms:int,rows:int[],strings:int,unknown:int,sig:string}
+	 *         sig: why the page refused the signature (format, expired, signature, replay), or ''.
 	 */
 	public static function visit( $url, $lang, $seconds, $map = false ) {
 		$nonce = bin2hex( random_bytes( 16 ) );
@@ -766,7 +767,14 @@ final class AITP_Queue {
 			'rows'       => array(),
 			'strings'    => 0,
 			'unknown'    => 0,
+			'sig'        => '',
 		);
+		// The page says when it did not accept the signature (format, expired, signature, replay).
+		$said = is_wp_error( $resp ) ? '' : (string) wp_remote_retrieve_header( $resp, self::HEADER );
+		if ( preg_match( '~^invalid:([a-z]{1,20})$~', $said, $m ) ) {
+			$out['sig'] = $m[1];
+			return $out;
+		}
 		// The page writes its report while shutting down; give it a moment if needed.
 		$key = 'aitp_warm_' . $nonce;
 		for ( $i = 0; $i < 6; $i++ ) {
@@ -835,9 +843,29 @@ final class AITP_Queue {
 			return;
 		}
 		$uri   = isset( $_SERVER['REQUEST_URI'] ) ? (string) $_SERVER['REQUEST_URI'] : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
-		$nonce = AITP_Queue_Logic::verify( self::secret(), $hdr, $uri, time() );
-		if ( $nonce === '' || get_transient( 'aitp_used_' . $nonce ) !== false ) {
-			return; // Invalid, expired or replayed: an ordinary page view.
+		$check = AITP_Queue_Logic::check( self::secret(), $hdr, $uri, time() );
+		$nonce = $check['nonce'];
+		if ( $nonce !== '' && get_transient( 'aitp_used_' . $nonce ) !== false ) {
+			$check['reason'] = 'replay';
+		}
+		if ( $check['reason'] !== '' ) {
+			// Marked as an internal visit but not verified (bad format, expired, wrong signature,
+			// replayed). Never an ordinary page view: no machine translation by any engine, no
+			// string saving, no page cache, and the reason goes back to the sender.
+			add_filter( 'trp_machine_translator_is_available', '__return_false', PHP_INT_MAX );
+			add_filter( 'trp_allow_string_saving', '__return_false', PHP_INT_MAX );
+			if ( ! defined( 'DONOTCACHEPAGE' ) ) {
+				define( 'DONOTCACHEPAGE', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- convention honoured by page caches.
+			}
+			$reason = $check['reason'];
+			add_action(
+				'send_headers',
+				function () use ( $reason ) {
+					nocache_headers();
+					header( self::HEADER . ': invalid:' . $reason );
+				}
+			);
+			return;
 		}
 		set_transient( 'aitp_used_' . $nonce, 1, AITP_Queue_Logic::TOKEN_TTL * 2 );
 
@@ -871,7 +899,13 @@ final class AITP_Queue {
 			},
 			99
 		);
-		add_action( 'send_headers', 'nocache_headers' );
+		add_action(
+			'send_headers',
+			function () {
+				nocache_headers();
+				header( self::HEADER . ': ok' );
+			}
+		);
 		add_action( 'aitp_translated_batch', array( $this, 'collect' ), 10, 2 );
 		add_action( 'shutdown', array( $this, 'save_report' ), PHP_INT_MAX - 1 );
 	}

@@ -58,6 +58,8 @@ final class AITP_Queue_Logic {
 			$out['attempts'] = $attempts + 1;
 			if ( $http >= 300 && $http < 400 ) {
 				$out['note'] = 'redirect';
+			} elseif ( $http >= 200 && $http < 300 && ! empty( $visit['sig'] ) ) {
+				$out['note'] = 'signature'; // The page refused the signed visit; nothing was translated.
 			} elseif ( $http >= 200 && $http < 300 ) {
 				$out['note'] = 'no_report'; // Usually a page cache answered instead of WordPress.
 			} else {
@@ -127,6 +129,36 @@ final class AITP_Queue_Logic {
 	}
 
 	/**
+	 * One spelling of a request path (with query), so the signing side and the receiving
+	 * side agree. HTTP libraries rewrite equivalent forms before sending (WordPress' Requests
+	 * library writes %e3 as %E3, %7e as ~ and percent-encodes raw non-ASCII text), and the site
+	 * may receive either form. Normalisation as in RFC 3986 6.2.2: percent-encodings in
+	 * upper case, encoded unreserved characters (A-Z a-z 0-9 - . _ ~) decoded, bytes that may
+	 * not appear raw encoded, a "%" without two hex digits encoded as %25. Reserved encodings
+	 * (%2F, %3F, %25, %26 …), the case of the path and the order of the query stay as they are.
+	 *
+	 * @param string $path Path with query.
+	 * @return string
+	 */
+	public static function canonical_path( $path ) {
+		$path = preg_replace_callback(
+			'~%(?![0-9A-Fa-f]{2})|[^\x21-\x7E]|["<>\\\\^`{|}]~',
+			function ( $m ) {
+				return '%' . strtoupper( bin2hex( $m[0] ) );
+			},
+			(string) $path
+		);
+		return preg_replace_callback(
+			'~%([0-9A-Fa-f]{2})~',
+			function ( $m ) {
+				$c = chr( hexdec( $m[1] ) );
+				return preg_match( '~^[A-Za-z0-9._\~-]$~', $c ) ? $c : '%' . strtoupper( $m[1] );
+			},
+			$path
+		);
+	}
+
+	/**
 	 * Signature header value for an internal visit of $path.
 	 *
 	 * @param string $secret Site secret.
@@ -136,7 +168,7 @@ final class AITP_Queue_Logic {
 	 * @return string
 	 */
 	public static function sign( $secret, $path, $ts, $nonce ) {
-		return $ts . '.' . $nonce . '.' . hash_hmac( 'sha256', $ts . '|' . $nonce . '|' . $path, $secret );
+		return $ts . '.' . $nonce . '.' . hash_hmac( 'sha256', $ts . '|' . $nonce . '|' . self::canonical_path( $path ), $secret );
 	}
 
 	/**
@@ -149,15 +181,28 @@ final class AITP_Queue_Logic {
 	 * @return string
 	 */
 	public static function verify( $secret, $header, $path, $now ) {
+		return self::check( $secret, $header, $path, $now )['nonce'];
+	}
+
+	/**
+	 * Verify a signature header and say why it failed.
+	 *
+	 * @param string $secret Site secret.
+	 * @param string $header Header value.
+	 * @param string $path   Request path (with query), as received.
+	 * @param int    $now    Unix time.
+	 * @return array{nonce:string,reason:string} reason: '' | format | expired | signature.
+	 */
+	public static function check( $secret, $header, $path, $now ) {
 		if ( ! is_string( $header ) || ! preg_match( '~^(\d{9,11})\.([a-f0-9]{16,64})\.([a-f0-9]{64})$~', $header, $m ) ) {
-			return '';
+			return array( 'nonce' => '', 'reason' => 'format' );
 		}
 		$ts = (int) $m[1];
 		if ( abs( $now - $ts ) > self::TOKEN_TTL ) {
-			return '';
+			return array( 'nonce' => '', 'reason' => 'expired' );
 		}
-		$expected = hash_hmac( 'sha256', $ts . '|' . $m[2] . '|' . $path, $secret );
-		return hash_equals( $expected, $m[3] ) ? $m[2] : '';
+		$expected = hash_hmac( 'sha256', $ts . '|' . $m[2] . '|' . self::canonical_path( $path ), $secret );
+		return hash_equals( $expected, $m[3] ) ? array( 'nonce' => $m[2], 'reason' => '' ) : array( 'nonce' => '', 'reason' => 'signature' );
 	}
 
 	/**

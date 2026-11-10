@@ -83,6 +83,52 @@ test( 'queue: signature valid only for its path, time window and secret', functi
 	eq( '', AITP_Queue_Logic::verify( 'secret', $t, '/fr/about/?aitp_nc=1', 1000000100 ), 'tampered' );
 } );
 
+test( 'queue: one spelling of a path for signing and checking', function () {
+	$c = function ( $p ) {
+		return AITP_Queue_Logic::canonical_path( $p );
+	};
+	eq( '/ja/tr90-%E3%82%AD/', $c( '/ja/tr90-%e3%82%ad/' ), 'hex in upper case' );
+	eq( '/ja/tr90-%E3%82%AD/', $c( '/ja/tr90-%E3%82%AD/' ), 'already canonical' );
+	eq( '/fr/~user/ABC-_./', $c( '/fr/%7euser/%41BC%2d%5F%2e/' ), 'unreserved decoded' );
+	eq( '/ja/%E6%97%A5%E6%9C%AC/?q=%E6%97%A5', $c( '/ja/日本/?q=日' ), 'raw Japanese' );
+	eq( '/ar/%D9%86%D8%B8%D8%A7%D8%B1%D8%A7%D8%AA/', $c( '/ar/نظارات/' ), 'raw Arabic' );
+	eq( '/fr/%D9%86%D8%B8/', $c( '/fr/%d9%86%D8%b8/' ), 'mixed case' );
+	eq( '/fr/a%2Fb%3Fc%25d%26e/?x=%2F&y=a%26b&z=2&z=1', $c( '/fr/a%2fb%3fc%25d%26e/?x=%2f&y=a%26b&z=2&z=1' ), 'reserved kept, query order kept' );
+	eq( '/fr/About-Us/?B=2&a=1', $c( '/fr/About-Us/?B=2&a=1' ), 'case of path and query kept' );
+	eq( '/fr/a%20b/?q=a+b%20c', $c( '/fr/a b/?q=a+b c' ), 'space encoded, plus kept' );
+	eq( '/fr/x%25zz/?q=100%25', $c( '/fr/x%zz/?q=100%' ), 'stray percent' );
+	eq( '/fr/x%22%3C%3E%5C%5E%60%7B%7C%7D/', $c( '/fr/x"<>\\^`{|}/' ), 'characters that may not appear raw' );
+	eq( "/fr/a%0A%7F/", $c( "/fr/a\n\x7f/" ), 'control bytes' );
+	foreach ( array( '/ja/日本/?a=%7e', '/fr/%e3%82%ad/?b=%2f' ) as $p ) {
+		eq( $c( $p ), $c( $c( $p ) ), 'idempotent' );
+	}
+} );
+
+test( 'queue: signature survives the HTTP library rewriting the address', function () {
+	$sent = '/ja/tr90-%e3%82%ad%e3%83%83%e3%82%ba/?aitp_nc=1a2b3c4d&aitp_map=1';
+	$h    = AITP_Queue_Logic::sign( 'secret', $sent, 1000000000, 'abcdef0123456789' );
+	eq( 'abcdef0123456789', AITP_Queue_Logic::verify( 'secret', $h, '/ja/tr90-%E3%82%AD%E3%83%83%E3%82%BA/?aitp_nc=1a2b3c4d&aitp_map=1', 1000000100 ), 'upper-case hex received' );
+	eq( 'abcdef0123456789', AITP_Queue_Logic::verify( 'secret', $h, '/ja/tr90-キッズ/?aitp_nc=1a2b3c4d&aitp_map=1', 1000000100 ), 'decoded by a proxy' );
+	$h2 = AITP_Queue_Logic::sign( 'secret', '/ar/نظارات/?aitp_nc=1', 1000000000, 'abcdef0123456789' );
+	eq( 'abcdef0123456789', AITP_Queue_Logic::verify( 'secret', $h2, '/ar/%D9%86%D8%B8%D8%A7%D8%B1%D8%A7%D8%AA/?aitp_nc=1', 1000000100 ), 'raw Arabic signed' );
+	eq( '', AITP_Queue_Logic::verify( 'secret', $h, '/ja/tr90-%E3%82%AD%E3%83%83%E3%82%BB/?aitp_nc=1a2b3c4d&aitp_map=1', 1000000100 ), 'other page' );
+	eq( '', AITP_Queue_Logic::verify( 'secret', $h, '/ja/tr90-%E3%82%AD%E3%83%83%E3%82%BA/?aitp_nc=1a2b3c4d', 1000000100 ), 'map flag removed' );
+	$h3 = AITP_Queue_Logic::sign( 'secret', '/fr/a%2Fb/', 1000000000, 'abcdef0123456789' );
+	eq( '', AITP_Queue_Logic::verify( 'secret', $h3, '/fr/a/b/', 1000000100 ), 'encoded slash is not a slash' );
+	$t = substr( $h, 0, -1 ) . ( substr( $h, -1 ) === 'a' ? 'b' : 'a' );
+	eq( array( 'nonce' => '', 'reason' => 'signature' ), AITP_Queue_Logic::check( 'secret', $t, $sent, 1000000100 ), 'tampered' );
+	eq( array( 'nonce' => '', 'reason' => 'expired' ), AITP_Queue_Logic::check( 'secret', $h, $sent, 1000000400 ), 'expired' );
+	eq( array( 'nonce' => '', 'reason' => 'format' ), AITP_Queue_Logic::check( 'secret', 'x', $sent, 1000000100 ), 'format' );
+	eq( array( 'nonce' => 'abcdef0123456789', 'reason' => '' ), AITP_Queue_Logic::check( 'secret', $h, $sent, 1000000100 ) );
+} );
+
+test( 'queue: refused signature is reported as such, not as a page cache', function () {
+	$d = AITP_Queue_Logic::decide( array(), qv( array( 'report' => false, 'sig' => 'signature' ) ), 1000 );
+	eq( 'signature', $d['note'] );
+	eq( 'pending', $d['status'] );
+	eq( 1, $d['attempts'] );
+} );
+
 test( 'queue: budget keeps a reserve of the TranslatePress limit for visitors', function () {
 	eq( '', AITP_Queue_Logic::budget_block( 1000, 300000, 100000, 1000000, 0.2 ) );
 	eq( 'queue_cap', AITP_Queue_Logic::budget_block( 300000, 300000, 100000, 1000000, 0.2 ) );

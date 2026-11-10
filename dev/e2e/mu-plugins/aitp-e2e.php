@@ -77,3 +77,32 @@ add_action(
 	},
 	0
 );
+
+/*
+ * 5. Spoiled signed visits (option aitp_e2e_tamper): 'signature' changes the last character,
+ *    'format' sends garbage, 'expired' moves the time stamp back, 'replay' marks the nonce as
+ *    used before the request is sent. Applied after the routing filter above.
+ */
+add_filter(
+	'aitp_queue_request',
+	function ( $req ) {
+		$t = get_option( 'aitp_e2e_tamper', '' );
+		$h = isset( $req['args']['headers']['X-AITP-Warm'] ) ? (string) $req['args']['headers']['X-AITP-Warm'] : '';
+		if ( $t === '' || $h === '' ) {
+			return $req;
+		}
+		$p = explode( '.', $h );
+		if ( $t === 'signature' ) {
+			$h = substr( $h, 0, -1 ) . ( substr( $h, -1 ) === 'a' ? 'b' : 'a' );
+		} elseif ( $t === 'format' ) {
+			$h = 'garbage';
+		} elseif ( $t === 'expired' && count( $p ) === 3 ) {
+			$h = ( (int) $p[0] - 1000 ) . '.' . $p[1] . '.' . $p[2];
+		} elseif ( $t === 'replay' && count( $p ) === 3 ) {
+			set_transient( 'aitp_used_' . $p[1], 1, 600 );
+		}
+		$req['args']['headers']['X-AITP-Warm'] = $h;
+		return $req;
+	},
+	20
+);

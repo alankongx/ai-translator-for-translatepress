@@ -1971,3 +1971,9 @@ msgstr "页面映射与测试记录"
 
 msgid "Page addresses"
 msgstr "页面地址"
+
+msgid "internal visit signature not accepted (nothing was translated or saved)"
+msgstr "内部访问签名不通过（没有翻译，也没有保存）"
+
+msgid "last visit failed: internal visit signature not accepted"
+msgstr "上次访问失败：内部访问签名不通过"

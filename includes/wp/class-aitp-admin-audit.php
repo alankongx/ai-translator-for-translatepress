@@ -210,6 +210,7 @@ final class AITP_Admin_Audit {
 			'too_many_failures'   => __( 'more than 5% of the last batch is still wrong or untranslated', 'ai-translator-for-translatepress' ),
 			'english_saved'       => __( 'English was stored as a translation in the last batch', 'ai-translator-for-translatepress' ),
 			'visit_failed'        => __( 'pages of the batch could not be loaded (loopback, cache or server error)', 'ai-translator-for-translatepress' ),
+			'visit_signature'     => __( 'internal visit signature not accepted (nothing was translated or saved)', 'ai-translator-for-translatepress' ),
 			'rolled_back'         => __( 'the current batch was rolled back', 'ai-translator-for-translatepress' ),
 			'no_pages'            => __( 'no page address found for the batch', 'ai-translator-for-translatepress' ),
 			'backup_failed'       => __( 'backup failed', 'ai-translator-for-translatepress' ),

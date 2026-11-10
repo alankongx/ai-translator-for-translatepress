@@ -16,9 +16,20 @@ function wp( ...args ) {
 	return out.split( '\n' ).filter( ( l ) => ! /Container /.test( l ) ).join( '\n' ).trim();
 }
 const json = ( s ) => JSON.parse( s.slice( s.indexOf( '{' ) ) );
-const reset = () => { wp( 'eval-file', '/e2e/reset.php' ); return fetch( MOCK + '/__mock/reset', { method: 'POST' } ); };
-const mock = ( cfg ) => fetch( MOCK + '/__mock/config', { method: 'POST', body: JSON.stringify( cfg ) } );
-const mockStats = async () => ( await fetch( MOCK + '/__mock/stats' ) ).json();
+// The mock server (and Apache) sometimes close a kept-alive connection: retry the control calls.
+async function fetchRetry( url, opts ) {
+	for ( let i = 0; ; i++ ) {
+		try {
+			return await fetch( url, opts );
+		} catch ( e ) {
+			if ( i >= 3 ) throw e;
+			await new Promise( ( r ) => setTimeout( r, 500 ) );
+		}
+	}
+}
+const reset = () => { wp( 'eval-file', '/e2e/reset.php' ); return fetchRetry( MOCK + '/__mock/reset', { method: 'POST' } ); };
+const mock = ( cfg ) => fetchRetry( MOCK + '/__mock/config', { method: 'POST', body: JSON.stringify( cfg ) } );
+const mockStats = async () => ( await fetchRetry( MOCK + '/__mock/stats' ) ).json();
 const verify = ( langs ) => json( wp( 'eval-file', '/e2e/verify.php', langs.join( ',' ) ) );
 const state = () => json( wp( 'eval-file', '/e2e/state.php' ) );
 const setOpt = ( obj ) => wp( 'eval', `$s = get_option('aitp_settings'); foreach (json_decode('${ JSON.stringify( obj ) }', true) as $k => $v) $s[$k] = $v; update_option('aitp_settings', $s); echo 'ok';` );
@@ -806,6 +817,131 @@ const S = {
 
 		wp( 'eval', 'foreach (array("aitp_e2e_footer","aitp_e2e_visit_log","aitp_queue_settings","aitp_autofix_settings","aitp_autofix_state","aitp_journal_state") as $o) delete_option($o); echo 1;' );
 		h( 'visits', 'clear' );
+	},
+
+	async signature() {
+		// 0.6.1: pages with non-ASCII addresses (the HTTP library rewrites percent-encodings before
+		// sending) and internal visits whose signature the site refuses.
+		const q = ( ...a ) => wp( 'aitp', 'queue', ...a );
+		const m = ( ...x ) => json( wp( 'aitp', 'map', ...x ) );
+		const h = ( ...x ) => json( wp( 'eval-file', '/e2e/pagemap-help.php', ...x.map( String ) ) );
+		const b64 = ( v ) => Buffer.from( JSON.stringify( v ) ).toString( 'base64' );
+		const opt = ( k, v ) => wp( 'eval', `update_option('${ k }', json_decode(base64_decode('${ b64( v ) }'), true)); echo 1;` );
+		const ev = ( php, v ) => json( wp( 'eval', `$in = json_decode(base64_decode('${ b64( v === undefined ? null : v ) }'), true); ${ php }` ) );
+		const SJ = 'Soft TR90 frames for small faces, on a page with a Japanese address';
+		const SA = 'Flexible kids glasses, on a page with an Arabic address';
+
+		await reset();
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_map_state","aitp_map_lock","aitp_journal_state") as $o) delete_option($o); echo 1;' );
+		opt( 'aitp_e2e_footer', [] );
+		opt( 'aitp_e2e_tamper', '' );
+		opt( 'aitp_e2e_visit_log', 1 );
+		h( 'visits', 'clear' );
+		const pg = ev( `global $wpdb; $o = array();
+			foreach ( $in as $k => $d ) {
+				$slug = sanitize_title( $d[0] );
+				$id   = (int) $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_name = %s AND post_type = 'page' AND post_status = 'publish'", $slug ) );
+				if ( ! $id ) { $id = wp_insert_post( array( 'post_type' => 'page', 'post_status' => 'publish', 'post_title' => $d[1], 'post_name' => $d[0], 'post_content' => '<p>' . $d[2] . '</p>' ) ); }
+				$src = get_permalink( $id );
+				$o[ $k ] = array( 'id' => $id, 'src' => $src, 'url' => AITP_Queue::translated_url( $src, $k ), 'lang' => $k );
+			}
+			echo wp_json_encode( $o );`, { ja: [ 'キッズ-tr90', 'Kids TR90 (Japanese address)', SJ ], ar: [ 'نظارات-tr90', 'Kids glasses (Arabic address)', SA ] } );
+		const enqueue = ( items ) => ev( 'echo wp_json_encode(array("n" => AITP_Queue::requeue_urls(array_map(function ($p) { return array("url" => $p["url"], "source_url" => $p["src"], "lang" => $p["lang"], "object_type" => "post", "object_id" => $p["id"]); }, $in))));', items );
+		wp( 'eval', `update_option('aitp_queue_settings', array_merge(AITP_Queue::defaults(), array('languages' => array('ja','ar'))), false); echo 1;` );
+
+		// 1. Queue visits through the real wp_remote_get chain.
+		const req0 = ( await mockStats() ).requests;
+		enqueue( [ pg.ja, pg.ar ] );
+		q( 'start' );
+		const qrun = json( q( 'run', '--ignore-rate', '--minutes=3' ) );
+		q( 'pause' );
+		const qrows = h( 'queue' ).rows;
+		const rj = h( 'find', 'ja', SJ );
+		const ra = h( 'find', 'ar', SA );
+		const req1 = ( await mockStats() ).requests;
+		const visits1 = h( 'visits' ).visits;
+		record( 'signature: queue translates pages with Japanese and Arabic addresses', {
+			urls: [ pg.ja.url, pg.ar.url ], run: qrun, queue: qrows, ja: [ rj.id, rj.status ], ar: [ ra.id, ra.status ], ai_requests: req1 - req0, visits: visits1.slice( 0, 4 ),
+		}, {
+			addresses_have_lower_case_hex: /%[0-9a-f]*[a-f]/.test( pg.ja.url ) && /%[0-9a-f]*[a-f]/.test( pg.ar.url ),
+			library_sends_upper_case: visits1.length > 0 && visits1.every( ( v ) => ! /%[0-9A-F]?[a-f]/.test( v ) ),
+			both_pages_done: qrows.length === 2 && qrows.every( ( r ) => r.status === 'done' && r.note === '' ),
+			strings_translated: rj.status === '1' && ra.status === '1',
+			ai_used: req1 > req0,
+		} );
+
+		// 2. Map visits of the same pages: read, nothing translated or saved.
+		const dj0 = h( 'dict', 'ja' );
+		const da0 = h( 'dict', 'ar' );
+		wp( 'aitp', 'map', 'start', `--urls=${ pg.ja.src },${ pg.ar.src }`, '--languages=ja,ar' );
+		const mrun = m( 'run', '--ignore-rate', '--minutes=2' );
+		const mrows = m( 'list' ).rows;
+		const exJ = json( wp( 'aitp', 'map', 'export', `--pages=${ ( mrows.find( ( r ) => r.url === pg.ja.url ) || {} ).id }` ) ).rows.map( ( r ) => Number( r.id ) );
+		const exA = json( wp( 'aitp', 'map', 'export', `--pages=${ ( mrows.find( ( r ) => r.url === pg.ar.url ) || {} ).id }` ) ).rows.map( ( r ) => Number( r.id ) );
+		const req2 = ( await mockStats() ).requests;
+		record( 'signature: map visits read pages with non-ASCII addresses', {
+			run: mrun, rows: mrows.map( ( r ) => [ r.lang, r.http, r.found, r.note ] ), ai_requests: req2 - req1,
+		}, {
+			all_read: mrun.status === 'done' && mrows.length === 4 && mrows.every( ( r ) => r.http === '200' && r.note === '' && Number( r.found ) > 0 ),
+			page_rows_found: exJ.includes( Number( rj.id ) ) && exA.includes( Number( ra.id ) ),
+			nothing_changed: h( 'dict', 'ja' ).sum === dj0.sum && h( 'dict', 'ar' ).sum === da0.sum,
+			no_ai_request: req2 === req1,
+		} );
+
+		// 3. Refused signatures: the page is served without translating or saving, and says why.
+		h( 'set', 'ja', rj.id, 0, '__NULL__' );
+		wp( 'eval', 'global $wpdb; $wpdb->query("TRUNCATE {$wpdb->prefix}trp_machine_translation_locks"); echo 1;' );
+		const dj1 = h( 'dict', 'ja' );
+		const o1 = h( 'originals' );
+		const req3 = ( await mockStats() ).requests;
+		h( 'visits', 'clear' );
+		const direct = {};
+		for ( const t of [ 'signature', 'format', 'expired', 'replay' ] ) {
+			opt( 'aitp_e2e_tamper', t );
+			const v = ev( 'echo wp_json_encode(AITP_Queue::visit($in, "ja", 20));', pg.ja.url );
+			direct[ t ] = { http: v.http, report: v.report, sig: v.sig, translated: v.translated, calls: v.calls };
+		}
+		opt( 'aitp_e2e_tamper', 'signature' );
+		enqueue( [ pg.ja ] );
+		q( 'start' );
+		json( q( 'run', '--ignore-rate', '--pages=1', '--minutes=1' ) );
+		q( 'pause' );
+		const qbad = h( 'queue' ).rows.find( ( r ) => r.url === pg.ja.url ) || {};
+		wp( 'aitp', 'map', 'start', `--urls=${ pg.ja.src }`, '--languages=ja' );
+		m( 'run', '--ignore-rate', '--minutes=1' );
+		const mbad = m( 'list' ).rows.find( ( r ) => r.url === pg.ja.url && r.lang === 'ja' ) || {};
+		const dj2 = h( 'dict', 'ja' );
+		const o2 = h( 'originals' );
+		const req4 = ( await mockStats() ).requests;
+		const rj2 = h( 'find', 'ja', SJ );
+		const reached = h( 'visits' ).visits.length;
+		record( 'signature: refused visits translate and save nothing, and say why', {
+			direct, queue: [ qbad.status, qbad.note ], map: [ mbad.http, mbad.note ], reached, row: [ rj2.status, rj2.is_null ], ai_requests: req4 - req3,
+		}, {
+			reasons_reported: Object.entries( direct ).every( ( [ t, v ] ) => v.sig === t && v.http === 200 && v.report === false && v.translated === 0 ),
+			requests_reached_the_site: reached >= 6,
+			queue_note: qbad.note === 'signature' && qbad.status === 'pending',
+			map_note: mbad.note === 'signature',
+			dictionary_unchanged: dj2.sum === dj1.sum && rj2.status === '0' && rj2.is_null === true,
+			originals_unchanged: o2.rows === o1.rows,
+			no_ai_request: req4 === req3,
+		} );
+
+		// 4. With a good signature again, the same page is translated.
+		opt( 'aitp_e2e_tamper', '' );
+		enqueue( [ pg.ja ] );
+		q( 'start' );
+		json( q( 'run', '--ignore-rate', '--minutes=2' ) );
+		q( 'pause' );
+		const rj3 = h( 'find', 'ja', SJ );
+		const qok = h( 'queue' ).rows.find( ( r ) => r.url === pg.ja.url ) || {};
+		opt( 'aitp_e2e_visit_log', 0 );
+		// The other scenarios count the pages of the site: remove the two test pages again.
+		ev( 'foreach ($in as $id) wp_delete_post((int) $id, true); echo wp_json_encode(array("ok" => 1));', [ pg.ja.id, pg.ar.id ] );
+		record( 'signature: valid visits work again afterwards', { row: [ rj3.status ], queue: [ qok.status, qok.note ] }, {
+			translated_again: rj3.status === '1',
+			queue_done: qok.status === 'done' && qok.note === '',
+		} );
 	},
 
 	async openai() {

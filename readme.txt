@@ -4,7 +4,7 @@ Tags: translatepress, translation, gemini, openai, multilingual
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.6.0
+Stable tag: 0.6.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -117,6 +117,10 @@ Not by itself. The engine only translates strings TranslatePress sends to it, wh
 Updates come from the GitHub releases of this plugin. To turn update checks off: `add_filter( 'aitp_github_updates', '__return_false' );`
 
 == Changelog ==
+
+= 0.6.1 =
+* Fix: internal visits of pages with non-ASCII addresses (Japanese, Arabic, …) failed their signature check, because the HTTP library rewrites percent-encodings before sending. Both sides now sign the same normalised address (RFC 3986): page map and backfill queue work on such pages.
+* A request that carries the internal-visit header but fails the check (format, expired, signature, replay) no longer becomes an ordinary page view: nothing is machine translated or saved, the page is not cached, and the reason is reported ("internal visit signature not accepted").
 
 = 0.6.0 =
 * Page map (new tab "Page map & test journal", `wp aitp map`): read-only visits record which page-text rows each page shows, including text outside the post content; candidate list per page for page-by-page comparisons.
