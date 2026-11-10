@@ -42,6 +42,7 @@ final class AITP_Admin {
 		add_action( 'admin_post_aitp_export_review', array( $this, 'handle_export_review' ) );
 		add_action( 'trp_machine_translation_extra_settings_middle', array( $this, 'tp_status_card' ), 30, 1 );
 		AITP_Admin_Queue::boot();
+		AITP_Admin_Audit::boot();
 		add_filter( 'plugin_action_links_' . plugin_basename( AITP_FILE ), array( $this, 'action_links' ) );
 	}
 
@@ -98,6 +99,12 @@ final class AITP_Admin {
 				array(
 					'ajax'  => admin_url( 'admin-ajax.php' ),
 					'nonce' => wp_create_nonce( 'aitp_queue_step' ),
+					'error' => __( 'Request failed; trying again shortly.', 'ai-translator-for-translatepress' ),
+				)
+			) . ';window.aitpAudit = ' . wp_json_encode(
+				array(
+					'ajax'  => admin_url( 'admin-ajax.php' ),
+					'nonce' => wp_create_nonce( 'aitp_audit_step' ),
 					'error' => __( 'Request failed; trying again shortly.', 'ai-translator-for-translatepress' ),
 				)
 			) . ';',
@@ -221,6 +228,7 @@ final class AITP_Admin {
 			'status'   => __( 'Status & log', 'ai-translator-for-translatepress' ),
 			'queue'    => __( 'Backfill queue', 'ai-translator-for-translatepress' ),
 			'review'   => __( 'Review list', 'ai-translator-for-translatepress' ),
+			'audit'    => __( 'Audit & repair', 'ai-translator-for-translatepress' ),
 		);
 		if ( ! isset( $tabs[ $tab ] ) ) {
 			$tab = 'settings';
@@ -237,6 +245,8 @@ final class AITP_Admin {
 			AITP_Admin_Queue::render();
 		} elseif ( $tab === 'review' ) {
 			$this->render_review();
+		} elseif ( $tab === 'audit' ) {
+			AITP_Admin_Audit::render();
 		} else {
 			$this->render_settings();
 		}
@@ -594,6 +604,15 @@ final class AITP_Admin {
 			'glossary_forbidden'        => __( 'forbidden glossary term used', 'ai-translator-for-translatepress' ),
 			'brand_added'               => __( 'brand added', 'ai-translator-for-translatepress' ),
 			'number_format'             => __( 'number written in words', 'ai-translator-for-translatepress' ),
+			'structured_broken'         => __( 'structured data damaged', 'ai-translator-for-translatepress' ),
+			'shared_translation'        => __( 'same translation as an unrelated text', 'ai-translator-for-translatepress' ),
+			'imported'                  => __( 'from imported list', 'ai-translator-for-translatepress' ),
+			'near_misaligned'           => __( 'next to misplaced translations', 'ai-translator-for-translatepress' ),
+			'identical'                 => __( 'left exactly as the original', 'ai-translator-for-translatepress' ),
+			'ai_mismatch'               => __( 'AI: belongs to another text or incomplete', 'ai-translator-for-translatepress' ),
+			'control_chars'             => __( 'control characters', 'ai-translator-for-translatepress' ),
+			'no_translate_changed'      => __( 'text marked "do not translate" changed', 'ai-translator-for-translatepress' ),
+			'no_letters'                => __( 'no letters', 'ai-translator-for-translatepress' ),
 		);
 		if ( isset( $map[ $code ] ) ) {
 			return $map[ $code ];

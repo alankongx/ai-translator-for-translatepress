@@ -4,7 +4,7 @@ Tags: translatepress, translation, gemini, openai, multilingual
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.2.0
+Stable tag: 0.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -52,6 +52,18 @@ Without visitors, pages are never translated. The backfill queue (Settings → A
 * Internal visits are signed (HMAC, valid 5 minutes, single use). A forged or replayed signature is treated as an ordinary page view.
 * Runs through WP-Cron, from the open admin page, or with WP-CLI: `wp aitp queue sync|start|pause|status|run|retry|clear`.
 
+= Check and repair old translations =
+
+Translations saved earlier by another engine may be misaligned, left in English or cut short. Settings → AI Translator → Audit & repair finds and repairs them.
+
+* Check: scans every machine translation in the TranslatePress tables (page text and interface strings) with the same validation as new translations, plus a cross-row check for one translation saved on unrelated texts and for runs of misplaced rows. No AI cost; runs in chunks through WP-Cron, from the admin page or with WP-CLI.
+* Review: filter by language, problem and severity, compare original and translation side by side, select the rows to repair. A candidate list from another tool can be imported; a row counts only when its ID, original and old translation still match.
+* Optional AI check (off by default): asks the model whether selected or suspicious pairs belong together. Counted against the daily character limit.
+* Repair: the selected rows are backed up to the plugin's own table (downloadable per batch), then set back to untranslated — only if they are still machine translated with the same text as when checked. Their pages are queued in the backfill queue and translated again with full validation. Page caches of known cache plugins are purged; a CDN has to be purged by hand.
+* Rollback per batch restores the backed-up text exactly; rows translated by hand in between are kept.
+* Human translations (status "manually translated") are never listed, changed or restored over. No table is emptied, no row deleted, at most 500 rows per action.
+* WP-CLI: `wp aitp audit scan|status|list|repair|rollback|import|ai-check|dismiss`.
+
 = Security =
 
 * The API key is stored encrypted (libsodium or AES-256-GCM, key derived from the site's secret keys) and is never shown again, put in a URL, logged or sent to the browser. It can also be set in wp-config.php with `define( 'AITP_API_KEY', '…' );`.
@@ -81,13 +93,16 @@ They failed validation or were not reached within the page view's time budget. T
 
 = Does it replace existing translations? =
 
-No. It only translates strings TranslatePress sends to an engine, which are strings without a translation. Manual translations are never sent.
+Not by itself. The engine only translates strings TranslatePress sends to it, which are strings without a translation. Old machine translations change only when you select them under Audit & repair and press Repair; they are backed up first and can be rolled back. Manual translations are never sent or changed.
 
 = Updates =
 
 Updates come from the GitHub releases of this plugin. To turn update checks off: `add_filter( 'aitp_github_updates', '__return_false' );`
 
 == Changelog ==
+
+= 0.3.0 =
+* Audit & repair: checks old machine translations (misaligned, English, cut short, broken structured data, lost placeholders), candidate list import, optional AI check, backed-up repair through the backfill queue, exact rollback per batch, WP-CLI commands.
 
 = 0.2.0 =
 * Backfill queue: translates pages nobody has visited yet, with speed and character limits, visitor reserve, pause on provider problems, page-cache bypass, signed internal visits, progress page and WP-CLI commands.

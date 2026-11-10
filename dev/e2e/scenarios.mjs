@@ -1,6 +1,6 @@
 // End-to-end scenarios: node dev/e2e/scenarios.mjs [name …]
 import { execFileSync, execFile } from 'node:child_process';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -343,6 +343,131 @@ const S = {
 			six_rows_requeued: again.pending === 6,
 			retranslated: s.status0 === 0 && s.mismatch === 0,
 		} );
+	},
+
+	async audit() {
+		const q = ( ...a ) => wp( 'aitp', 'queue', ...a );
+		const a = ( ...x ) => json( wp( 'aitp', 'audit', ...x ) );
+		const seedc = ( ...x ) => json( wp( 'eval-file', '/e2e/audit-seed.php', ...x ) );
+		const key = ( k, l, id ) => `${ k }|${ l }|${ id }`;
+		const list = ( ...x ) => a( 'list', '--limit=5000', ...x ).rows;
+
+		// Fully translated site (backfill queue), then plant the HHG failure types.
+		await reset();
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings") as $o) delete_option($o); echo 1;' );
+		q( 'sync' );
+		q( 'start' );
+		json( q( 'run', '--ignore-rate', '--minutes=8' ) );
+		const before = sum( verify( LANGS ) );
+		const seeded = seedc( 'seed' );
+		const seed = seedc( 'dump' );
+		const bad = seed.rows.filter( ( r ) => r.type !== 'manual' );
+		const manualRows = seed.rows.filter( ( r ) => r.type === 'manual' );
+		const isBad = new Set( bad.map( ( r ) => key( r.kind, r.lang, r.id ) ) );
+
+		// 1. Check.
+		let t0 = Date.now();
+		const scan = a( 'scan', '--minutes=5' );
+		const secs = ( Date.now() - t0 ) / 1000;
+		let found = list();
+		const byKey = Object.fromEntries( found.map( ( f ) => [ key( f.kind, f.lang, f.row_id ), f ] ) );
+		const missed = bad.filter( ( r ) => ! byKey[ key( r.kind, r.lang, r.id ) ] );
+		const missedErr = bad.filter( ( r ) => ( byKey[ key( r.kind, r.lang, r.id ) ] || {} ).severity !== 'error' );
+		const falseErr = found.filter( ( f ) => f.severity === 'error' && ! isBad.has( key( f.kind, f.lang, f.row_id ) ) );
+		const falseSus = found.filter( ( f ) => f.severity !== 'error' && ! isBad.has( key( f.kind, f.lang, f.row_id ) ) );
+		record( 'audit: check finds planted bad translations', {
+			translated_before: before.status1, seeded: seeded.seeded, scanned: scan.scanned, secs,
+			findings: found.length, errors: found.filter( ( f ) => f.severity === 'error' ).length,
+			missed: missed.map( ( r ) => r.type + ':' + r.lang ), not_error_yet: missedErr.map( ( r ) => r.type + ':' + r.lang + ( r.long ? ':long' : ':short' ) ),
+			false_errors: falseErr.length, other_suspects: falseSus.length,
+			false_error_rows: falseErr.slice( 0, 5 ).map( ( f ) => [ f.kind, f.lang, f.row_id, f.codes, f.original.slice( 0, 80 ), f.translated.slice( 0, 80 ) ] ),
+		}, {
+			every_planted_row_found: missed.length === 0,
+			truncated_structured_placeholder_are_errors: bad.filter( ( r ) => [ 'truncated', 'structured', 'placeholder' ].includes( r.type ) ).every( ( r ) => ( byKey[ key( r.kind, r.lang, r.id ) ] || {} ).severity === 'error' ),
+			no_false_errors: falseErr.length === 0,
+			manual_rows_not_listed: manualRows.every( ( r ) => ! byKey[ key( r.kind, r.lang, r.id ) ] ),
+			nothing_changed_by_check: seedc( 'check' ).manual_sum === seed.manual_sum && seedc( 'check' ).rows.every( ( r ) => r.type === 'manual' ? r.status === 2 : r.is_bad ),
+		} );
+
+		// 2. AI check of the suspects (short shifted rows the rules cannot prove).
+		wp( 'eval', 'update_option("aitp_audit_settings", array("ai_check" => true, "gettext" => true)); echo 1;' );
+		const tpBefore = state().tp_counter;
+		const ai = a( 'ai-check', '--severity=suspect' );
+		const tpAfter = state().tp_counter;
+		found = list();
+		const byKey2 = Object.fromEntries( found.map( ( f ) => [ key( f.kind, f.lang, f.row_id ), f ] ) );
+		const shiftNotErr = bad.filter( ( r ) => ( byKey2[ key( r.kind, r.lang, r.id ) ] || {} ).severity !== 'error' );
+		const goodMarkedBad = found.filter( ( f ) => f.ai === 'mismatch' && ! isBad.has( key( f.kind, f.lang, f.row_id ) ) );
+		record( 'audit: AI check confirms the short misplaced rows', { ai, tp_chars: tpAfter - tpBefore, still_not_error: shiftNotErr.length, good_rows_flagged: goodMarkedBad.length, good_flagged_rows: goodMarkedBad.slice( 0, 8 ).map( ( f ) => [ f.lang, f.row_id, f.original.slice( 0, 100 ), f.translated.slice( 0, 100 ) ] ) }, {
+			every_planted_row_now_error: shiftNotErr.length === 0,
+			good_neighbours_cleared: goodMarkedBad.length === 0,
+			ai_counted_in_tp_limit: tpAfter > tpBefore,
+		} );
+
+		// 3. Repair: one planted row is fixed by someone else after the check -> skipped.
+		const other = bad.find( ( r ) => r.type === 'english' && r.lang === 'fr_FR' );
+		wp( 'eval-file', '/e2e/audit-seed.php', 'edit', other.lang, String( other.id ), other.good );
+		const rep = a( 'repair', '--severity=error', '--yes' );
+		let chk = seedc( 'check' );
+		const resetRows = chk.rows.filter( ( r ) => r.type !== 'manual' && r.status === 0 && r.empty );
+		record( 'audit: repair backs up and resets only unchanged machine rows', { repair: rep, reset_rows: resetRows.length }, {
+			all_planted_reset_but_edited_one: rep.reset === bad.length - 1 && resetRows.length === bad.length - 1,
+			edited_row_skipped: ( rep.skipped.changed || 0 ) === 1 && chk.rows.find( ( r ) => r.id === other.id && r.lang === other.lang ).is_good,
+			manual_untouched: chk.manual_sum === seed.manual_sum,
+			pages_queued: rep.pages > 0,
+		} );
+
+		// 4. Backfill queue translates them again.
+		json( q( 'run', '--ignore-rate', '--minutes=5' ) );
+		let v = sum( verify( LANGS ) );
+		chk = seedc( 'check' );
+		// The broken JSON-LD row is reset to untranslated; no page renders it, so nothing retranslates it.
+		const notGood = chk.rows.filter( ( r ) => ! [ 'manual', 'structured' ].includes( r.type ) && r.kind === 'dictionary' && ! r.is_good );
+		const structuredRow = chk.rows.find( ( r ) => r.type === 'structured' );
+		record( 'audit: repaired rows translated again correctly', { verify: v, not_good: notGood.map( ( r ) => r.type + ':' + r.lang ) }, {
+			no_mismatch_left: v.mismatch === 0,
+			planted_rows_now_correct: notGood.length === 0,
+			structured_left_untranslated: structuredRow.status === 0 && structuredRow.empty,
+			manual_untouched: chk.manual_sum === seed.manual_sum,
+		} );
+
+		// 5. Rollback; one repaired row was corrected by hand in between and must be kept.
+		const hand = bad.find( ( r ) => r.type === 'truncated' && r.lang === 'ja' );
+		wp( 'eval-file', '/e2e/audit-seed.php', 'manual', hand.lang, String( hand.id ) );
+		const rb = a( 'rollback', String( rep.batch ) );
+		chk = seedc( 'check' );
+		const restored = chk.rows.filter( ( r ) => r.is_bad && r.status === 1 && r.type !== 'manual' );
+		record( 'audit: rollback restores the old text exactly, keeps manual work', { rollback: rb, restored_exact: restored.length }, {
+			restored_all_but_manual: rb.restored === rep.reset - 1 && restored.length === rep.reset - 1,
+			manual_kept: ( rb.skipped.manual || 0 ) === 1 && chk.rows.find( ( r ) => r.id === hand.id && r.lang === hand.lang ).status === 2,
+			original_manual_rows_untouched: chk.rows.filter( ( r ) => r.type === 'manual' ).every( ( r ) => r.status === 2 && r.is_bad ),
+		} );
+
+		// 6. Import of a candidate list.
+		seedc( 'import-file' );
+		wp( 'eval', 'global $wpdb; $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_audit"); echo 1;' );
+		const imp = a( 'import', '/var/www/html/wp-content/e2e-state/import.json' );
+		record( 'audit: import keeps only candidates that still match', imp, {
+			planted_rows_added: imp.added === bad.length - 2, // minus the hand-corrected one and the one edited by someone else
+			manual_refused: imp.manual === manualRows.length + 1,
+			changed_refused: imp.changed + imp.untranslated >= 2,
+			unknown_language_refused: imp.missing === 1,
+		} );
+
+		// 7. Scale: 50,000 more rows.
+		seedc( 'big', '50000' );
+		t0 = Date.now();
+		const big = a( 'scan', '--minutes=10' );
+		const bigSecs = ( Date.now() - t0 ) / 1000;
+		const bigErr = list( '--lang=es_MX', '--severity=error' ).length;
+		seedc( 'unbig' );
+		record( 'audit: 50,000 extra rows checked', { scanned: big.scanned, secs: bigSecs, es_errors: bigErr }, {
+			finished: big.result === 'done',
+			under_3_minutes: bigSecs < 180,
+			no_false_errors: bigErr === 0,
+		} );
+		seedc( 'restore-gettext' );
+		wp( 'eval', 'delete_option("aitp_audit_settings"); echo 1;' );
 	},
 
 	async openai() {

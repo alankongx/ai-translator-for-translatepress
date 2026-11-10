@@ -51,61 +51,65 @@
 	update( false );
 } )();
 
-// Backfill queue: advance from the open admin page.
+/* Live loops: advance the backfill queue or the audit from the open admin page. */
 ( function () {
 	'use strict';
-	var btn = document.getElementById( 'aitp-queue-live' );
-	var out = document.getElementById( 'aitp-queue-live-status' );
-	var cfg = window.aitpQueue;
-	if ( ! btn || ! out || ! cfg ) {
-		return;
-	}
-	var label = btn.textContent;
-	var on = false;
-	var timer = null;
-
-	function stop() {
-		on = false;
-		clearTimeout( timer );
-		btn.textContent = label;
-	}
-
-	function step() {
-		if ( ! on ) {
+	function loop( btnId, outId, action, cfg ) {
+		var btn = document.getElementById( btnId );
+		var out = document.getElementById( outId );
+		if ( ! btn || ! out || ! cfg ) {
 			return;
 		}
-		var body = new FormData();
-		body.append( 'action', 'aitp_queue_step' );
-		body.append( '_ajax_nonce', cfg.nonce );
-		fetch( cfg.ajax, { method: 'POST', body: body, credentials: 'same-origin' } )
-			.then( function ( r ) {
-				return r.json();
-			} )
-			.then( function ( j ) {
-				if ( ! j || ! j.success ) {
-					throw new Error( 'bad response' );
-				}
-				out.textContent = j.data.text;
-				if ( j.data.stop ) {
-					stop();
-					return;
-				}
-				var wait = j.data.result === 'pages' || j.data.result === 'time' ? 1 : Math.min( 60, Math.max( 2, j.data.wait || 5 ) );
-				timer = setTimeout( step, wait * 1000 );
-			} )
-			.catch( function () {
-				out.textContent = cfg.error;
-				timer = setTimeout( step, 15000 );
-			} );
-	}
+		var label = btn.textContent;
+		var on = false;
+		var timer = null;
 
-	btn.addEventListener( 'click', function () {
-		if ( on ) {
-			stop();
-			return;
+		function stop() {
+			on = false;
+			clearTimeout( timer );
+			btn.textContent = label;
 		}
-		on = true;
-		btn.textContent = btn.getAttribute( 'data-label-stop' );
-		step();
-	} );
+
+		function step() {
+			if ( ! on ) {
+				return;
+			}
+			var body = new FormData();
+			body.append( 'action', action );
+			body.append( '_ajax_nonce', cfg.nonce );
+			fetch( cfg.ajax, { method: 'POST', body: body, credentials: 'same-origin' } )
+				.then( function ( r ) {
+					return r.json();
+				} )
+				.then( function ( j ) {
+					if ( ! j || ! j.success ) {
+						throw new Error( 'bad response' );
+					}
+					out.textContent = j.data.text;
+					if ( j.data.stop ) {
+						stop();
+						return;
+					}
+					var fast = [ 'pages', 'time', 'running' ].indexOf( j.data.result ) !== -1;
+					var wait = fast ? 1 : Math.min( 60, Math.max( 2, j.data.wait || 5 ) );
+					timer = setTimeout( step, wait * 1000 );
+				} )
+				.catch( function () {
+					out.textContent = cfg.error;
+					timer = setTimeout( step, 15000 );
+				} );
+		}
+
+		btn.addEventListener( 'click', function () {
+			if ( on ) {
+				stop();
+				return;
+			}
+			on = true;
+			btn.textContent = btn.getAttribute( 'data-label-stop' );
+			step();
+		} );
+	}
+	loop( 'aitp-queue-live', 'aitp-queue-live-status', 'aitp_queue_step', window.aitpQueue );
+	loop( 'aitp-audit-live', 'aitp-audit-live-status', 'aitp_audit_step', window.aitpAudit );
 } )();

@@ -390,6 +390,46 @@ final class AITP_Queue {
 		// phpcs:enable
 	}
 
+	/**
+	 * Put pages of one language back in the queue.
+	 *
+	 * @param string     $lang     Language.
+	 * @param int[]|null $post_ids Only these posts, or null for every page of the language.
+	 * @return int Rows changed.
+	 */
+	public static function requeue_lang( $lang, $post_ids ) {
+		global $wpdb;
+		$table = AITP_Schema::table( 'queue' );
+		$set   = "status = 'pending', visits = 0, attempts = 0, passes = 0, next_at = 0, note = ''";
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+		if ( $post_ids === null ) {
+			return (int) $wpdb->query( $wpdb->prepare( "UPDATE $table SET $set WHERE lang = %s", $lang ) );
+		}
+		$ids = array_values( array_filter( array_map( 'intval', $post_ids ) ) );
+		if ( ! $ids ) {
+			return 0;
+		}
+		return (int) $wpdb->query( $wpdb->prepare( "UPDATE $table SET $set WHERE lang = %s AND object_type = 'post' AND object_id IN (" . implode( ',', $ids ) . ')', $lang ) );
+		// phpcs:enable
+	}
+
+	/**
+	 * Translated addresses of posts in one language (from the queue).
+	 *
+	 * @param string $lang     Language.
+	 * @param int[]  $post_ids Posts.
+	 * @return string[]
+	 */
+	public static function urls_for( $lang, array $post_ids ) {
+		global $wpdb;
+		$ids = array_values( array_filter( array_map( 'intval', $post_ids ) ) );
+		if ( ! $ids ) {
+			return array();
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+		return (array) $wpdb->get_col( $wpdb->prepare( 'SELECT url FROM ' . AITP_Schema::table( 'queue' ) . " WHERE lang = %s AND object_type = 'post' AND object_id IN (" . implode( ',', $ids ) . ')', $lang ) );
+	}
+
 	/** Remove every page from the queue. */
 	public static function clear() {
 		global $wpdb;
@@ -585,6 +625,11 @@ final class AITP_Queue {
 			),
 			array( 'id' => (int) $item['id'] )
 		);
+
+		if ( (int) $visit['translated'] > 0 ) {
+			// New translations on this page: cached copies for visitors are out of date.
+			AITP_Cache_Purge::urls( array( $item['url'] ) );
+		}
 
 		$changes = array();
 		if ( $visit['sent'] ) {

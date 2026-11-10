@@ -6,3 +6,6 @@
 .aitp-wrap .aitp-test ul { margin: 0 0 8px 18px; list-style: disc; }
 .aitp-wrap .aitp-hidden { display: none; }
 .aitp-button-delete{color:#b32d2e!important;border-color:#b32d2e!important;}
+.aitp-wrap .aitp-audit th:nth-child(2), .aitp-wrap .aitp-audit td:nth-child(2) { width: 64px; word-break: normal; white-space: nowrap; }
+.aitp-wrap .aitp-audit th:nth-child(5), .aitp-wrap .aitp-audit td:nth-child(5) { width: 170px; word-break: normal; }
+.aitp-wrap .aitp-audit th:nth-child(6), .aitp-wrap .aitp-audit td:nth-child(6) { width: 110px; word-break: normal; }

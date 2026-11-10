@@ -21,6 +21,8 @@ foreach ( array(
 	'core/class-aitp-circuit-breaker.php',
 	'core/class-aitp-translator.php',
 	'core/class-aitp-queue-logic.php',
+	'core/class-aitp-audit-logic.php',
+	'core/class-aitp-pair-checker.php',
 	'providers/class-aitp-provider.php',
 	'providers/class-aitp-provider-gemini.php',
 	'providers/class-aitp-provider-openai.php',

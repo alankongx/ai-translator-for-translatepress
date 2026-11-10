@@ -84,6 +84,10 @@ function buildTranslations( payload, mode ) {
 	return list;
 }
 
+function decode( s ) {
+	return String( s ).replace( /&#(x[0-9a-f]+|\d+);/gi, ( m, n ) => String.fromCodePoint( n[ 0 ].toLowerCase() === 'x' ? parseInt( n.slice( 1 ), 16 ) : parseInt( n, 10 ) ) ).replace( /&(amp|lt|gt|quot|#039|#39|apos|nbsp);/g, ( m, e ) => ( { amp: '&', lt: '<', gt: '>', quot: '"', '#039': "'", '#39': "'", apos: "'", nbsp: '\u00a0' }[ e ] ) );
+}
+
 function send( res, status, obj, headers ) {
 	const body = typeof obj === 'string' ? obj : JSON.stringify( obj );
 	res.writeHead( status, Object.assign( { 'content-type': 'application/json' }, headers || {} ) );
@@ -146,7 +150,14 @@ function handle( req, res, raw ) {
 			: send( res, 400, { error: { message: 'response_format type json_schema is not supported by this model' } } );
 	}
 
-	let text = JSON.stringify( { translations: buildTranslations( payload, mode ) } );
+	// Pair check of the audit: judge each stored translation against the mock's own translation.
+	const system = gemini ? ( body.systemInstruction && body.systemInstruction.parts[ 0 ].text ) || '' : body.messages[ 0 ].content;
+	const check = system.startsWith( 'You review stored website translations.' );
+	stats.log[ stats.log.length - 1 ].check = check;
+	const norm = ( t ) => String( t ).replace( /\s+/g, /Japanese|Chinese/.test( payload.target_language ) ? '' : ' ' ).trim();
+	let text = check
+		? JSON.stringify( { translations: payload.items.map( ( it ) => ( { id: it.id, text: [ it.source, decode( it.source ) ].some( ( src ) => norm( it.translation ) === norm( pseudo( src, payload.target_language, config.check_terms || [ 'OKAY EYEWEAR' ] ) ) ) ? 'match' : 'mismatch' } ) ) } )
+		: JSON.stringify( { translations: buildTranslations( payload, mode ) } );
 	let finish = 'STOP';
 	if ( mode === 'truncate' ) {
 		text = text.slice( 0, Math.floor( text.length / 2 ) );
