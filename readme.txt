@@ -85,7 +85,19 @@ Translations saved earlier by another engine may be misaligned, left in English 
 4. In TranslatePress → Settings → Automatic Translation, turn automatic translation on and choose "AI Translator (Gemini / OpenAI-compatible)" as the engine.
 5. Add your brand names under Protected terms.
 
-If another engine plugin (for example "HHG for TranslatePress") is active, switch the engine first and then deactivate the other plugin.
+= Switching from another engine (for example HHG for TranslatePress) =
+
+Sites that used another AI engine often have pages that were never translated and some wrong translations. Recommended order:
+
+1. Make a full backup (at least the database).
+2. Install and configure AI Translator (steps above), run the connection test.
+3. Choose "AI Translator" as the engine in TranslatePress → Automatic Translation.
+4. Deactivate the other engine plugin. Do not delete it yet, so you can switch back quickly; delete it once everything runs well. Until the engine is switched, the backfill queue does not run and repair is refused, and the admin shows a notice.
+5. Settings → AI Translator → Backfill queue → "Build page list and start" to translate pages nobody has visited yet.
+6. Settings → AI Translator → Audit & repair → "Start check". The check is read-only and costs nothing.
+7. If you have translations people already reviewed, add them to the accepted list first; they are never repaired.
+8. Repair a small batch first (one language, "error" findings, a few dozen rows), let the queue translate them again, check the pages, then continue in batches of at most 500. Purge your CDN yourself.
+9. If a batch looks wrong, roll it back under "Repairs"; the old text is restored exactly.
 
 == Frequently Asked Questions ==
 
