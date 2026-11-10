@@ -944,6 +944,160 @@ const S = {
 		} );
 	},
 
+	async repairsafe() {
+		// 0.6.2: repair batches survive cut-off requests and failing cache plugins; repairs visit
+		// mapped pages first and only listed pages when given a list.
+		const q = ( ...x ) => wp( 'aitp', 'queue', ...x );
+		const a = ( ...x ) => json( wp( 'aitp', 'audit', ...x ) );
+		const m = ( ...x ) => json( wp( 'aitp', 'map', ...x ) );
+		const h = ( ...x ) => json( wp( 'eval-file', '/e2e/pagemap-help.php', ...x.map( String ) ) );
+		const b64 = ( v ) => Buffer.from( JSON.stringify( v ) ).toString( 'base64' );
+		const opt = ( k, v ) => wp( 'eval', `update_option('${ k }', json_decode(base64_decode('${ b64( v ) }'), true)); echo 1;` );
+		const ev = ( php, v ) => json( wp( 'eval', `$in = json_decode(base64_decode('${ b64( v === undefined ? null : v ) }'), true); ${ php }` ) );
+		const tryWp = ( ...x ) => { try { return { ok: true, out: wp( ...x ) }; } catch ( e ) { return { ok: false, code: e.status, err: String( e.stderr || '' ).slice( -200 ) }; } };
+		const batches = () => json( wp( 'eval', 'echo wp_json_encode((object) AITP_Audit::batches());' ) );
+		const findIds = ( rowIds ) => { const rows = a( 'list', '--limit=5000', '--state=all' ).rows; return rowIds.map( ( id ) => ( rows.find( ( f ) => Number( f.row_id ) === Number( id ) && f.lang === L ) || {} ).id ); };
+		const unlock = () => wp( 'eval', 'global $wpdb; $wpdb->query("TRUNCATE {$wpdb->prefix}trp_machine_translation_locks"); echo 1;' );
+		const L = 'fr_FR';
+		const FA = 'Free shipping on every order over ninety nine dollars';
+		const FB = 'Only on the home page: ask for a free sample today';
+
+		await reset();
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_autofix_state","aitp_autofix_lock","aitp_map_state","aitp_map_lock","aitp_journal_state","aitp_purge_list") as $o) delete_option($o); echo 1;' );
+		opt( 'aitp_e2e_footer', [ [ FA, '' ], [ FB, 'okay-home' ] ] );
+		for ( const o of [ 'aitp_e2e_tamper', 'aitp_e2e_kill_after', 'aitp_e2e_purge_fault' ] ) opt( o, 0 );
+		opt( 'aitp_e2e_fake_litespeed', 1 );
+		opt( 'aitp_e2e_visit_log', 1 );
+		wp( 'eval', '@unlink(WP_CONTENT_DIR . "/e2e-state/litespeed.log"); echo 1;' );
+		wp( 'eval', `update_option('aitp_queue_settings', array_merge(AITP_Queue::defaults(), array('languages' => array('${ L }'))), false); echo 1;` );
+		q( 'sync' );
+		q( 'start' );
+		json( q( 'run', '--ignore-rate', '--minutes=6' ) );
+		q( 'pause' );
+		const rowA = h( 'find', L, FA );
+		const rowB = h( 'find', L, FB );
+		const pg = ev( 'echo wp_json_encode(array_map(function ($s) { $p = get_page_by_path($s); return array("id" => $p->ID, "src" => get_permalink($p), "url" => AITP_Queue::translated_url(get_permalink($p), "fr_FR")); }, $in));', { home: 'okay-home', article: 'okay-article' } );
+		// Like the row in the test site's report: TranslatePress also links the home footer text to the article
+		// (marked with meta_id far above the others; removed again at the end, other scenarios rely on it not being there).
+		const unlinkB = () => ev( 'global $wpdb; $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->prefix}trp_original_meta WHERE meta_key = %s AND original_id = %d AND meta_value = %s", "post_parent_id", (int) $in[0], (string) $in[1])); echo wp_json_encode(array("ok" => 1));', [ rowB.original_id, pg.article.id ] );
+		unlinkB();
+		ev( 'global $wpdb; $wpdb->insert($wpdb->prefix . "trp_original_meta", array("original_id" => (int) $in[0], "meta_key" => "post_parent_id", "meta_value" => (string) $in[1])); echo wp_json_encode(array("ok" => 1));', [ rowB.original_id, pg.article.id ] );
+		wp( 'aitp', 'map', 'start', `--urls=${ pg.home.src }`, `--languages=${ L }` );
+		m( 'run', '--ignore-rate', '--minutes=2' );
+		const rowX = ev( `global $wpdb; $t = $wpdb->prefix . 'trp_dictionary_en_us_fr_fr'; $m = $wpdb->prefix . 'trp_original_meta';
+			echo wp_json_encode($wpdb->get_row($wpdb->prepare("SELECT d.id, d.original, d.original_id FROM $t d JOIN $m m ON m.original_id = d.original_id AND m.meta_key = 'post_parent_id' WHERE m.meta_value = %s AND d.status = 1 AND d.id NOT IN (SELECT row_id FROM {$wpdb->prefix}aitp_pagestr WHERE lang = 'fr_FR') AND LENGTH(d.original) > 20 ORDER BY d.id LIMIT 1", (string) $in), ARRAY_A));`, pg.article.id );
+		const d0 = h( 'dict', L );
+
+		// 1. Mapped pages first: B (mapped on the home page, also linked to the article) is visited on the home page.
+		a( 'import', h( 'cand', L, `${ rowB.id },${ rowX.id }` ).file );
+		let ids = findIds( [ rowB.id, rowX.id ] );
+		unlock();
+		const r1 = a( 'repair', `--ids=${ ids.join( ',' ) }` );
+		const rb1 = a( 'rollback', r1.batch );
+		unlinkB(); // Only needed for the first repair.
+		// 2. With a list: only the home page; X (shown on no listed page) is skipped and stays open.
+		ids = findIds( [ rowB.id, rowX.id ] );
+		// A rollback leaves the pages the batch queued: take them off for a clean visit log.
+		wp( 'eval', 'global $wpdb; $wpdb->query("UPDATE {$wpdb->prefix}aitp_queue SET status = \'done\', note = \'\' WHERE status = \'pending\'"); echo 1;' );
+		h( 'visits', 'clear' );
+		unlock();
+		const r2 = a( 'repair', `--ids=${ ids.join( ',' ) }`, `--pages=${ pg.home.src }` );
+		const xState = ( a( 'list', '--limit=5000', '--state=all' ).rows.find( ( f ) => Number( f.row_id ) === Number( rowX.id ) && f.lang === L ) || {} ).state;
+		q( 'start' );
+		json( q( 'run', '--ignore-rate', '--minutes=2' ) );
+		q( 'pause' );
+		const visits = h( 'visits' ).visits;
+		const nowB = h( 'find', L, FB );
+		const rb2 = a( 'rollback', r2.batch );
+		const u1 = r1.urls.map( ( u ) => u.url ).sort();
+		record( 'repairsafe: repairs visit mapped pages first, and only listed pages', {
+			r1: { reset: r1.reset, urls: u1, pages: r1.pages }, r2: { reset: r2.reset, skipped: r2.skipped, urls: r2.urls.map( ( u ) => u.url ) }, x_state: xState, visits, B: nowB.status, rollbacks: [ rb1.restored, rb2.restored ],
+		}, {
+			mapped_page_for_mapped_row: u1.includes( pg.home.url ) && u1.includes( pg.article.url ) && r1.reset === 2,
+			list_keeps_to_listed_pages: r2.reset === 1 && r2.skipped.outside_pages === 1 && r2.urls.length === 1 && r2.urls[ 0 ].url === pg.home.url && xState === 'open',
+			no_visit_outside_list: visits.length > 0 && visits.every( ( v ) => v.split( '?' )[ 0 ] === new URL( pg.home.url ).pathname ),
+			retranslated: nowB.status === '1',
+			rolled_back: rb1.restored === 2 && rb2.restored === 1 && h( 'dict', L, d0.max ).sum === d0.sum,
+		} );
+
+		// Rows of the home page for the fault tests (4 machine-translated rows, not the footer ones).
+		const homeMap = m( 'list' ).rows.find( ( r ) => r.url === pg.home.url );
+		const four = json( wp( 'aitp', 'map', 'export', `--pages=${ homeMap.id }` ) ).rows.map( ( r ) => Number( r.id ) ).filter( ( id ) => id !== Number( rowA.id ) && id !== Number( rowB.id ) ).slice( 0, 4 );
+		a( 'import', h( 'cand', L, four.join( ',' ) ).file );
+		opt( 'aitp_e2e_purge_fault', 1 ); // Every cache purge from here on throws.
+		const d1 = h( 'dict', L );
+
+		// 3. The repair request dies after 2 of 4 rows: the batch is listed and rolls back exactly.
+		opt( 'aitp_e2e_kill_after', 2 );
+		const cut = tryWp( 'aitp', 'audit', 'repair', `--ids=${ findIds( four ).join( ',' ) }` );
+		opt( 'aitp_e2e_kill_after', 0 );
+		let bs = batches();
+		const cutId = Object.keys( bs ).find( ( k ) => bs[ k ].incomplete && ! bs[ k ].rolled_back );
+		const cutInfo = cutId ? { reset: bs[ cutId ].reset, state: bs[ cutId ].state, langs: bs[ cutId ].langs } : null;
+		const changed = h( 'dict', L ).sum !== d1.sum;
+		const rb3 = cutId ? a( 'rollback', cutId ) : {};
+		const after3 = h( 'dict', L ).sum;
+		bs = batches();
+
+		// 4. Batch record lost altogether (as on the test site): found from the backup rows.
+		const r4 = a( 'repair', `--ids=${ findIds( four ).join( ',' ) }` );
+		wp( 'eval', 'delete_option("aitp_repair_batches"); echo 1;' );
+		const b4 = batches()[ r4.batch ] || {};
+		const rb4 = a( 'rollback', r4.batch );
+		const after4 = h( 'dict', L ).sum;
+		const b4after = batches()[ r4.batch ] || {};
+
+		// 5. A rollback cut off halfway: running it again finishes it.
+		const r5 = a( 'repair', `--ids=${ findIds( four ).join( ',' ) }` );
+		opt( 'aitp_e2e_kill_after', 2 );
+		const cut5 = tryWp( 'aitp', 'audit', 'rollback', String( r5.batch ) );
+		opt( 'aitp_e2e_kill_after', 0 );
+		const mid5 = h( 'dict', L ).sum;
+		const rb5 = a( 'rollback', r5.batch );
+		const after5 = h( 'dict', L ).sum;
+		record( 'repairsafe: cut-off repairs and rollbacks, lost batch records', {
+			cut: { ok: cut.ok, code: cut.code, info: cutInfo, changed, rb: rb3 }, lost: { reset: b4.reset, incomplete: b4.incomplete, langs: b4.langs, rb: rb4, rolled_back: !! b4after.rolled_back }, cut_rollback: { ok: cut5.ok, code: cut5.code, rb: rb5 },
+		}, {
+			cut_repair_listed: cut.ok === false && cut.code === 3 && changed && cutInfo && cutInfo.state === 'running' && cutInfo.reset === 3,
+			cut_repair_rolled_back_exactly: rb3.restored === 3 && after3 === d1.sum && !! bs[ cutId ].rolled_back,
+			lost_record_found: r4.reset === 4 && b4.incomplete === true && b4.reset === 4 && b4.langs === L,
+			lost_record_rolled_back_exactly: rb4.restored === 4 && after4 === d1.sum && b4after.rolled_back,
+			cut_rollback_finished: cut5.ok === false && mid5 !== d1.sum && rb5.restored === 2 && after5 === d1.sum,
+		} );
+
+		// 6. Many pages: cache clearing goes to the background list; the cache plugin keeps failing.
+		wp( 'aitp', 'map', 'start', `--languages=${ L }` );
+		m( 'run', '--ignore-rate', '--minutes=3' );
+		const mapped = m( 'list' ).rows.filter( ( r ) => r.http === '200' ).length;
+		wp( 'eval', '@unlink(WP_CONTENT_DIR . "/e2e-state/litespeed.log"); global $wpdb; $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_log"); echo 1;' );
+		a( 'import', h( 'cand', L, `${ rowA.id },${ four[ 0 ] }` ).file );
+		const t6 = Date.now();
+		const r6 = a( 'repair', `--ids=${ findIds( [ rowA.id, four[ 0 ] ] ).join( ',' ) }` );
+		const ms6 = Date.now() - t6;
+		const b6 = batches()[ r6.batch ] || {};
+		const left = Number( wp( 'eval', 'echo AITP_Cache_Purge::tick(10);' ) );
+		const ls = ev( '$f = WP_CONTENT_DIR . "/e2e-state/litespeed.log"; $l = is_readable($f) ? array_filter(explode("\\n", file_get_contents($f))) : array(); echo wp_json_encode(array("n" => count($l), "notice" => count(array_filter($l, function ($x) { return strpos($x, "NOTICE") === 0; }))));' );
+		const warn = Number( wp( 'eval', 'global $wpdb; echo (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}aitp_log WHERE event = \'cache_purge\'");' ) );
+		const rb6 = a( 'rollback', r6.batch );
+		wp( 'eval', 'AITP_Cache_Purge::tick(10); echo 1;' );
+		const after6 = h( 'dict', L ).sum;
+		opt( 'aitp_e2e_purge_fault', 0 );
+		opt( 'aitp_e2e_fake_litespeed', 0 );
+		opt( 'aitp_e2e_visit_log', 0 );
+		opt( 'aitp_e2e_footer', [] ); // The other scenarios count the strings of the pages.
+		record( 'repairsafe: cache clearing in the background, silent, failures do not matter', {
+			mapped, r6: { reset: r6.reset, purge: r6.purge, ms: ms6 }, batch_state: b6.state, left, litespeed: ls, warnings: warn, rb6: rb6.restored,
+		}, {
+			many_pages: mapped >= 6,
+			purge_deferred: r6.reset === 2 && r6.purge && r6.purge.now === 0 && r6.purge.later >= 6,
+			batch_saved_first: b6.state === 'done' && ! b6.incomplete,
+			list_worked_through: left === 0 && ls.n >= 6,
+			no_litespeed_notices: ls.notice === 0,
+			failure_logged_not_fatal: warn >= 1,
+			rolled_back_exactly: rb6.restored === 2 && after6 === d1.sum,
+		} );
+	},
+
 	async openai() {
 		await reset();
 		wp( 'eval-file', '/e2e/configure.php', 'openai' );

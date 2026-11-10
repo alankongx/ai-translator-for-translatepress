@@ -136,6 +136,10 @@ final class AITP_CLI {
 	 * : For "repair": also reset rows on no known page (not linked by TranslatePress, not
 	 * found by page mapping); every page of their language is then queued again.
 	 *
+	 * [--pages=<list>]
+	 * : For "repair": only queue these pages (comma-separated addresses, or a file with one
+	 * per line; default-language or translated). Rows shown on none of them are skipped.
+	 *
 	 * ## EXAMPLES
 	 *
 	 *     wp aitp audit scan
@@ -174,7 +178,12 @@ final class AITP_CLI {
 					}
 					$ids = AITP_Audit::ids_for( $f );
 				}
-				WP_CLI::log( wp_json_encode( AITP_Audit::repair( $ids, array( 'unlinked' => ! empty( $assoc['include-unlinked'] ) ) ) ) );
+				$only = array();
+				if ( isset( $assoc['pages'] ) ) {
+					$u    = (string) $assoc['pages'];
+					$only = array_values( array_filter( array_map( 'trim', is_readable( $u ) ? preg_split( '~\R~', (string) file_get_contents( $u ) ) : explode( ',', $u ) ) ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+				}
+				WP_CLI::log( wp_json_encode( AITP_Audit::repair( $ids, array( 'unlinked' => ! empty( $assoc['include-unlinked'] ), 'pages' => $only ) ) ) );
 				break;
 			case 'rollback':
 				WP_CLI::log( wp_json_encode( AITP_Audit::rollback( isset( $args[1] ) ? (int) $args[1] : 0 ) ) );

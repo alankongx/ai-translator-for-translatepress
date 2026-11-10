@@ -4,7 +4,7 @@ Tags: translatepress, translation, gemini, openai, multilingual
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.6.1
+Stable tag: 0.6.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -117,6 +117,12 @@ Not by itself. The engine only translates strings TranslatePress sends to it, wh
 Updates come from the GitHub releases of this plugin. To turn update checks off: `add_filter( 'aitp_github_updates', '__return_false' );`
 
 == Changelog ==
+
+= 0.6.2 =
+* Repairs can no longer leave a batch without a record: the batch is recorded before the first row changes, and repairs and rollbacks keep running when the browser goes away. Batches whose record is missing or unfinished are found from their backup rows ("batch record incomplete") and can be downloaded and rolled back; a cut-off rollback finishes when run again.
+* Page caches are cleared in the background, 50 addresses at a time, after the batch is recorded; LiteSpeed adds no admin notice per address; errors of cache plugins are logged and do not stop anything.
+* Repairs visit pages from the page map first (pages only linked by TranslatePress are used for rows on no mapped page), and can be limited to a list of pages ("Only use these pages", `--pages=`).
+* The check no longer calls a row untranslated when its original is already in the target language (it exists in no other language), for example language switcher labels.
 
 = 0.6.1 =
 * Fix: internal visits of pages with non-ASCII addresses (Japanese, Arabic, …) failed their signature check, because the HTTP library rewrites percent-encodings before sending. Both sides now sign the same normalised address (RFC 3986): page map and backfill queue work on such pages.

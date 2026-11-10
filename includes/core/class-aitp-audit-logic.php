@@ -243,6 +243,91 @@ final class AITP_Audit_Logic {
 	}
 
 	/**
+	 * Pages a repair may visit for one row. Pages where the page map saw the row come first:
+	 * when there are any, pages only linked by TranslatePress (post_parent_id) are not used, so
+	 * a repair of rows taken from mapped pages stays on those pages. With a list of allowed
+	 * pages, only pages on that list are used.
+	 *
+	 * @param array<string,array>       $known   key => page (url, source_url, lang, from: map|meta).
+	 * @param array<string,bool>|null   $allowed Keys from page_keys(), or null for no list.
+	 * @return array<string,array> key => page
+	 */
+	public static function visit_pages( array $known, $allowed ) {
+		$mapped = array_filter(
+			$known,
+			function ( $p ) {
+				return isset( $p['from'] ) && $p['from'] === 'map';
+			}
+		);
+		$use = $mapped ? $mapped : $known;
+		if ( $allowed === null ) {
+			return $use;
+		}
+		return array_filter(
+			$use,
+			function ( $p ) use ( $allowed ) {
+				return isset( $allowed[ self::page_key( (string) $p['url'] ) ] ) || isset( $allowed[ self::page_key( isset( $p['source_url'] ) ? (string) $p['source_url'] : '' ) ] );
+			}
+		);
+	}
+
+	/**
+	 * @param string[] $urls Page addresses (default-language or translated).
+	 * @return array<string,bool> page key => true
+	 */
+	public static function page_keys( array $urls ) {
+		$out = array();
+		foreach ( $urls as $u ) {
+			$k = self::page_key( (string) $u );
+			if ( $k !== '' ) {
+				$out[ $k ] = true;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Comparable form of a page address: path and query in the canonical spelling, without
+	 * scheme, host, fragment and trailing slash.
+	 *
+	 * @param string $url Address.
+	 * @return string
+	 */
+	public static function page_key( $url ) {
+		$url = trim( (string) $url );
+		if ( $url === '' ) {
+			return '';
+		}
+		$url  = preg_replace( '~#.*$~s', '', $url );
+		$path = preg_match( '~^[a-z][a-z0-9+.-]*://[^/?]*(.*)$~i', $url, $m ) ? $m[1] : $url;
+		$q    = '';
+		if ( strpos( $path, '?' ) !== false ) {
+			list( $path, $q ) = explode( '?', $path, 2 );
+		}
+		$path = '/' . trim( $path, '/' );
+		return AITP_Queue_Logic::canonical_path( $path . ( $q !== '' ? '?' . $q : '' ) );
+	}
+
+	/**
+	 * A row stored unchanged whose original is not in the source language (TranslatePress
+	 * keeps, for example, the language switcher labels of each language as originals of that
+	 * language only). Only "untranslated" was found, the translation equals the original, and
+	 * no other language has this original: a person should look, nothing needs retranslating.
+	 *
+	 * @param array|null $f            Finding from check_row().
+	 * @param string     $original     Original.
+	 * @param mixed      $translated   Stored translation.
+	 * @param bool       $in_other     Whether another language's dictionary has this original.
+	 * @return array|null The finding to record.
+	 */
+	public static function native_identical( $f, $original, $translated, $in_other ) {
+		if ( ! $f || $in_other || $f['codes'] !== array( 'untranslated' ) || ! is_string( $translated ) || trim( $translated ) !== trim( (string) $original ) ) {
+			return $f;
+		}
+		return array( 'severity' => self::REVIEW, 'codes' => array( 'identical_native' ), 'details' => array() );
+	}
+
+	/**
 	 * Whether a row may be reset: still machine translated and unchanged since the scan.
 	 *
 	 * @param array $finding Finding: original_hash, translated_hash.

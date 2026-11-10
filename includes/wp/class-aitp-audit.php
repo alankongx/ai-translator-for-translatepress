@@ -330,17 +330,58 @@ final class AITP_Audit {
 		$rows = (array) $wpdb->get_results( $wpdb->prepare( self::select_rows( $t ) . ' WHERE tt.status = 1 AND tt.id > %d ORDER BY tt.id LIMIT %d', (int) $s['last_id'], self::CHUNK ), ARRAY_A );
 		$si   = self::source_info( $t['kind'] );
 		$ti   = AITP_Languages::info( $t['lang'] );
-		foreach ( $rows as $r ) {
+		$found = array();
+		$same  = array(); // Originals stored unchanged and called untranslated.
+		foreach ( $rows as $i => $r ) {
 			$s['last_id'] = (int) $r['id'];
 			$f            = AITP_Audit_Logic::check_row( $v, (string) $r['original'], $r['translated'], $si, $ti );
 			if ( $f ) {
-				self::record( $t, $r, $f, 'scan', (int) $s['scan'] );
+				$found[ $i ] = $f;
+				if ( $f['codes'] === array( 'untranslated' ) && is_string( $r['translated'] ) && trim( $r['translated'] ) === trim( (string) $r['original'] ) ) {
+					$same[ (string) $r['original'] ] = true;
+				}
 			}
+		}
+		$elsewhere = $same && $t['kind'] === 'dictionary' ? self::originals_elsewhere( $t, array_keys( $same ) ) : array();
+		foreach ( $found as $i => $f ) {
+			$r = $rows[ $i ];
+			if ( $t['kind'] === 'dictionary' && isset( $same[ (string) $r['original'] ] ) ) {
+				$f = AITP_Audit_Logic::native_identical( $f, (string) $r['original'], $r['translated'], isset( $elsewhere[ (string) $r['original'] ] ) );
+			}
+			self::record( $t, $r, $f, 'scan', (int) $s['scan'] );
 		}
 		$key               = $t['kind'] . ':' . $t['lang'];
 		$s['rows'][ $key ] = ( isset( $s['rows'][ $key ] ) ? (int) $s['rows'][ $key ] : 0 ) + count( $rows );
 		$s['scanned']     += count( $rows );
 		return count( $rows );
+	}
+
+	/**
+	 * Originals that also exist in another language's dictionary (so they are source text).
+	 *
+	 * @param array    $t         Dictionary table entry.
+	 * @param string[] $originals Originals.
+	 * @return array<string,bool>
+	 */
+	private static function originals_elsewhere( array $t, array $originals ) {
+		global $wpdb;
+		$out = array();
+		foreach ( self::tables() as $o ) {
+			if ( $o['kind'] !== 'dictionary' || $o['table'] === $t['table'] || ! $originals ) {
+				continue;
+			}
+			foreach ( array_chunk( $originals, 100 ) as $chunk ) {
+				$ph = implode( ',', array_fill( 0, count( $chunk ), '%s' ) );
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+				foreach ( (array) $wpdb->get_col( $wpdb->prepare( "SELECT original FROM `{$o['table']}` WHERE original IN ($ph)", $chunk ) ) as $hit ) {
+					if ( in_array( $hit, $chunk, true ) ) {
+						$out[ $hit ] = true; // Byte for byte (the IN above ignores case).
+					}
+				}
+			}
+			$originals = array_values( array_diff( $originals, array_keys( $out ) ) );
+		}
+		return $out;
 	}
 
 	/**
@@ -862,10 +903,39 @@ final class AITP_Audit {
 	 * Repair and rollback.
 	 * ----------------------------------------------------------------------------------- */
 
-	/** @return array<int,array> batch id => batch info, newest first. */
+	/**
+	 * Repair batches, newest first: the stored batch records, plus every batch that has backup
+	 * rows but no complete record (a repair cut off before it finished, or a record lost).
+	 * Such batches carry 'incomplete' => true; download and rollback work from the backup rows.
+	 *
+	 * @return array<int,array> batch id => batch info.
+	 */
 	public static function batches() {
+		global $wpdb;
 		$b = get_option( self::BATCHES, array() );
 		$b = is_array( $b ) ? $b : array();
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$rows = (array) $wpdb->get_results( 'SELECT batch, COUNT(*) AS n, MIN(created_at) AS t, SUM(restored = \'yes\') AS yes, SUM(restored = \'\') AS todo, GROUP_CONCAT(DISTINCT lang ORDER BY lang) AS langs FROM ' . AITP_Schema::table( 'repair' ) . ' GROUP BY batch', ARRAY_A );
+		foreach ( $rows as $r ) {
+			$id = (int) $r['batch'];
+			if ( isset( $b[ $id ] ) && ( ! isset( $b[ $id ]['state'] ) || $b[ $id ]['state'] === 'done' ) ) {
+				continue;
+			}
+			$info = isset( $b[ $id ] ) ? $b[ $id ] : array(
+				'time'    => (int) strtotime( $r['t'] . ' UTC' ),
+				'user'    => 0,
+				'skipped' => array(),
+				'pages'   => 0,
+			);
+			$info['incomplete'] = true;
+			$info['reset']      = (int) $r['n'];
+			$info['langs']      = (string) $r['langs'];
+			if ( (int) $r['todo'] === 0 && empty( $info['rolled_back'] ) ) {
+				$info['rolled_back'] = (int) strtotime( $r['t'] . ' UTC' ); // Every row handled by a rollback whose record is missing.
+				$info['restored']    = (int) $r['yes'];
+			}
+			$b[ $id ] = $info;
+		}
 		krsort( $b );
 		return $b;
 	}
@@ -907,9 +977,17 @@ final class AITP_Audit {
 			$out['skipped']['engine_not_selected'] = count( $ids );
 			return $out;
 		}
+		// Finish even when the browser goes away; the batch record is written before any change.
+		ignore_user_abort( true );
+		if ( function_exists( 'set_time_limit' ) ) {
+			@set_time_limit( 300 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		}
+		$allowed  = isset( $opts['pages'] ) && is_array( $opts['pages'] ) && $opts['pages'] ? AITP_Audit_Logic::page_keys( $opts['pages'] ) : null;
 		$audit    = AITP_Schema::table( 'audit' );
 		$repair   = AITP_Schema::table( 'repair' );
-		$pages_of = array(); // row key => pages showing the row.
+		$started  = false;
+		$pages_of = array(); // row key => pages to visit for the row.
+		$purge_of = array(); // row key => every known page showing the row.
 		$all_lang = array(); // Languages with reset rows on no known page.
 		$failures = new AITP_WP_Failures();
 		$skip     = function ( $why, $fid = 0 ) use ( &$out, $wpdb, $audit ) {
@@ -951,11 +1029,33 @@ final class AITP_Audit {
 					$skip( $block, (int) $f['id'] );
 					continue;
 				}
-				$rp = isset( $pages[ (int) $r['id'] ] ) ? $pages[ (int) $r['id'] ] : array();
-				if ( ! $rp && ! $unlinked ) {
+				$known = isset( $pages[ (int) $r['id'] ] ) ? $pages[ (int) $r['id'] ] : array();
+				$rp    = AITP_Audit_Logic::visit_pages( $known, $allowed );
+				if ( ! $rp && $allowed !== null && $known ) {
+					$skip( 'outside_pages' ); // Shown only on pages outside the given list: left open.
+					continue;
+				}
+				if ( ! $rp && ( ! $unlinked || $allowed !== null ) ) {
 					$skip( 'no_page' ); // The finding stays open: map its page first, or opt in.
 					$out['no_page'][] = (int) $f['id'];
 					continue;
+				}
+				if ( ! $started ) {
+					// Recorded before the first row changes: a cut-off repair can still be rolled back.
+					self::save_batch(
+						$batch,
+						array(
+							'time'      => time(),
+							'user'      => get_current_user_id(),
+							'state'     => 'running',
+							'reset'     => 0,
+							'skipped'   => array(),
+							'pages'     => 0,
+							'urls'      => array(),
+							'all_pages' => array(),
+						)
+					);
+					$started = true;
 				}
 				// phpcs:disable WordPress.DB.DirectDatabaseQuery
 				$wpdb->insert(
@@ -990,6 +1090,7 @@ final class AITP_Audit {
 				$failures->clear( AITP_Translator::failure_key( (string) $r['original'], $src, $lang ) );
 				if ( $rp ) {
 					$pages_of[ $kind . '|' . $lang . '|' . (int) $r['id'] ] = $rp;
+					$purge_of[ $kind . '|' . $lang . '|' . (int) $r['id'] ] = $known;
 				} else {
 					$all_lang[ $lang ] = true;
 				}
@@ -1004,12 +1105,12 @@ final class AITP_Audit {
 				$out['all_pages'][] = $lang;
 				$out['pages']      += AITP_Queue::requeue_lang( $lang, null );
 			}
-			AITP_Cache_Purge::urls( self::all_urls( $pages_of ) );
 			self::save_batch(
 				$batch,
 				array(
 					'time'      => time(),
 					'user'      => get_current_user_id(),
+					'state'     => 'done',
 					'reset'     => $out['reset'],
 					'skipped'   => $out['skipped'],
 					'pages'     => $out['pages'],
@@ -1017,6 +1118,8 @@ final class AITP_Audit {
 					'all_pages' => $out['all_pages'],
 				)
 			);
+			// Cached copies of every page showing the rows: cleared in the background, in small steps.
+			$out['purge'] = AITP_Cache_Purge::urls( self::all_urls( $purge_of ) );
 		}
 		( new AITP_WP_Log() )->log( 'notice', 'repair', $out );
 		return $out;
@@ -1051,8 +1154,10 @@ final class AITP_Audit {
 			return $out;
 		}
 		$lang = $t['lang'];
-		$add  = function ( $row_id, array $p ) use ( &$out ) {
-			$out[ (int) $row_id ][ sha1( $p['source_url'] . '|' . $p['lang'] ) ] = $p;
+		$add  = function ( $row_id, array $p, $from ) use ( &$out ) {
+			$k = sha1( $p['source_url'] . '|' . $p['lang'] );
+			$p['from'] = isset( $out[ (int) $row_id ][ $k ]['from'] ) && $out[ (int) $row_id ][ $k ]['from'] === 'map' ? 'map' : $from;
+			$out[ (int) $row_id ][ $k ] = $p;
 		};
 		$by_original = array();
 		foreach ( $rows as $id => $r ) {
@@ -1063,14 +1168,14 @@ final class AITP_Audit {
 				$p = self::post_page( $lang, $post_id );
 				if ( $p ) {
 					foreach ( $by_original[ $oid ] as $row_id ) {
-						$add( $row_id, $p );
+						$add( $row_id, $p, 'meta' );
 					}
 				}
 			}
 		}
 		foreach ( AITP_Pagemap::pages_of_rows( $lang, array_keys( $rows ) ) as $row_id => $list ) {
 			foreach ( $list as $p ) {
-				$add( $row_id, $p );
+				$add( $row_id, $p, 'map' );
 			}
 		}
 		return $out;
@@ -1143,6 +1248,11 @@ final class AITP_Audit {
 		$repair = AITP_Schema::table( 'repair' );
 		$audit  = AITP_Schema::table( 'audit' );
 		$out    = array( 'restored' => 0, 'skipped' => array() );
+		ignore_user_abort( true );
+		if ( function_exists( 'set_time_limit' ) ) {
+			@set_time_limit( 300 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		}
+		// Rows already handled by an earlier (perhaps cut-off) rollback are skipped: running it again finishes it.
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT * FROM $repair WHERE batch = %d AND restored = ''", (int) $batch ), ARRAY_A );
 		$by   = array();
@@ -1181,8 +1291,15 @@ final class AITP_Audit {
 				$out['restored']++;
 			}
 		}
+		$info = self::batches();
+		if ( isset( $info[ $batch ] ) ) {
+			$info[ $batch ]['rolled_back']      = time();
+			$info[ $batch ]['restored']         = ( isset( $info[ $batch ]['restored'] ) ? (int) $info[ $batch ]['restored'] : 0 ) + $out['restored'];
+			$info[ $batch ]['restore_skipped'] = $out['skipped'];
+			self::save_batch( $batch, $info[ $batch ] );
+		}
 		if ( $restored ) {
-			// Restored rows are translated: nothing to queue, only cached copies to refresh.
+			// Restored rows are translated: nothing to queue, only cached copies to refresh (in the background).
 			$pages_of = array();
 			foreach ( $restored as $k => $rows ) {
 				list( $kind, $lang ) = explode( '|', $k );
@@ -1190,14 +1307,7 @@ final class AITP_Audit {
 					$pages_of[ $k . '|' . $id ] = $list;
 				}
 			}
-			AITP_Cache_Purge::urls( self::all_urls( $pages_of ) );
-		}
-		$info = self::batches();
-		if ( isset( $info[ $batch ] ) ) {
-			$info[ $batch ]['rolled_back']      = time();
-			$info[ $batch ]['restored']         = ( isset( $info[ $batch ]['restored'] ) ? (int) $info[ $batch ]['restored'] : 0 ) + $out['restored'];
-			$info[ $batch ]['restore_skipped'] = $out['skipped'];
-			self::save_batch( $batch, $info[ $batch ] );
+			$out['purge'] = AITP_Cache_Purge::urls( self::all_urls( $pages_of ) );
 		}
 		( new AITP_WP_Log() )->log( 'notice', 'rollback', array( 'batch' => $batch ) + $out );
 		return $out;
@@ -1314,7 +1424,7 @@ final class AITP_Audit {
 	public static function batch_urls( $batch ) {
 		global $wpdb;
 		$info = self::batches();
-		if ( isset( $info[ $batch ]['urls'] ) ) {
+		if ( ! empty( $info[ $batch ]['urls'] ) ) {
 			return (array) $info[ $batch ]['urls']; // Chosen when the batch was reset.
 		}
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
@@ -1331,7 +1441,7 @@ final class AITP_Audit {
 				continue;
 			}
 			foreach ( self::row_pages( $t, self::rows( $t, $ids ) ) as $id => $list ) {
-				$pages_of[ $k . '|' . $id ] = $list;
+				$pages_of[ $k . '|' . $id ] = AITP_Audit_Logic::visit_pages( $list, null );
 			}
 		}
 		$out = array();

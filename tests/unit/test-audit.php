@@ -172,3 +172,31 @@ test( 'audit: accepted list reads "new" columns and {rows:[...]} files', functio
 	// The candidate import still reads the old text.
 	eq( 'قديم', AITP_Audit_Logic::parse_import( $json )['rows'][0]['old'] );
 } );
+
+test( 'audit: repair visits mapped pages first, and only listed pages when given a list', function () {
+	$home = array( 'url' => 'https://x.com/fr/', 'source_url' => 'https://x.com/', 'lang' => 'fr_FR', 'from' => 'map' );
+	$tr90 = array( 'url' => 'https://x.com/fr/tr90/', 'source_url' => 'https://x.com/tr90/', 'lang' => 'fr_FR', 'from' => 'map' );
+	$blog = array( 'url' => 'https://x.com/fr/spec-sheet/', 'source_url' => 'https://x.com/spec-sheet/', 'lang' => 'fr_FR', 'from' => 'meta' );
+	eq( array( 'h', 't' ), array_keys( AITP_Audit_Logic::visit_pages( array( 'h' => $home, 't' => $tr90, 'b' => $blog ), null ) ), 'meta-only page not used when mapped pages exist' );
+	eq( array( 'b' ), array_keys( AITP_Audit_Logic::visit_pages( array( 'b' => $blog ), null ) ), 'meta page when nothing is mapped' );
+	$allow = AITP_Audit_Logic::page_keys( array( 'http://x.com/tr90', "https://x.com/ja/%e3%82%ad/\n" ) );
+	eq( array( 't' ), array_keys( AITP_Audit_Logic::visit_pages( array( 'h' => $home, 't' => $tr90 ), $allow ) ), 'default-language address, other scheme, no trailing slash' );
+	eq( array(), AITP_Audit_Logic::visit_pages( array( 'b' => $blog ), $allow ), 'outside the list' );
+	$ja = array( 'url' => 'https://x.com/ja/%E3%82%AD/', 'source_url' => 'https://x.com/kids/', 'lang' => 'ja', 'from' => 'map' );
+	eq( array( 'j' ), array_keys( AITP_Audit_Logic::visit_pages( array( 'j' => $ja ), $allow ) ), 'translated address, other hex case' );
+	eq( '/fr/a%2Fb?x=1', AITP_Audit_Logic::page_key( 'https://x.com/fr/a%2fb/?x=1#top' ) );
+	eq( '/', AITP_Audit_Logic::page_key( 'https://x.com' ) );
+} );
+
+test( 'audit: text that is already in the target language is not called untranslated', function () {
+	$f = audit_row( 'Sprachauswahl der Website', 'Sprachauswahl der Website', 'de_DE' );
+	eq( array( 'untranslated' ), $f['codes'] );
+	$n = AITP_Audit_Logic::native_identical( $f, 'Sprachauswahl der Website', 'Sprachauswahl der Website', false );
+	eq( 'review', $n['severity'] );
+	eq( array( 'identical_native' ), $n['codes'] );
+	// English text left untranslated exists in the other languages too: still an error.
+	eq( $f, AITP_Audit_Logic::native_identical( $f, 'Free shipping on all orders', 'Free shipping on all orders', true ) );
+	// Not identical, or other problems as well: unchanged.
+	$g = audit_row( 'Free shipping on all orders', 'Free shipping on all orders today', 'fr_FR' );
+	eq( $g, AITP_Audit_Logic::native_identical( $g, 'Free shipping on all orders', 'Free shipping on all orders today', false ) );
+} );

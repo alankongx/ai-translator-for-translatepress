@@ -111,6 +111,7 @@ final class AITP_Admin_Audit {
 			'engine_not_selected' => __( 'nothing reset: TranslatePress is not using the AI Translator engine, so another engine would translate these rows again', 'ai-translator-for-translatepress' ),
 			'backup_failed' => __( 'backup failed', 'ai-translator-for-translatepress' ),
 			'no_page'       => __( 'on no known page (not reset)', 'ai-translator-for-translatepress' ),
+			'outside_pages' => __( 'not on any page of the given list (not reset)', 'ai-translator-for-translatepress' ),
 		);
 		return isset( $map[ $why ] ) ? $map[ $why ] : $why;
 	}
@@ -188,6 +189,7 @@ final class AITP_Admin_Audit {
 
 		self::render_autofix();
 		self::render_list( $set );
+		self::render_purge();
 		self::render_batches();
 		self::render_import();
 		self::render_settings( $set );
@@ -366,6 +368,7 @@ final class AITP_Admin_Audit {
 		echo '<button class="button" name="do" value="repair_filter" onclick="return confirm(' . esc_attr( wp_json_encode( $all_q ) ) . ');">' . esc_html( sprintf( __( 'Reset all matching (at most %s)', 'ai-translator-for-translatepress' ), $max ) ) . '</button> ';
 		echo '<button class="button" name="do" value="dismiss">' . esc_html__( 'Not a problem', 'ai-translator-for-translatepress' ) . '</button> ';
 		echo '<br><label><input type="checkbox" name="unlinked" value="1" onchange="if(this.checked&&!confirm(this.dataset.q)){this.checked=false;}" data-q="' . esc_attr__( 'Also reset rows that are on no known page? Their pages are unknown, so every page of their language is queued again (and visited when the backfill queue runs). Usually it is better to map the pages that show them first.', 'ai-translator-for-translatepress' ) . '"> ' . esc_html__( 'Also reset rows on no known page (queues every page of their language again)', 'ai-translator-for-translatepress' ) . '</label><br>';
+		echo '<details style="margin:4px 0;"><summary>' . esc_html__( 'Only use these pages (optional)', 'ai-translator-for-translatepress' ) . '</summary><textarea name="only_pages" rows="4" cols="90" placeholder="https://example.com/page/">' . '</textarea><br><span class="description">' . esc_html__( 'One address per line (default language or translated). Rows are queued only on pages of this list; rows not shown on any of them are skipped and stay open. Rows on no known page are never reset with a list.', 'ai-translator-for-translatepress' ) . '</span></details>';
 		echo '<button class="button" name="do" value="reopen">' . esc_html__( 'Reopen', 'ai-translator-for-translatepress' ) . '</button> ';
 		if ( $set['ai_check'] ) {
 			echo '<button class="button" name="do" value="ai">' . esc_html__( 'AI check selected', 'ai-translator-for-translatepress' ) . '</button> ';
@@ -385,6 +388,25 @@ final class AITP_Admin_Audit {
 		}
 	}
 
+	/** Page cache addresses still to clear after a repair or rollback. */
+	private static function render_purge() {
+		if ( AITP_Cache_Purge::status()['waiting'] ) {
+			AITP_Cache_Purge::tick( 3 ); // Viewing this page also moves the list on.
+		}
+		$st = AITP_Cache_Purge::status();
+		if ( ! $st['waiting'] ) {
+			return;
+		}
+		/* translators: 1: addresses waiting, 2: addresses per step */
+		echo '<div class="notice notice-info inline"><p>' . esc_html( sprintf( __( 'Page caches: %1$s addresses whose translations changed are still to be cleared (in the background, %2$s at a time).', 'ai-translator-for-translatepress' ), number_format_i18n( $st['waiting'] ), number_format_i18n( AITP_Cache_Purge::STEP ) ) );
+		if ( $st['waiting'] > 1000 || $st['dropped'] ) {
+			echo ' ' . esc_html__( 'With this many pages, clearing the whole cache in your cache plugin is quicker; then stop the list here.', 'ai-translator-for-translatepress' );
+		}
+		echo '</p><form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="aitp_audit"><input type="hidden" name="do" value="purge_clear">';
+		wp_nonce_field( 'aitp_audit' );
+		echo '<p><button class="button">' . esc_html__( 'I cleared the whole cache: stop the list', 'ai-translator-for-translatepress' ) . '</button></p></form></div>';
+	}
+
 	/** Repair batches. */
 	private static function render_batches() {
 		$b = AITP_Audit::batches();
@@ -397,8 +419,9 @@ final class AITP_Admin_Audit {
 			if ( ! empty( $info['rolled_back'] ) ) {
 				$rolled = wp_date( 'Y-m-d H:i', (int) $info['rolled_back'] ) . ' — ' . number_format_i18n( (int) $info['restored'] ) . ( ! empty( $info['restore_skipped'] ) ? ' (' . self::skipped_text( $info['restore_skipped'] ) . ')' : '' );
 			}
+			$inc  = ! empty( $info['incomplete'] ) ? __( 'batch record incomplete (the repair was cut off); shown from its backup rows, can be downloaded and rolled back', 'ai-translator-for-translatepress' ) . ( ! empty( $info['langs'] ) ? ' — ' . $info['langs'] : '' ) : '';
 			$auto = ! empty( $info['auto'] ) ? ' · ' . __( 'auto repair', 'ai-translator-for-translatepress' ) . ( isset( $info['auto_result'] ) && $info['auto_result'] !== 'ok' ? ' (' . self::autofix_reason( $info['auto_result'] ) . ')' : '' ) : '';
-			echo '<tr><td>' . esc_html( wp_date( 'Y-m-d H:i:s', (int) $info['time'] ) . $auto ) . '</td><td>' . esc_html( number_format_i18n( (int) $info['reset'] ) ) . '</td><td>' . esc_html( self::skipped_text( (array) $info['skipped'] ) ) . '</td><td>' . esc_html( number_format_i18n( (int) $info['pages'] ) ) . '</td><td>' . esc_html( $rolled ) . '</td><td>';
+			echo '<tr><td>' . esc_html( wp_date( 'Y-m-d H:i:s', (int) $info['time'] ) . $auto ) . ( $inc !== '' ? '<br><strong>' . esc_html( $inc ) . '</strong>' : '' ) . '<br><span class="description">#' . esc_html( (string) $id ) . '</span></td><td>' . esc_html( number_format_i18n( (int) $info['reset'] ) ) . '</td><td>' . esc_html( self::skipped_text( (array) $info['skipped'] ) ) . '</td><td>' . esc_html( number_format_i18n( (int) $info['pages'] ) ) . '</td><td>' . esc_html( $rolled ) . '</td><td>';
 			echo '<a class="button" href="' . esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=aitp_audit_backup&batch=' . rawurlencode( (string) $id ) ), 'aitp_audit_backup' ) ) . '">' . esc_html__( 'Download backup', 'ai-translator-for-translatepress' ) . '</a> ';
 			if ( empty( $info['rolled_back'] ) ) {
 				echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline-block;" onsubmit="return confirm(' . esc_attr( wp_json_encode( __( 'Put the old translations of this repair back? Rows translated manually since then are kept.', 'ai-translator-for-translatepress' ) ) ) . ');"><input type="hidden" name="action" value="aitp_audit"><input type="hidden" name="do" value="rollback"><input type="hidden" name="batch" value="' . esc_attr( (string) $id ) . '">';
@@ -508,7 +531,8 @@ final class AITP_Admin_Audit {
 					$type = 'warning';
 					break;
 				}
-				$r = AITP_Audit::repair( $sel, array( 'unlinked' => ! empty( $_POST['unlinked'] ) ) );
+				$only = isset( $_POST['only_pages'] ) ? array_values( array_filter( array_map( 'trim', preg_split( '~\R~', sanitize_textarea_field( wp_unslash( $_POST['only_pages'] ) ) ) ) ) ) : array();
+				$r    = AITP_Audit::repair( $sel, array( 'unlinked' => ! empty( $_POST['unlinked'] ), 'pages' => array_map( 'esc_url_raw', $only ) ) );
 				/* translators: 1: rows reset, 2: pages queued */
 				$msg = sprintf( __( '%1$s translations backed up and reset; %2$s pages queued again.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['reset'] ), number_format_i18n( $r['pages'] ) );
 				if ( $r['skipped'] ) {
@@ -525,6 +549,10 @@ final class AITP_Admin_Audit {
 				if ( AITP_Queue::state()['status'] !== 'running' ) {
 					$msg .= ' ' . __( 'The backfill queue is paused: start it, or the strings are translated again when visitors open the pages.', 'ai-translator-for-translatepress' );
 				}
+				break;
+			case 'purge_clear':
+				AITP_Cache_Purge::clear();
+				$msg = __( 'The list of page caches to clear was emptied.', 'ai-translator-for-translatepress' );
 				break;
 			case 'rollback':
 				$batch = isset( $_POST['batch'] ) ? (int) $_POST['batch'] : 0;

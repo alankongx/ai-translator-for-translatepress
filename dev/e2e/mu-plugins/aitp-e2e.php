@@ -106,3 +106,41 @@ add_filter(
 	},
 	20
 );
+
+/*
+ * 6. Faults around repairs (dev/e2e only):
+ *    aitp_e2e_kill_after = N   the WP-CLI process dies right before the (N+1)th change of a
+ *                              dictionary row by a repair or rollback (a cut-off request).
+ *    aitp_e2e_purge_fault = 1  cache purges throw an exception.
+ *    aitp_e2e_fake_litespeed   a stand-in \LiteSpeed\Purge that logs purge_url calls (with the
+ *                              "no admin notice" flag) to wp-content/e2e-state/litespeed.log.
+ */
+add_filter(
+	'query',
+	function ( $q ) {
+		static $n = 0, $max = null, $busy = false;
+		if ( PHP_SAPI !== 'cli' || $busy || ! did_action( 'plugins_loaded' ) ) {
+			return $q;
+		}
+		if ( $max === null ) {
+			$busy = true; // get_option() itself runs a query.
+			$max  = (int) get_option( 'aitp_e2e_kill_after', 0 );
+			$busy = false;
+		}
+		if ( $max > 0 && preg_match( '~^UPDATE `[^`]*trp_dictionary_[^`]*` SET translated = ~', $q ) ) {
+			if ( ++$n > $max ) {
+				fwrite( STDERR, "e2e: killed before change $n\n" );
+				exit( 3 );
+			}
+		}
+		return $q;
+	}
+);
+add_action(
+	'aitp_purge_urls',
+	function () {
+		if ( get_option( 'aitp_e2e_purge_fault' ) ) {
+			throw new RuntimeException( 'e2e: cache plugin failed' );
+		}
+	}
+);

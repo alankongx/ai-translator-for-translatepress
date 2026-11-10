@@ -631,6 +631,7 @@ final class AITP_Admin {
 			'imported'                  => __( 'from imported list', 'ai-translator-for-translatepress' ),
 			'near_misaligned'           => __( 'next to misplaced translations', 'ai-translator-for-translatepress' ),
 			'identical'                 => __( 'left exactly as the original', 'ai-translator-for-translatepress' ),
+			'identical_native'          => __( 'same as the original, which is not in the source language (no other language has it); probably fine', 'ai-translator-for-translatepress' ),
 			'ai_mismatch'               => __( 'AI: belongs to another text or incomplete', 'ai-translator-for-translatepress' ),
 			'control_chars'             => __( 'control characters', 'ai-translator-for-translatepress' ),
 			'no_translate_changed'      => __( 'text marked "do not translate" changed', 'ai-translator-for-translatepress' ),

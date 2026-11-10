@@ -1977,3 +1977,30 @@ msgstr "内部访问签名不通过（没有翻译，也没有保存）"
 
 msgid "last visit failed: internal visit signature not accepted"
 msgstr "上次访问失败：内部访问签名不通过"
+
+msgid "not on any page of the given list (not reset)"
+msgstr "不在指定的任何页面上（未改回）"
+
+msgid "Only use these pages (optional)"
+msgstr "只用这些页面（可选）"
+
+msgid "One address per line (default language or translated). Rows are queued only on pages of this list; rows not shown on any of them are skipped and stay open. Rows on no known page are never reset with a list."
+msgstr "每行一个地址（默认语言或译文地址都可以）。只把名单里的页面排进队列；不在其中任何页面上显示的行会跳过、保持待处理。填了名单时，不在已知页面上的行一律不改回。"
+
+msgid "Page caches: %1$s addresses whose translations changed are still to be cleared (in the background, %2$s at a time)."
+msgstr "页面缓存：还有 %1$s 个译文有变化的地址待清理（后台进行，每次 %2$s 个）。"
+
+msgid "With this many pages, clearing the whole cache in your cache plugin is quicker; then stop the list here."
+msgstr "页面这么多时，直接在缓存插件里清全站缓存更快；清完再在这里停止列表。"
+
+msgid "I cleared the whole cache: stop the list"
+msgstr "我已清全站缓存：停止这个列表"
+
+msgid "batch record incomplete (the repair was cut off); shown from its backup rows, can be downloaded and rolled back"
+msgstr "批次记录不完整（修复中途被打断）；按备份行显示，可以下载备份和回滚"
+
+msgid "The list of page caches to clear was emptied."
+msgstr "待清理的页面缓存列表已清空。"
+
+msgid "same as the original, which is not in the source language (no other language has it); probably fine"
+msgstr "与原文相同，但原文本身就不是源语言（其他语言里没有这条原文），多半没问题"
