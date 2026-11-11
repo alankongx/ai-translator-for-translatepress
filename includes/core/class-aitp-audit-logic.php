@@ -23,7 +23,7 @@ final class AITP_Audit_Logic {
 	const REVIEW = 'review';
 
 	/** Most rows one repair or AI-check action may touch. */
-	const MAX_ACTION_ROWS = 500;
+	const MAX_ACTION_ROWS = 1000;
 
 	/**
 	 * Judge one stored machine translation.

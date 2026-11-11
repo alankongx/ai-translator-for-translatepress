@@ -2008,3 +2008,21 @@ msgstr "与原文相同，但原文本身就不是源语言（其他语言里没
 #. translators: %s: rows of the batch restored by all rollbacks
 msgid "This batch: %s restored in all."
 msgstr "这一批累计恢复 %s 条。"
+
+#. translators: 1: time, 2: batch id or "-"
+msgid "This form was already sent at %1$s (batch %2$s); it was not run again. Check the repairs list below, then use the form on a freshly opened page if more is needed."
+msgstr "这张表单在 %1$s 已经提交过（批次 %2$s），这次没有再执行。请先看下面的修复记录；还要继续的话，请在重新打开的页面上操作。"
+
+msgid "roll back"
+msgstr "回滚"
+
+msgid "reset"
+msgstr "改回"
+
+#. translators: 1: action, 2: time, 3: batch, 4: rows
+msgid "Last action: %1$s at %2$s (batch %3$s) – finished, %4$s rows."
+msgstr "上次操作：%2$s %1$s（批次 %3$s）——已完成，%4$s 条。"
+
+#. translators: 1: action, 2: time
+msgid "Last action: %1$s at %2$s – no result recorded yet. It may still be running, or the page failed after it ran: check the repairs list below before sending anything again."
+msgstr "上次操作：%2$s %1$s——还没有记录结果。可能还在执行，也可能已执行完但页面出错了：请先看下面的修复记录，不要重复提交。"

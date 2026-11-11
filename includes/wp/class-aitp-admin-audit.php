@@ -135,6 +135,7 @@ final class AITP_Admin_Audit {
 		$counts = AITP_Audit::counts();
 
 		echo '<p class="description" style="max-width:860px;">' . esc_html__( 'Checks translations TranslatePress already stored (machine translations only) with the same rules used before saving new ones. Nothing is changed by a check. Rows you choose can be set back to "not translated" – they are backed up first and translated again through the backfill queue. Manual translations are never touched.', 'ai-translator-for-translatepress' ) . '</p>';
+		self::render_last_action();
 
 		// Overview.
 		$labels = array(
@@ -343,6 +344,7 @@ final class AITP_Admin_Audit {
 		}
 
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="aitp_audit">';
+		self::once_field();
 		foreach ( self::filter_args( $f ) as $k => $v ) {
 			echo '<input type="hidden" name="' . esc_attr( $k ) . '" value="' . esc_attr( $v ) . '">';
 		}
@@ -425,6 +427,7 @@ final class AITP_Admin_Audit {
 			echo '<a class="button" href="' . esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=aitp_audit_backup&batch=' . rawurlencode( (string) $id ) ), 'aitp_audit_backup' ) ) . '">' . esc_html__( 'Download backup', 'ai-translator-for-translatepress' ) . '</a> ';
 			if ( empty( $info['rolled_back'] ) || ! empty( $info['todo'] ) ) {
 				echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline-block;" onsubmit="return confirm(' . esc_attr( wp_json_encode( __( 'Put the old translations of this repair back? Rows translated manually since then are kept.', 'ai-translator-for-translatepress' ) ) ) . ');"><input type="hidden" name="action" value="aitp_audit"><input type="hidden" name="do" value="rollback"><input type="hidden" name="batch" value="' . esc_attr( (string) $id ) . '">';
+				self::once_field();
 				wp_nonce_field( 'aitp_audit' );
 				echo '<button class="button">' . esc_html__( 'Roll back', 'ai-translator-for-translatepress' ) . '</button></form>';
 			}
@@ -502,6 +505,68 @@ final class AITP_Admin_Audit {
 		echo '<tr><th>' . esc_html( $k ) . '</th><td>' . esc_html( $v ) . '</td></tr>';
 	}
 
+	/** A one-time id: a repair or rollback form is carried out once, however often it is sent. */
+	private static function once_field() {
+		echo '<input type="hidden" name="aitp_form" value="' . esc_attr( str_replace( '-', '', wp_generate_uuid4() ) ) . '">';
+	}
+
+	/**
+	 * @param string $form Form id.
+	 * @return array|null The earlier use of this form.
+	 */
+	private static function form_used( $form ) {
+		if ( $form === '' ) {
+			return null;
+		}
+		$l = get_option( 'aitp_audit_actions', array() );
+		return is_array( $l ) && isset( $l[ $form ] ) ? $l[ $form ] : null;
+	}
+
+	/**
+	 * Record a repair or rollback sent from a form (before it runs, and again when done), so a page
+	 * that fails to load afterwards can still tell what happened.
+	 *
+	 * @param string $form Form id ('' for forms of older pages).
+	 * @param array  $info do, time, state (running|done), batch, n.
+	 */
+	private static function action_record( $form, array $info ) {
+		$l    = get_option( 'aitp_audit_actions', array() );
+		$l    = is_array( $l ) ? $l : array();
+		$key  = $form !== '' ? $form : 'f' . get_current_user_id();
+		$l[ $key ] = array_merge( isset( $l[ $key ] ) ? $l[ $key ] : array(), $info, array( 'user' => get_current_user_id() ) );
+		if ( count( $l ) > 50 ) {
+			uasort( $l, function ( $a, $b ) { return (int) $a['time'] - (int) $b['time']; } );
+			$l = array_slice( $l, -50, null, true );
+		}
+		update_option( 'aitp_audit_actions', $l, false );
+	}
+
+	/** The last repair or rollback sent from a form (shown for a day). */
+	private static function render_last_action() {
+		$l = get_option( 'aitp_audit_actions', array() );
+		if ( ! is_array( $l ) || ! $l ) {
+			return;
+		}
+		$last = null;
+		foreach ( $l as $a ) {
+			if ( ! $last || (int) $a['time'] >= (int) $last['time'] ) {
+				$last = $a;
+			}
+		}
+		if ( ! $last || time() - (int) $last['time'] > DAY_IN_SECONDS ) {
+			return;
+		}
+		$what = $last['do'] === 'rollback' ? __( 'roll back', 'ai-translator-for-translatepress' ) : __( 'reset', 'ai-translator-for-translatepress' );
+		if ( $last['state'] === 'done' ) {
+			/* translators: 1: action, 2: time, 3: batch, 4: rows */
+			$text = sprintf( __( 'Last action: %1$s at %2$s (batch %3$s) – finished, %4$s rows.', 'ai-translator-for-translatepress' ), $what, wp_date( 'Y-m-d H:i:s', (int) $last['time'] ), $last['batch'] ? '#' . $last['batch'] : '-', number_format_i18n( (int) $last['n'] ) );
+		} else {
+			/* translators: 1: action, 2: time */
+			$text = sprintf( __( 'Last action: %1$s at %2$s – no result recorded yet. It may still be running, or the page failed after it ran: check the repairs list below before sending anything again.', 'ai-translator-for-translatepress' ), $what, wp_date( 'Y-m-d H:i:s', (int) $last['time'] ) );
+		}
+		echo '<div class="notice notice-' . ( $last['state'] === 'done' ? 'info' : 'warning' ) . ' inline" data-aitp-last="' . esc_attr( $last['do'] . ':' . $last['state'] ) . '"><p>' . esc_html( $text ) . '</p></div>';
+	}
+
 	/** Form actions. */
 	public static function handle() {
 		if ( ! current_user_can( 'manage_options' ) ) {
@@ -513,6 +578,19 @@ final class AITP_Admin_Audit {
 		$f    = self::filters();
 		$msg  = '';
 		$type = 'success';
+		$form = isset( $_POST['aitp_form'] ) ? sanitize_key( wp_unslash( $_POST['aitp_form'] ) ) : '';
+		if ( in_array( $do, array( 'repair', 'repair_filter', 'rollback' ), true ) ) {
+			$used = self::form_used( $form );
+			if ( $used ) {
+				// The same form again (page reloaded after an error, back button, double click): never a second batch.
+				/* translators: 1: time, 2: batch id or "-" */
+				$msg  = sprintf( __( 'This form was already sent at %1$s (batch %2$s); it was not run again. Check the repairs list below, then use the form on a freshly opened page if more is needed.', 'ai-translator-for-translatepress' ), wp_date( 'H:i:s', (int) $used['time'] ), $used['batch'] ? '#' . $used['batch'] : '-' );
+				$type = 'warning';
+				$do   = '';
+			} else {
+				self::action_record( $form, array( 'do' => $do, 'time' => time(), 'state' => 'running', 'batch' => $do === 'rollback' && isset( $_POST['batch'] ) ? (int) $_POST['batch'] : 0, 'n' => 0 ) );
+			}
+		}
 		switch ( $do ) {
 			case 'scan':
 				AITP_Audit::start_scan();
@@ -527,12 +605,14 @@ final class AITP_Admin_Audit {
 			case 'repair_filter':
 				$sel = $do === 'repair' ? $ids : AITP_Audit::ids_for( $f );
 				if ( ! $sel ) {
+					self::action_record( $form, array( 'state' => 'done', 'n' => 0 ) );
 					$msg  = __( 'Nothing selected.', 'ai-translator-for-translatepress' );
 					$type = 'warning';
 					break;
 				}
 				$only = isset( $_POST['only_pages'] ) ? array_values( array_filter( array_map( 'trim', preg_split( '~\R~', sanitize_textarea_field( wp_unslash( $_POST['only_pages'] ) ) ) ) ) ) : array();
 				$r    = AITP_Audit::repair( $sel, array( 'unlinked' => ! empty( $_POST['unlinked'] ), 'pages' => array_map( 'esc_url_raw', $only ) ) );
+				self::action_record( $form, array( 'state' => 'done', 'batch' => $r['reset'] ? (int) $r['batch'] : 0, 'n' => (int) $r['reset'] ) );
 				/* translators: 1: rows reset, 2: pages queued */
 				$msg = sprintf( __( '%1$s translations backed up and reset; %2$s pages queued again.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['reset'] ), number_format_i18n( $r['pages'] ) );
 				if ( $r['skipped'] ) {
@@ -557,6 +637,7 @@ final class AITP_Admin_Audit {
 			case 'rollback':
 				$batch = isset( $_POST['batch'] ) ? (int) $_POST['batch'] : 0;
 				$r     = AITP_Audit::rollback( $batch );
+				self::action_record( $form, array( 'state' => 'done', 'batch' => $batch, 'n' => (int) $r['restored'] ) );
 				/* translators: %s: rows restored */
 				$msg = sprintf( __( '%s translations restored.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['restored'] ) );
 				if ( isset( $r['total'] ) && $r['total'] !== $r['restored'] ) {

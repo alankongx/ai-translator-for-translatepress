@@ -4,7 +4,7 @@ Tags: translatepress, translation, gemini, openai, multilingual
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.6.3
+Stable tag: 0.6.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,7 +66,7 @@ Translations saved earlier by another engine may be misaligned, left in English 
 * Accepted list: translations people have already reviewed (for example rows fixed in an earlier clean-up) can be imported by ID, original and text. The check still lists them, but they are never counted as open and never repaired while their text is unchanged.
 * Repair is refused, and the backfill queue waits, while TranslatePress uses another engine or automatic translation is off — otherwise another engine would translate the reset rows.
 * Batch auto repair (off by default): works through the "wrong" findings of page text one batch at a time (20–500 rows, one language at a time). Each batch is backed up and reset, only the pages that show those strings are visited until they are translated again, the new translations are checked, and the next batch starts only if the batch came out clean. It stops by itself when more than 5% of a batch is still wrong or untranslated, when English is stored as a translation, on provider errors or failed page loads, when TranslatePress stops using this engine, or when a batch is rolled back. It has its own daily character cap (default: half the TranslatePress limit). "Probably misplaced" and "check meaning" findings, the accepted list, manual translations, structured data and interface text are never touched; rows still wrong afterwards are left for a person. Every batch can be rolled back.
-* Human translations (status "manually translated") are never listed, changed or restored over. No table is emptied, no row deleted, at most 500 rows per action.
+* Human translations (status "manually translated") are never listed, changed or restored over. No table is emptied, no row deleted, at most 1000 rows per action.
 * WP-CLI: `wp aitp audit scan|status|list|repair|rollback|import|ai-check|dismiss`, `wp aitp autofix status|settings|start|stop|run`, `wp aitp map start|run|stop|status|list|export|clear`, `wp aitp journal start|stop|status|undo|new-rows`.
 
 = Security =
@@ -99,7 +99,7 @@ Sites that used another AI engine often have pages that were never translated an
 5. Settings → AI Translator → Backfill queue → "Build page list and start" to translate pages nobody has visited yet.
 6. Settings → AI Translator → Audit & repair → "Start check". The check is read-only and costs nothing.
 7. If you have translations people already reviewed, add them to the accepted list first; they are never repaired.
-8. Map the pages you care about (Page map & test journal), so repairs know which pages show which strings. Then repair a small batch first (one language, "error" findings, a few dozen rows), let the queue translate them again, check the pages, then continue in batches of at most 500. Purge your CDN yourself.
+8. Map the pages you care about (Page map & test journal), so repairs know which pages show which strings. Then repair a small batch first (one language, "error" findings, a few dozen rows), let the queue translate them again, check the pages, then continue in batches of at most 1000. Purge your CDN yourself.
 9. If a batch looks wrong, roll it back under "Repairs"; the old text is restored exactly.
 
 == Frequently Asked Questions ==
@@ -117,6 +117,11 @@ Not by itself. The engine only translates strings TranslatePress sends to it, wh
 Updates come from the GitHub releases of this plugin. To turn update checks off: `add_filter( 'aitp_github_updates', '__return_false' );`
 
 == Changelog ==
+
+= 0.6.4 =
+* Manual actions on findings (reset, "Not a problem", reopen, AI check, `wp aitp audit repair --yes`) take up to 1,000 rows at a time instead of 500. The batch auto repair keeps at most 500 rows per batch.
+* Fix: admin pages answered with HTTP 500 after large repairs or rollbacks on LiteSpeed hosts. LiteSpeed Cache adds one tag per cleared page to a response header (about 41 bytes each), and in WP-Cron stores that header for the next request of any visitor; clearing hundreds or thousands of pages made headers of tens of kilobytes. Now one request clears at most 30 pages through LiteSpeed, and with LiteSpeed active more than 200 changed pages clear its page cache once as a whole (a header of a few bytes); other cache plugins still get the page list in the background.
+* A repair or rollback form is carried out once: sending the same form again (reload after an error, back button, double click) does nothing and says so. The check page shows the last repair or rollback and whether it finished.
 
 = 0.6.3 =
 * Rollback counts in the repair list are read from the backup rows, so a rollback of a batch found from its backup rows, a rollback finished in several runs and a repeated rollback each count every row once (a record lost before showed twice its rows). Rows kept as they are stay counted apart. The notice after a rollback adds the total of the batch when earlier runs restored rows too.

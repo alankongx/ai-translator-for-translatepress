@@ -136,11 +136,44 @@ add_filter(
 		return $q;
 	}
 );
-add_action(
-	'aitp_purge_urls',
-	function () {
-		if ( get_option( 'aitp_e2e_purge_fault' ) ) {
+if ( get_option( 'aitp_e2e_purge_fault' ) ) {
+	// Only while the fault test runs: otherwise this hook would count as a second cache plugin.
+	add_action(
+		'aitp_purge_urls',
+		function () {
 			throw new RuntimeException( 'e2e: cache plugin failed' );
 		}
-	}
+	);
+}
+// Header probe (0.6.4 F07): ?aitp_e2e_purge=N hands N page addresses to AITP_Cache_Purge::urls();
+// ?aitp_e2e_raw=N calls LiteSpeed's purge_url N times in one request (how 0.6.3 cleared a list);
+// ?aitp_e2e_crontick=1 runs the background step as WP-Cron would.
+add_action(
+	'init',
+	function () {
+		if ( ! get_option( 'aitp_e2e_purge_probe' ) || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		if ( isset( $_GET['aitp_e2e_crontick'] ) ) {
+			// The background step as WP-Cron runs it (wp_doing_cron(): LiteSpeed also stores its header for the next request).
+			add_filter( 'wp_doing_cron', '__return_true' );
+			wp_send_json( array( 'left' => AITP_Cache_Purge::tick( 10 ) ) );
+		}
+		$n = isset( $_GET['aitp_e2e_purge'] ) ? (int) $_GET['aitp_e2e_purge'] : ( isset( $_GET['aitp_e2e_raw'] ) ? (int) $_GET['aitp_e2e_raw'] : 0 );
+		if ( $n < 1 ) {
+			return;
+		}
+		$urls = array();
+		for ( $i = 1; $i <= $n; $i++ ) {
+			$urls[] = home_url( '/probe-page-' . $i . '/' );
+		}
+		if ( isset( $_GET['aitp_e2e_raw'] ) ) {
+			foreach ( $urls as $u ) {
+				\LiteSpeed\Purge::cls()->purge_url( $u, false, true );
+			}
+			wp_send_json( array( 'raw' => $n ) );
+		}
+		wp_send_json( AITP_Cache_Purge::urls( $urls ) );
+	},
+	99
 );

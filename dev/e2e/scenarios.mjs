@@ -1129,6 +1129,129 @@ const S = {
 		} );
 	},
 
+	async bulk() {
+		// 0.6.4: one manual action takes up to 1,000 rows. 1,005 synthetic machine-translated rows linked
+		// to the article page (removed again at the end: the dictionaries are emptied by reset(), the
+		// originals and their page links are not).
+		const a = ( ...x ) => json( wp( 'aitp', 'audit', ...x ) );
+		const h = ( ...x ) => json( wp( 'eval-file', '/e2e/pagemap-help.php', ...x.map( String ) ) );
+		const b64 = ( v ) => Buffer.from( JSON.stringify( v ) ).toString( 'base64' );
+		const ev = ( php, v ) => json( wp( 'eval', `$in = json_decode(base64_decode('${ b64( v === undefined ? null : v ) }'), true); ${ php }` ) );
+		const tryWp = ( ...x ) => { try { return { ok: true, out: wp( ...x ) }; } catch ( e ) { return { ok: false, code: e.status }; } };
+		const L = 'fr_FR';
+		const N = 1005;
+		const cleanup = () => ev( 'global $wpdb; $o = $wpdb->prefix . "trp_original_strings"; $ids = $wpdb->get_col("SELECT id FROM $o WHERE original LIKE \'AITP bulk row %\'"); if ($ids) { $wpdb->query("DELETE FROM {$wpdb->prefix}trp_original_meta WHERE original_id IN (" . implode(",", array_map("intval", $ids)) . ")"); $wpdb->query("DELETE FROM $o WHERE id IN (" . implode(",", array_map("intval", $ids)) . ")"); $wpdb->query("DELETE FROM {$wpdb->prefix}trp_dictionary_en_us_fr_fr WHERE original LIKE \'AITP bulk row %\'"); } echo wp_json_encode(array("removed" => count($ids)));' );
+
+		await reset();
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_audit_state","aitp_repair_batches","aitp_autofix_state","aitp_map_state","aitp_journal_state","aitp_purge_list") as $o) delete_option($o); update_option("aitp_e2e_kill_after", 0); echo 1;' );
+		cleanup();
+		const made = ev( `global $wpdb; $art = get_page_by_path('okay-article')->ID; $ids = array();
+			for ($i = 1; $i <= (int) $in; $i++) {
+				$o = sprintf('AITP bulk row %04d: lightweight frames for every face', $i);
+				$wpdb->insert($wpdb->prefix . 'trp_original_strings', array('original' => $o));
+				$oid = (int) $wpdb->insert_id;
+				$wpdb->insert($wpdb->prefix . 'trp_original_meta', array('original_id' => $oid, 'meta_key' => 'post_parent_id', 'meta_value' => (string) $art));
+				$wpdb->insert($wpdb->prefix . 'trp_dictionary_en_us_fr_fr', array('original' => $o, 'translated' => sprintf('Ligne %04d : montures légères pour chaque visage', $i), 'status' => 1, 'block_type' => 0, 'original_id' => $oid));
+				$ids[] = (int) $wpdb->insert_id;
+			}
+			echo wp_json_encode(array('ids' => $ids));`, N ).ids;
+		const d0 = h( 'dict', L );
+		const imp = a( 'import', h( 'cand', L, made.join( ',' ) ).file );
+		wp( 'eval', 'global $wpdb; $wpdb->query("TRUNCATE {$wpdb->prefix}trp_machine_translation_locks"); echo 1;' );
+
+		// 1. One "reset all matching" takes 1,000 rows; timed.
+		const t1 = Date.now();
+		const r1 = a( 'repair', '--source=import', '--yes' );
+		const ms1 = Date.now() - t1;
+		const b1 = h( 'dict', L );
+		const t2 = Date.now();
+		const rb1 = a( 'rollback', r1.batch );
+		const ms2 = Date.now() - t2;
+		const after1 = h( 'dict', L );
+
+		// 2. A 1,000-row repair cut off after 600 rows: found from its backup rows, rolled back exactly.
+		wp( 'eval', 'update_option("aitp_e2e_kill_after", 600); echo 1;' );
+		const cut = tryWp( 'aitp', 'audit', 'repair', '--source=import', '--yes' );
+		wp( 'eval', 'update_option("aitp_e2e_kill_after", 0); echo 1;' );
+		const bs = json( wp( 'eval', 'echo wp_json_encode((object) AITP_Audit::batches());' ) );
+		const cutId = Object.keys( bs ).find( ( k ) => Number( k ) !== r1.batch && ! bs[ k ].rolled_back );
+		const cutInfo = cutId ? { reset: bs[ cutId ].reset, state: bs[ cutId ].state, incomplete: bs[ cutId ].incomplete } : null;
+		const rb2 = cutId ? a( 'rollback', cutId ) : {};
+		const after2 = h( 'dict', L );
+		const removed = cleanup().removed;
+		record( 'bulk: 1,000 rows per action, timed, cut off, rolled back exactly', {
+			made: made.length, imported: imp, r1: { reset: r1.reset, skipped: r1.skipped, pages: r1.pages, ms: ms1 }, rollback: { restored: rb1.restored, ms: ms2 }, cut: { ok: cut.ok, code: cut.code, info: cutInfo, rb: rb2.restored }, removed,
+		}, {
+			cap_1000: r1.reset === 1000 && b1.sum !== d0.sum,
+			rolled_back_exactly: rb1.restored === 1000 && after1.sum === d0.sum,
+			cut_found_and_rolled_back: cut.ok === false && cut.code === 3 && cutInfo && cutInfo.state === 'running' && cutInfo.reset === 601 && rb2.restored === 601 && after2.sum === d0.sum,
+			cleaned_up: removed === N,
+		} );
+	},
+
+	async litespeed() {
+		// 0.6.4 (F07): with the real LiteSpeed Cache 7.9.3 (dev/e2e: `./wp.sh plugin install litespeed-cache --version=7.9.3`),
+		// no request carries more than 30 purge tags; long lists clear its whole cache once; a form is carried out once.
+		const ev = ( php ) => json( wp( 'eval', php ) );
+		const have = wp( 'plugin', 'is-installed', 'litespeed-cache' ) === '' ? true : false;
+		if ( ! have ) {
+			record( 'litespeed: real LiteSpeed Cache 7.9.3', {}, { installed: false } );
+			return;
+		}
+		wp( 'plugin', 'activate', 'litespeed-cache' );
+		wp( 'eval', 'update_option("aitp_e2e_purge_probe", 1); update_option("aitp_e2e_fake_litespeed", 0); update_option("aitp_e2e_purge_fault", 0); AITP_Cache_Purge::clear(); delete_option("aitp_audit_actions"); delete_option("litespeed.purge.queue"); echo 1;' );
+		const ck = ev( '$u = get_user_by("login", "admin"); $e = time() + 3600; echo wp_json_encode(array("c" => LOGGED_IN_COOKIE . "=" . rawurlencode(wp_generate_auth_cookie($u->ID, $e, "logged_in")) . "; " . AUTH_COOKIE . "=" . rawurlencode(wp_generate_auth_cookie($u->ID, $e, "auth")), "uid" => $u->ID));' );
+		const curl = ( url, ...extra ) => {
+			const out = execFileSync( 'curl', [ '-s', '-D', '-', '-o', '/dev/null', '-H', `Cookie: ${ ck.c }`, ...extra, url ], { encoding: 'utf8', maxBuffer: 1 << 24 } );
+			const status = Number( ( out.match( /^HTTP\/\S+ (\d+)/m ) || [] )[ 1 ] );
+			const h = out.split( /\r?\n/ ).filter( ( l ) => /^x-litespeed-purge:/i.test( l ) );
+			const last = h.length ? h[ h.length - 1 ] : '';
+			return { status, bytes: last.length, tags: last ? last.split( ',' ).length - 1 : 0, all_bytes: out.length };
+		};
+		const body = ( url ) => execFileSync( 'curl', [ '-s', '-H', `Cookie: ${ ck.c }`, url ], { encoding: 'utf8', maxBuffer: 1 << 24 } );
+		const SITE = 'http://localhost:8088';
+		const AUDIT = `${ SITE }/wp-admin/options-general.php?page=aitp&tab=audit`;
+
+		// 1. How 0.6.3 cleared a list: LiteSpeed's purge_url 1,000 times in one request.
+		const raw = curl( `${ SITE }/?aitp_e2e_raw=1000` );
+		// 2. Now: 1,000 addresses clear the whole LiteSpeed cache once; 150 go to the list.
+		const p1000 = JSON.parse( body( `${ SITE }/?aitp_e2e_purge=1000` ) );
+		const h1000 = curl( `${ SITE }/?aitp_e2e_purge=1000` );
+		wp( 'eval', 'AITP_Cache_Purge::clear(); echo 1;' );
+		const p150 = JSON.parse( body( `${ SITE }/?aitp_e2e_purge=150` ) );
+		// 3. Viewing the audit page moves the list on by at most 30.
+		const page = curl( AUDIT );
+		const left1 = ev( 'echo wp_json_encode(AITP_Cache_Purge::status());' ).waiting;
+		// 4. WP-Cron: at most 30, and the header LiteSpeed stores for the next request is as small.
+		const cron = curl( `${ SITE }/?aitp_e2e_crontick=1` );
+		const stored = Number( wp( 'eval', 'echo strlen((string) get_option("litespeed.purge.queue"));' ) );
+		const next = curl( `${ SITE }/` );
+		const left2 = ev( 'echo wp_json_encode(AITP_Cache_Purge::status());' ).waiting;
+
+		// 5. A rollback form sent twice runs once; the page names the last action.
+		const html = body( AUDIT );
+		const nonce = ( html.match( /name="_wpnonce" value="([0-9a-f]+)"/ ) || [] )[ 1 ];
+		const post = () => curl( `${ SITE }/wp-admin/admin-post.php`, '--data', `action=aitp_audit&do=rollback&batch=1&aitp_form=e2eonce1&_wpnonce=${ nonce }&_wp_http_referer=%2F` );
+		const flash = () => ev( `$f = get_transient("aitp_flash_${ ck.uid }"); delete_transient("aitp_flash_${ ck.uid }"); echo wp_json_encode(array("f" => $f));` ).f || {};
+		post();
+		const f1 = flash();
+		post();
+		const f2 = flash();
+		const shown = body( AUDIT ).includes( 'data-aitp-last="rollback:done"' );
+		wp( 'eval', 'AITP_Cache_Purge::clear(); delete_option("aitp_audit_actions"); delete_option("aitp_e2e_purge_probe"); delete_option("litespeed.purge.queue"); echo 1;' );
+		wp( 'plugin', 'deactivate', 'litespeed-cache' );
+		record( 'litespeed: real LiteSpeed Cache 7.9.3, headers per request, a form runs once', {
+			raw_1000: raw, purge_1000: { r: p1000, h: h1000 }, purge_150: p150, audit_page: page, left_after_page: left1, cron, stored_queue_bytes: stored, next_request: next, left_after_cron: left2, form: { first: f1, second: f2, shown },
+		}, {
+			old_way_huge_header: raw.tags === 1000 && raw.bytes > 30000,
+			many_clear_all_once: p1000.all === true && p1000.waiting === 0 && h1000.tags <= 1 && h1000.bytes < 100,
+			short_list_waits: p150.later === 150 && p150.all === false,
+			page_view_capped: page.status === 200 && page.tags > 0 && page.tags <= 30 && page.bytes < 2000 && left1 === 120,
+			cron_capped: cron.tags <= 30 && stored < 2000 && next.tags <= 30 && left2 === 90,
+			form_runs_once: f1.type === 'success' && f2.type === 'warning' && ( f2.message || '' ).includes( '#1' ) && shown,
+		} );
+	},
+
 	async openai() {
 		await reset();
 		wp( 'eval-file', '/e2e/configure.php', 'openai' );

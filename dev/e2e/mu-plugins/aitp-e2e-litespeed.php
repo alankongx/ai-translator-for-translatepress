@@ -14,5 +14,9 @@ if ( ! class_exists( '\LiteSpeed\Purge' ) && get_option( 'aitp_e2e_fake_litespee
 			file_put_contents( WP_CONTENT_DIR . '/e2e-state/litespeed.log', ( $quite ? 'quiet ' : 'NOTICE ' ) . $url . "\n", FILE_APPEND );
 			return true;
 		}
+		public static function purge_all_lscache( $reason = false ) {
+			@mkdir( WP_CONTENT_DIR . '/e2e-state', 0777, true );
+			file_put_contents( WP_CONTENT_DIR . '/e2e-state/litespeed.log', "ALL\n", FILE_APPEND );
+		}
 	}
 }

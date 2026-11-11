@@ -130,7 +130,7 @@ final class AITP_CLI {
 	 * : For "scan": how long to work (default 10).
 	 *
 	 * [--yes]
-	 * : Confirm "repair" without --ids (applies to every match of the filters, at most 500).
+	 * : Confirm "repair" without --ids (applies to every match of the filters, at most 1000).
 	 *
 	 * [--include-unlinked]
 	 * : For "repair": also reset rows on no known page (not linked by TranslatePress, not
@@ -174,7 +174,7 @@ final class AITP_CLI {
 			case 'repair':
 				if ( ! $ids ) {
 					if ( empty( $assoc['yes'] ) ) {
-						WP_CLI::error( 'Give --ids, or --yes to reset every match of the filters (at most 500).' );
+						WP_CLI::error( 'Give --ids, or --yes to reset every match of the filters (at most 1000).' );
 					}
 					$ids = AITP_Audit::ids_for( $f );
 				}
