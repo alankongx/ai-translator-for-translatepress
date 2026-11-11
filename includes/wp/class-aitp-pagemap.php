@@ -26,6 +26,7 @@ final class AITP_Pagemap {
 	const CRON      = 'aitp_map_tick';
 	const GAP       = 5;    // Seconds between two map visits.
 	const MAX_ITEMS = 3000; // Pages x languages of one run.
+	const ROW_PAGES = 250;  // Pages kept per row (a footer line is on every page; more than 200 clear the whole cache anyway).
 
 	/** @var int Seconds between two map visits (WP-CLI --ignore-rate sets 0). */
 	public static $gap = self::GAP;
@@ -112,6 +113,14 @@ final class AITP_Pagemap {
 				continue;
 			}
 			$obj = self::object_of( $u );
+			// The site's own spelling of the address (the one the queue and TranslatePress use),
+			// however it was typed (percent-encoded or not, with or without the trailing slash).
+			if ( $obj[0] === 'post' ) {
+				$link = (string) get_permalink( $obj[1] );
+				$u    = $link !== '' ? $link : $u;
+			} elseif ( $obj[0] === 'home' ) {
+				$u = home_url( '/' );
+			}
 			foreach ( $langs as $lang ) {
 				$turl = AITP_Queue::translated_url( $u, $lang );
 				if ( $turl === '' || $turl === $u ) {
@@ -443,10 +452,13 @@ final class AITP_Pagemap {
 		}
 		$table = AITP_Schema::table( 'pagemap' );
 		$ps    = AITP_Schema::table( 'pagestr' );
-		foreach ( array_chunk( $ids, 500 ) as $chunk ) {
+		foreach ( array_chunk( $ids, 50 ) as $chunk ) {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
 			$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT p.row_id, m.url, m.source_url, m.lang, m.object_type, m.object_id FROM $ps p JOIN $table m ON m.id = p.page_id WHERE p.lang = %s AND p.row_id IN (" . implode( ',', $chunk ) . ')', $lang ), ARRAY_A );
 			foreach ( $rows as $r ) {
+				if ( isset( $out[ (int) $r['row_id'] ] ) && count( $out[ (int) $r['row_id'] ] ) >= self::ROW_PAGES ) {
+					continue;
+				}
 				$out[ (int) $r['row_id'] ][] = array(
 					'url'         => (string) $r['url'],
 					'source_url'  => (string) $r['source_url'],

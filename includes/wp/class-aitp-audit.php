@@ -990,6 +990,27 @@ final class AITP_Audit {
 			$out['skipped']['engine_not_selected'] = count( $ids );
 			return $out;
 		}
+		if ( ! self::write_lock( 'repair' ) ) {
+			$out['busy'] = self::write_lock_holder();
+			return $out;
+		}
+		try {
+			return self::repair_locked( $ids, $opts, $out );
+		} finally {
+			self::write_unlock();
+		}
+	}
+
+	/**
+	 * @param int[] $ids  Finding ids.
+	 * @param array $opts Options of repair().
+	 * @param array $out  Result so far.
+	 * @return array
+	 */
+	private static function repair_locked( array $ids, array $opts, array $out ) {
+		global $wpdb;
+		$batch    = $out['batch'];
+		$unlinked = ! empty( $opts['unlinked'] );
 		// Finish even when the browser goes away; the batch record is written before any change.
 		ignore_user_abort( true );
 		if ( function_exists( 'set_time_limit' ) ) {
@@ -1068,6 +1089,7 @@ final class AITP_Audit {
 							'urls'      => array(),
 							'all_pages' => array(),
 							'only'      => $only,
+							'journal'   => AITP_Journal::max_id(), // Test journal entries after this one belong to the batch.
 						)
 					);
 					$started = true;
@@ -1084,8 +1106,9 @@ final class AITP_Audit {
 						'original'   => (string) $r['original'],
 						'translated' => (string) $r['translated'],
 						'status'     => (int) $r['status'],
+						'exact'      => 1,
 						'created_at' => current_time( 'mysql', true ),
-					)
+					) + ( $r['original_id'] !== null && $r['original_id'] !== '' ? array( 'original_id' => (int) $r['original_id'] ) : array() )
 				);
 				$backup_id = (int) $wpdb->insert_id;
 				if ( ! $backup_id ) {
@@ -1103,6 +1126,10 @@ final class AITP_Audit {
 				$wpdb->update( $audit, array( 'state' => 'fixed', 'batch' => $batch ), array( 'id' => (int) $f['id'] ) );
 				// phpcs:enable
 				$failures->clear( AITP_Translator::failure_key( (string) $r['original'], $src, $lang ) );
+				$decoded = html_entity_decode( (string) $r['original'], ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+				if ( $decoded !== (string) $r['original'] ) {
+					$failures->clear( AITP_Translator::failure_key( $decoded, $src, $lang ) ); // The engine is given decoded text.
+				}
 				if ( $rp ) {
 					$pages_of[ $kind . '|' . $lang . '|' . (int) $r['id'] ] = $rp;
 					$purge_of[ $kind . '|' . $lang . '|' . (int) $r['id'] ] = $known;
@@ -1113,6 +1140,8 @@ final class AITP_Audit {
 			}
 		}
 		if ( $out['reset'] ) {
+			$prev_info    = get_option( self::BATCHES, array() );
+			$prev_info    = is_array( $prev_info ) && isset( $prev_info[ $batch ] ) ? $prev_info[ $batch ] : array();
 			$visit        = AITP_Audit_Logic::cover_pages( $pages_of );
 			$out['urls']  = array_values( array_map( function ( $p ) { return array( 'url' => $p['url'], 'lang' => $p['lang'] ); }, $visit ) );
 			$out['pages'] = AITP_Queue::requeue_urls( array_values( $visit ) );
@@ -1132,6 +1161,7 @@ final class AITP_Audit {
 					'urls'      => $out['urls'],
 					'all_pages' => $out['all_pages'],
 					'only'      => $only,
+					'journal'   => isset( $prev_info['journal'] ) ? $prev_info['journal'] : 0,
 				)
 			);
 			// Cached copies of every page showing the rows: cleared in the background, in small steps.
@@ -1215,7 +1245,7 @@ final class AITP_Audit {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
 			$rows = (array) $wpdb->get_results( "SELECT DISTINCT original_id, meta_value FROM `$meta` WHERE meta_key = 'post_parent_id' AND original_id IN (" . implode( ',', $chunk ) . ')', ARRAY_A );
 			foreach ( $rows as $r ) {
-				if ( (int) $r['meta_value'] > 0 ) {
+				if ( (int) $r['meta_value'] > 0 && ( ! isset( $out[ (int) $r['original_id'] ] ) || count( $out[ (int) $r['original_id'] ] ) < AITP_Pagemap::ROW_PAGES ) ) {
 					$out[ (int) $r['original_id'] ][] = (int) $r['meta_value'];
 				}
 			}
@@ -1260,10 +1290,25 @@ final class AITP_Audit {
 	 * @return array{restored:int,skipped:array<string,int>,total?:int} restored and skipped: this round; total: rows of the batch restored by all rounds.
 	 */
 	public static function rollback( $batch ) {
+		if ( ! self::write_lock( 'rollback' ) ) {
+			return array( 'restored' => 0, 'skipped' => array(), 'busy' => self::write_lock_holder() );
+		}
+		try {
+			return self::rollback_locked( (int) $batch );
+		} finally {
+			self::write_unlock();
+		}
+	}
+
+	/**
+	 * @param int $batch Batch id.
+	 * @return array
+	 */
+	private static function rollback_locked( $batch ) {
 		global $wpdb;
 		$repair = AITP_Schema::table( 'repair' );
 		$audit  = AITP_Schema::table( 'audit' );
-		$out    = array( 'restored' => 0, 'skipped' => array() );
+		$out    = array( 'restored' => 0, 'skipped' => array(), 'newer' => array() );
 		ignore_user_abort( true );
 		if ( function_exists( 'set_time_limit' ) ) {
 			@set_time_limit( 300 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
@@ -1275,12 +1320,26 @@ final class AITP_Audit {
 		foreach ( $rows as $b ) {
 			$by[ $b['kind'] . '|' . $b['lang'] ][] = $b;
 		}
+		$all      = self::batches();
+		$mine     = isset( $all[ $batch ] ) ? $all[ $batch ] : array();
+		$after    = isset( $mine['journal'] ) ? (int) $mine['journal'] : -1; // -1: batch from before 0.6.5.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$since    = (string) $wpdb->get_var( $wpdb->prepare( "SELECT MIN(created_at) FROM $repair WHERE batch = %d", (int) $batch ) );
 		$restored = array();
+		$marked   = array(); // kind|lang => row ids put back (for the test journal).
 		foreach ( $by as $k => $list ) {
 			list( $kind, $lang ) = explode( '|', $k );
 			$t                   = self::table_for( $kind, $lang );
 			$cur                 = $t ? self::rows( $t, wp_list_pluck( $list, 'row_id' ) ) : array();
+			$newer               = self::newer_batches( $kind, $lang, (int) $batch, wp_list_pluck( $list, 'row_id' ) );
 			foreach ( $list as $b ) {
+				if ( isset( $newer[ (int) $b['row_id'] ] ) ) {
+					// A newer repair, not rolled back yet, also reset this row: its backup holds the text in
+					// between. Left for a later round (not marked), after that batch is rolled back.
+					$out['skipped']['newer_batch'] = ( isset( $out['skipped']['newer_batch'] ) ? $out['skipped']['newer_batch'] : 0 ) + 1;
+					$out['newer'][ $newer[ (int) $b['row_id'] ] ] = true;
+					continue;
+				}
 				$r     = isset( $cur[ (int) $b['row_id'] ] ) ? $cur[ (int) $b['row_id'] ] : null;
 				$block = $t ? AITP_Audit_Logic::restore_block( $b, $r ) : 'missing';
 				if ( $block === '' ) {
@@ -1291,21 +1350,37 @@ final class AITP_Audit {
 						$n = 1; // Already identical to the backup (MySQL reports 0 affected rows): nothing to undo.
 					}
 					$block = $n === 1 ? '' : 'changed';
+					if ( $block === '' && ! empty( $b['exact'] ) && $kind === 'dictionary' && (string) $r['original_id'] !== (string) $b['original_id'] ) {
+						// TranslatePress fills original_id when it saves a row that had none: put that back too.
+						$oid = $b['original_id'] === null ? 'NULL' : (string) (int) $b['original_id'];
+						// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+						$wpdb->query( $wpdb->prepare( "UPDATE `{$t['table']}` SET original_id = $oid WHERE id = %d", (int) $b['row_id'] ) );
+					}
 				}
 				if ( $block !== '' ) {
 					$out['skipped'][ $block ] = ( isset( $out['skipped'][ $block ] ) ? $out['skipped'][ $block ] : 0 ) + 1;
-					$wpdb->update( $repair, array( 'restored' => 'skip:' . $block ), array( 'id' => (int) $b['id'] ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					$wpdb->query( $wpdb->prepare( "UPDATE $repair SET restored = %s WHERE id = %d AND restored = ''", 'skip:' . $block, (int) $b['id'] ) );
 					continue;
 				}
-				// phpcs:disable WordPress.DB.DirectDatabaseQuery
-				$wpdb->update( $repair, array( 'restored' => 'yes' ), array( 'id' => (int) $b['id'] ) );
-				$wpdb->update( $audit, array( 'state' => 'open', 'batch' => 0, 'original_hash' => sha1( (string) $b['original'] ), 'translated_hash' => sha1( (string) $b['translated'] ) ), array( 'id' => (int) $b['finding_id'] ) );
-				// phpcs:enable
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				if ( 1 !== (int) $wpdb->query( $wpdb->prepare( "UPDATE $repair SET restored = 'yes' WHERE id = %d AND restored = ''", (int) $b['id'] ) ) ) {
+					continue; // Handled by another round at the same time.
+				}
+				$wpdb->update( $audit, array( 'state' => 'open', 'batch' => 0, 'original_hash' => sha1( (string) $b['original'] ), 'translated_hash' => sha1( (string) $b['translated'] ) ), array( 'id' => (int) $b['finding_id'] ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 				if ( $r && $t ) {
 					$restored[ $kind . '|' . $lang ][ (int) $r['id'] ] = $r;
 				}
+				$marked[ $kind . '|' . $lang ][] = (int) $b['row_id'];
 				$out['restored']++;
 			}
+		}
+		$out['newer'] = array_keys( $out['newer'] );
+		rsort( $out['newer'] );
+		foreach ( $marked as $k => $row_ids ) {
+			list( $kind, $lang ) = explode( '|', $k );
+			// Translations saved after the reset are replaced by the backup now: an undo must not touch them.
+			AITP_Journal::rolled_back( $kind, $lang, $row_ids, $after, $since );
 		}
 		$info = self::batches(); // Counts read from the backup rows, this round included.
 		if ( isset( $info[ $batch ] ) ) {
@@ -1327,6 +1402,98 @@ final class AITP_Audit {
 		}
 		( new AITP_WP_Log() )->log( 'notice', 'rollback', array( 'batch' => $batch ) + $out );
 		return $out;
+	}
+
+	/**
+	 * Newer repair batches that reset some of these rows and are not rolled back for them.
+	 *
+	 * @param string $kind    Table kind.
+	 * @param string $lang    Language.
+	 * @param int    $batch   This batch.
+	 * @param int[]  $row_ids Rows.
+	 * @return array<int,int> row id => newest such batch
+	 */
+	private static function newer_batches( $kind, $lang, $batch, array $row_ids ) {
+		global $wpdb;
+		$out = array();
+		$ids = array_values( array_filter( array_map( 'intval', $row_ids ) ) );
+		foreach ( array_chunk( $ids, 500 ) as $chunk ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+			$rows = (array) $wpdb->get_results( $wpdb->prepare( 'SELECT row_id, MAX(batch) AS b FROM ' . AITP_Schema::table( 'repair' ) . " WHERE lang = %s AND kind = %s AND batch > %d AND restored = '' AND row_id IN (" . implode( ',', $chunk ) . ') GROUP BY row_id', (string) $lang, (string) $kind, (int) $batch ), ARRAY_A );
+			foreach ( $rows as $r ) {
+				$out[ (int) $r['row_id'] ] = (int) $r['b'];
+			}
+		}
+		return $out;
+	}
+
+	/* -------------------------------------------------------------------------------------
+	 * Write lock: repairs, rollbacks and the undo of the test journal change TranslatePress rows
+	 * one at a time (two at once could each back up or restore what the other just wrote).
+	 * ----------------------------------------------------------------------------------- */
+
+	const WRITE_LOCK = 'aitp_write_lock';
+
+	/** @var int Depth of the write lock held by this request. */
+	private static $write_depth = 0;
+
+	/**
+	 * @param string $who What takes it (repair, rollback, undo).
+	 * @param int    $ttl Seconds before a lock left by a request that died is taken over.
+	 * @return bool
+	 */
+	public static function write_lock( $who, $ttl = 900 ) {
+		if ( self::$write_depth > 0 ) {
+			self::$write_depth++;
+			return true;
+		}
+		$val = array( 'until' => time() + $ttl, 'who' => (string) $who, 'since' => time() );
+		$ok  = add_option( self::WRITE_LOCK, $val, '', 'no' );
+		if ( ! $ok ) {
+			wp_cache_delete( self::WRITE_LOCK, 'options' );
+			$cur = get_option( self::WRITE_LOCK );
+			if ( ! is_array( $cur ) || (int) $cur['until'] < time() ) {
+				delete_option( self::WRITE_LOCK );
+				$ok = add_option( self::WRITE_LOCK, $val, '', 'no' );
+			}
+		}
+		if ( $ok ) {
+			self::$write_depth = 1;
+			static $hooked = false;
+			if ( ! $hooked ) {
+				$hooked = true;
+				// Released even when the request ends in a fatal error or time limit.
+				register_shutdown_function( array( __CLASS__, 'write_release_all' ) );
+			}
+		}
+		return $ok;
+	}
+
+	/** Release one level of the write lock. */
+	public static function write_unlock() {
+		if ( self::$write_depth > 1 ) {
+			self::$write_depth--;
+			return;
+		}
+		self::write_release_all();
+	}
+
+	/** Release the write lock if this request holds it. */
+	public static function write_release_all() {
+		if ( self::$write_depth > 0 ) {
+			self::$write_depth = 0;
+			delete_option( self::WRITE_LOCK );
+		}
+	}
+
+	/** @return array{who:string,since:int} What holds the write lock now (who '' = nothing). */
+	public static function write_lock_holder() {
+		wp_cache_delete( self::WRITE_LOCK, 'options' );
+		$cur = get_option( self::WRITE_LOCK );
+		if ( ! is_array( $cur ) || (int) $cur['until'] < time() ) {
+			return array( 'who' => '', 'since' => 0 );
+		}
+		return array( 'who' => (string) $cur['who'], 'since' => (int) $cur['since'] );
 	}
 
 	/**

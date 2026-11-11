@@ -112,6 +112,7 @@ final class AITP_Admin_Audit {
 			'backup_failed' => __( 'backup failed', 'ai-translator-for-translatepress' ),
 			'no_page'       => __( 'on no known page (not reset)', 'ai-translator-for-translatepress' ),
 			'outside_pages' => __( 'not on any page of the given list (not reset)', 'ai-translator-for-translatepress' ),
+			'newer_batch'   => __( 'also reset by a newer repair that is not rolled back yet (roll that one back first, then this one again)', 'ai-translator-for-translatepress' ),
 		);
 		return isset( $map[ $why ] ) ? $map[ $why ] : $why;
 	}
@@ -221,6 +222,9 @@ final class AITP_Admin_Audit {
 			'cap'                 => __( 'daily character cap of the auto repair reached; continues tomorrow', 'ai-translator-for-translatepress' ),
 			'tp_limit'            => __( 'TranslatePress daily limit (minus the share kept for visitors) reached; continues tomorrow', 'ai-translator-for-translatepress' ),
 			'quota'               => __( 'TranslatePress daily limit reached; continues tomorrow', 'ai-translator-for-translatepress' ),
+			'max_batches'         => __( 'the number of batches set for one start is done', 'ai-translator-for-translatepress' ),
+			'visit_check'         => __( 'a test load of a page before the next batch failed (nothing was reset)', 'ai-translator-for-translatepress' ),
+			'busy'                => __( 'a repair, rollback or undo is running', 'ai-translator-for-translatepress' ),
 		);
 		if ( isset( $map[ $r ] ) ) {
 			return $map[ $r ];
@@ -251,6 +255,7 @@ final class AITP_Admin_Audit {
 		echo '<br><span class="description">' . esc_html__( 'None ticked = all languages, one language after another.', 'ai-translator-for-translatepress' ) . '</span></td></tr>';
 		/* translators: 1: smallest, 2: largest batch */
 		echo '<tr><th>' . esc_html__( 'Rows per batch', 'ai-translator-for-translatepress' ) . '</th><td><input type="number" name="x[batch]" min="' . (int) AITP_Autofix_Logic::MIN_BATCH . '" max="' . (int) AITP_Autofix_Logic::MAX_BATCH . '" value="' . (int) $set['batch'] . '" class="small-text"> <span class="description">' . esc_html( sprintf( __( '%1$s–%2$s; smaller batches stop sooner when something goes wrong.', 'ai-translator-for-translatepress' ), number_format_i18n( AITP_Autofix_Logic::MIN_BATCH ), number_format_i18n( AITP_Autofix_Logic::MAX_BATCH ) ) ) . '</span></td></tr>';
+		echo '<tr><th>' . esc_html__( 'Batches per start', 'ai-translator-for-translatepress' ) . '</th><td><input type="number" name="x[max_batches]" min="0" max="1000" value="' . (int) $set['max_batches'] . '" class="small-text"> <span class="description">' . esc_html__( 'Stops by itself after this many batches; 0 = no limit. Use 1 while trying it out.', 'ai-translator-for-translatepress' ) . '</span></td></tr>';
 		echo '<tr><th>' . esc_html__( 'Characters per day', 'ai-translator-for-translatepress' ) . '</th><td><input type="number" name="x[cap]" min="1" value="' . (int) $set['cap'] . '" class="regular-text" style="width:140px;"> <span class="description">' . esc_html__( 'Own cap of the auto repair (default: half the TranslatePress daily limit). The TranslatePress limit and the share kept for visitors apply as well.', 'ai-translator-for-translatepress' ) . '</span></td></tr>';
 		echo '</tbody></table>';
 		submit_button( __( 'Save', 'ai-translator-for-translatepress' ), 'secondary' );
@@ -274,6 +279,9 @@ final class AITP_Admin_Audit {
 			/* translators: 1: reason, 2: time */
 			$state .= ' — ' . sprintf( __( 'waiting: %1$s (until %2$s)', 'ai-translator-for-translatepress' ), self::autofix_reason( $s['wait_reason'] ), wp_date( 'Y-m-d H:i', (int) $s['wait_until'] ) );
 		}
+		if ( $s['status'] === 'running' ) {
+			$state .= AITP_Admin::cron_late( wp_next_scheduled( AITP_Autofix::CRON ) );
+		}
 		self::kv( __( 'State', 'ai-translator-for-translatepress' ), $state );
 		if ( $s['batch'] ) {
 			$b = $s['batch'];
@@ -295,6 +303,7 @@ final class AITP_Admin_Audit {
 		} elseif ( $set['enabled'] ) {
 			$q = $s['batch'] ? __( 'Resume the auto repair with the current batch?', 'ai-translator-for-translatepress' ) : __( 'Start the batch auto repair? Each batch is backed up first and can be rolled back.', 'ai-translator-for-translatepress' );
 			echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline-block;" onsubmit="return confirm(this.dataset.q)" data-q="' . esc_attr( $q ) . '"><input type="hidden" name="action" value="aitp_audit"><input type="hidden" name="do" value="autofix_start">';
+			self::once_field();
 			wp_nonce_field( 'aitp_audit' );
 			echo '<button class="button button-primary">' . esc_html( $s['batch'] ? __( 'Resume auto repair', 'ai-translator-for-translatepress' ) : __( 'Start auto repair', 'ai-translator-for-translatepress' ) ) . '</button></form>';
 		}
@@ -434,6 +443,31 @@ final class AITP_Admin_Audit {
 			echo '</td></tr>';
 		}
 		echo '</tbody></table>';
+		if ( count( $b ) > 30 ) {
+			$open = 0;
+			foreach ( array_slice( $b, 30, null, true ) as $info ) {
+				if ( empty( $info['rolled_back'] ) || ! empty( $info['todo'] ) ) {
+					$open++;
+				}
+			}
+			/* translators: 1: batches not listed, 2: of them not rolled back */
+			echo '<p class="description">' . esc_html( sprintf( __( '%1$s older batches are not listed; %2$s of them are not (fully) rolled back. Their backups stay in the database.', 'ai-translator-for-translatepress' ), number_format_i18n( count( $b ) - 30 ), number_format_i18n( $open ) ) ) . '</p>';
+		}
+	}
+
+	/**
+	 * @param array $holder What holds the write lock (who, since).
+	 * @return string
+	 */
+	public static function busy_message( array $holder ) {
+		$map = array(
+			'repair'   => __( 'a repair', 'ai-translator-for-translatepress' ),
+			'rollback' => __( 'a rollback', 'ai-translator-for-translatepress' ),
+			'undo'     => __( 'an undo of the test journal', 'ai-translator-for-translatepress' ),
+		);
+		$who = isset( $map[ $holder['who'] ] ) ? $map[ $holder['who'] ] : __( 'another change', 'ai-translator-for-translatepress' );
+		/* translators: 1: what is running, 2: time it started */
+		return sprintf( __( 'Nothing was changed: %1$s is running (since %2$s). Wait until it has finished, then open this page again and check the result before sending anything.', 'ai-translator-for-translatepress' ), $who, $holder['since'] ? wp_date( 'H:i:s', (int) $holder['since'] ) : '-' );
 	}
 
 	/** Import form. */
@@ -506,7 +540,7 @@ final class AITP_Admin_Audit {
 	}
 
 	/** A one-time id: a repair or rollback form is carried out once, however often it is sent. */
-	private static function once_field() {
+	public static function once_field() {
 		echo '<input type="hidden" name="aitp_form" value="' . esc_attr( str_replace( '-', '', wp_generate_uuid4() ) ) . '">';
 	}
 
@@ -514,7 +548,7 @@ final class AITP_Admin_Audit {
 	 * @param string $form Form id.
 	 * @return array|null The earlier use of this form.
 	 */
-	private static function form_used( $form ) {
+	public static function form_used( $form ) {
 		if ( $form === '' ) {
 			return null;
 		}
@@ -529,7 +563,7 @@ final class AITP_Admin_Audit {
 	 * @param string $form Form id ('' for forms of older pages).
 	 * @param array  $info do, time, state (running|done), batch, n.
 	 */
-	private static function action_record( $form, array $info ) {
+	public static function action_record( $form, array $info ) {
 		$l    = get_option( 'aitp_audit_actions', array() );
 		$l    = is_array( $l ) ? $l : array();
 		$key  = $form !== '' ? $form : 'f' . get_current_user_id();
@@ -541,8 +575,36 @@ final class AITP_Admin_Audit {
 		update_option( 'aitp_audit_actions', $l, false );
 	}
 
-	/** The last repair or rollback sent from a form (shown for a day). */
-	private static function render_last_action() {
+	/**
+	 * @param string $do Action of a one-time form.
+	 * @return string
+	 */
+	private static function action_label( $do ) {
+		$map = array(
+			'repair'        => __( 'reset', 'ai-translator-for-translatepress' ),
+			'repair_filter' => __( 'reset', 'ai-translator-for-translatepress' ),
+			'rollback'      => __( 'roll back', 'ai-translator-for-translatepress' ),
+			'autofix_start' => __( 'start the auto repair', 'ai-translator-for-translatepress' ),
+			'map_start'     => __( 'start mapping', 'ai-translator-for-translatepress' ),
+			'journal_start' => __( 'switch the test journal on', 'ai-translator-for-translatepress' ),
+			'journal_undo'  => __( 'undo translations of the test', 'ai-translator-for-translatepress' ),
+		);
+		return isset( $map[ $do ] ) ? $map[ $do ] : $do;
+	}
+
+	/**
+	 * A one-time form sent again: the warning shown instead of running it.
+	 *
+	 * @param array $used The earlier use.
+	 * @return string
+	 */
+	public static function used_message( array $used ) {
+		/* translators: 1: action, 2: time, 3: batch id or "-" */
+		return sprintf( __( 'This form (%1$s) was already sent at %2$s (batch %3$s); it was not run again. Check the result on the page, then use the form on a freshly opened page if more is needed.', 'ai-translator-for-translatepress' ), self::action_label( isset( $used['do'] ) ? (string) $used['do'] : '' ), wp_date( 'H:i:s', (int) $used['time'] ), ! empty( $used['batch'] ) ? '#' . $used['batch'] : '-' );
+	}
+
+	/** The last action sent from a one-time form (shown for a day). */
+	public static function render_last_action() {
 		$l = get_option( 'aitp_audit_actions', array() );
 		if ( ! is_array( $l ) || ! $l ) {
 			return;
@@ -556,13 +618,13 @@ final class AITP_Admin_Audit {
 		if ( ! $last || time() - (int) $last['time'] > DAY_IN_SECONDS ) {
 			return;
 		}
-		$what = $last['do'] === 'rollback' ? __( 'roll back', 'ai-translator-for-translatepress' ) : __( 'reset', 'ai-translator-for-translatepress' );
+		$what = self::action_label( (string) $last['do'] );
 		if ( $last['state'] === 'done' ) {
 			/* translators: 1: action, 2: time, 3: batch, 4: rows */
 			$text = sprintf( __( 'Last action: %1$s at %2$s (batch %3$s) – finished, %4$s rows.', 'ai-translator-for-translatepress' ), $what, wp_date( 'Y-m-d H:i:s', (int) $last['time'] ), $last['batch'] ? '#' . $last['batch'] : '-', number_format_i18n( (int) $last['n'] ) );
 		} else {
 			/* translators: 1: action, 2: time */
-			$text = sprintf( __( 'Last action: %1$s at %2$s – no result recorded yet. It may still be running, or the page failed after it ran: check the repairs list below before sending anything again.', 'ai-translator-for-translatepress' ), $what, wp_date( 'Y-m-d H:i:s', (int) $last['time'] ) );
+			$text = sprintf( __( 'Last action: %1$s at %2$s – no result recorded yet. It may still be running, or the page failed after it ran: check the repairs list or the test journal before sending anything again.', 'ai-translator-for-translatepress' ), $what, wp_date( 'Y-m-d H:i:s', (int) $last['time'] ) );
 		}
 		echo '<div class="notice notice-' . ( $last['state'] === 'done' ? 'info' : 'warning' ) . ' inline" data-aitp-last="' . esc_attr( $last['do'] . ':' . $last['state'] ) . '"><p>' . esc_html( $text ) . '</p></div>';
 	}
@@ -579,12 +641,11 @@ final class AITP_Admin_Audit {
 		$msg  = '';
 		$type = 'success';
 		$form = isset( $_POST['aitp_form'] ) ? sanitize_key( wp_unslash( $_POST['aitp_form'] ) ) : '';
-		if ( in_array( $do, array( 'repair', 'repair_filter', 'rollback' ), true ) ) {
+		if ( in_array( $do, array( 'repair', 'repair_filter', 'rollback', 'autofix_start' ), true ) ) {
 			$used = self::form_used( $form );
 			if ( $used ) {
 				// The same form again (page reloaded after an error, back button, double click): never a second batch.
-				/* translators: 1: time, 2: batch id or "-" */
-				$msg  = sprintf( __( 'This form was already sent at %1$s (batch %2$s); it was not run again. Check the repairs list below, then use the form on a freshly opened page if more is needed.', 'ai-translator-for-translatepress' ), wp_date( 'H:i:s', (int) $used['time'] ), $used['batch'] ? '#' . $used['batch'] : '-' );
+				$msg  = self::used_message( $used );
 				$type = 'warning';
 				$do   = '';
 			} else {
@@ -610,9 +671,14 @@ final class AITP_Admin_Audit {
 					$type = 'warning';
 					break;
 				}
-				$only = isset( $_POST['only_pages'] ) ? array_values( array_filter( array_map( 'trim', preg_split( '~\R~', sanitize_textarea_field( wp_unslash( $_POST['only_pages'] ) ) ) ) ) ) : array();
-				$r    = AITP_Audit::repair( $sel, array( 'unlinked' => ! empty( $_POST['unlinked'] ), 'pages' => array_map( 'esc_url_raw', $only ) ) );
+				$only = isset( $_POST['only_pages'] ) ? AITP_Admin::url_lines( wp_unslash( $_POST['only_pages'] ) ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- each address goes through esc_url_raw().
+				$r    = AITP_Audit::repair( $sel, array( 'unlinked' => ! empty( $_POST['unlinked'] ), 'pages' => $only ) );
 				self::action_record( $form, array( 'state' => 'done', 'batch' => $r['reset'] ? (int) $r['batch'] : 0, 'n' => (int) $r['reset'] ) );
+				if ( ! empty( $r['busy'] ) ) {
+					$msg  = self::busy_message( $r['busy'] );
+					$type = 'warning';
+					break;
+				}
 				/* translators: 1: rows reset, 2: pages queued */
 				$msg = sprintf( __( '%1$s translations backed up and reset; %2$s pages queued again.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['reset'] ), number_format_i18n( $r['pages'] ) );
 				if ( $r['skipped'] ) {
@@ -638,6 +704,11 @@ final class AITP_Admin_Audit {
 				$batch = isset( $_POST['batch'] ) ? (int) $_POST['batch'] : 0;
 				$r     = AITP_Audit::rollback( $batch );
 				self::action_record( $form, array( 'state' => 'done', 'batch' => $batch, 'n' => (int) $r['restored'] ) );
+				if ( ! empty( $r['busy'] ) ) {
+					$msg  = self::busy_message( $r['busy'] );
+					$type = 'warning';
+					break;
+				}
 				/* translators: %s: rows restored */
 				$msg = sprintf( __( '%s translations restored.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['restored'] ) );
 				if ( isset( $r['total'] ) && $r['total'] !== $r['restored'] ) {
@@ -647,6 +718,11 @@ final class AITP_Admin_Audit {
 				if ( $r['skipped'] ) {
 					/* translators: %s: reasons and counts */
 					$msg .= ' ' . sprintf( __( 'Kept as they are: %s.', 'ai-translator-for-translatepress' ), self::skipped_text( $r['skipped'] ) );
+				}
+				if ( ! empty( $r['newer'] ) ) {
+					/* translators: %s: batch ids */
+					$msg .= ' ' . sprintf( __( 'Roll back these newer batches first, then roll back this one again: %s.', 'ai-translator-for-translatepress' ), '#' . implode( ', #', $r['newer'] ) );
+					$type = 'warning';
 				}
 				break;
 			case 'dismiss':
@@ -683,7 +759,8 @@ final class AITP_Admin_Audit {
 				}
 				$r = AITP_Audit::import( $content );
 				/* translators: 1: rows read, 2: rows added, 3: changed, 4: manual, 5: missing or unreadable, 6: on the accepted list */
-				$msg = sprintf( __( 'Import: %1$s rows read, %2$s added. Not added — changed since: %3$s, translated manually: %4$s, missing or unreadable: %5$s, on the accepted list: %6$s.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['read'] ), number_format_i18n( $r['added'] ), number_format_i18n( $r['changed'] + $r['untranslated'] ), number_format_i18n( $r['manual'] ), number_format_i18n( $r['missing'] + $r['bad'] ), number_format_i18n( $r['accepted'] ) );
+				/* translators: 1: rows read, 2: rows added, 3: changed, 4: not translated now, 5: manual, 6: row missing, 7: unreadable, 8: on the accepted list */
+				$msg = sprintf( __( 'Import: %1$s rows read, %2$s added. Not added — text changed since: %3$s, not translated now: %4$s, translated manually: %5$s, row no longer exists: %6$s, unreadable line: %7$s, on the accepted list: %8$s.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['read'] ), number_format_i18n( $r['added'] ), number_format_i18n( $r['changed'] ), number_format_i18n( $r['untranslated'] ), number_format_i18n( $r['manual'] ), number_format_i18n( $r['missing'] ), number_format_i18n( $r['bad'] ), number_format_i18n( $r['accepted'] ) );
 				$f   = array( 'source' => 'import' ) + $f;
 				break;
 			case 'protect':
@@ -695,7 +772,8 @@ final class AITP_Admin_Audit {
 				}
 				$r = AITP_Audit::protect( $content, isset( $_POST['label'] ) ? sanitize_text_field( wp_unslash( $_POST['label'] ) ) : '' );
 				/* translators: 1: rows read, 2: added, 3: of them found by original text, 4: already on the list, 5: changed, 6: manual, 7: missing or unreadable, 8: original found more than once */
-				$msg = sprintf( __( 'Accepted list: %1$s rows read, %2$s added (%3$s of them found by their original text because the ID differs), %4$s already on the list. Not added — text differs from the site: %5$s, translated manually (protected anyway): %6$s, missing or unreadable: %7$s, original found more than once: %8$s.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['read'] ), number_format_i18n( $r['added'] ), number_format_i18n( $r['by_original'] ), number_format_i18n( $r['already'] ), number_format_i18n( $r['changed'] + $r['untranslated'] ), number_format_i18n( $r['manual'] ), number_format_i18n( $r['missing'] + $r['bad'] ), number_format_i18n( $r['duplicate'] ) );
+				/* translators: 1: rows read, 2: added, 3: of them found by original text, 4: already on the list, 5: changed, 6: not translated now, 7: manual, 8: row missing, 9: unreadable, 10: original found more than once */
+				$msg = sprintf( __( 'Accepted list: %1$s rows read, %2$s added (%3$s of them found by their original text because the ID differs), %4$s already on the list. Not added — text differs from the site: %5$s, not translated now: %6$s, translated manually (protected anyway): %7$s, row no longer exists: %8$s, unreadable line: %9$s, original found more than once: %10$s.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['read'] ), number_format_i18n( $r['added'] ), number_format_i18n( $r['by_original'] ), number_format_i18n( $r['already'] ), number_format_i18n( $r['changed'] ), number_format_i18n( $r['untranslated'] ), number_format_i18n( $r['manual'] ), number_format_i18n( $r['missing'] ), number_format_i18n( $r['bad'] ), number_format_i18n( $r['duplicate'] ) );
 				break;
 			case 'unprotect':
 				$n = AITP_Audit::unprotect( isset( $_POST['label'] ) ? sanitize_text_field( wp_unslash( $_POST['label'] ) ) : '' );
@@ -708,7 +786,9 @@ final class AITP_Admin_Audit {
 				$msg = $out['enabled'] ? __( 'Saved. The auto repair is allowed; start it below.', 'ai-translator-for-translatepress' ) : __( 'Saved. The auto repair is off.', 'ai-translator-for-translatepress' );
 				break;
 			case 'autofix_start':
+				self::action_record( $form, array( 'do' => 'autofix_start', 'time' => time(), 'state' => 'running', 'batch' => 0, 'n' => 0 ) );
 				$why = AITP_Autofix::start();
+				self::action_record( $form, array( 'state' => 'done' ) );
 				if ( $why !== '' ) {
 					/* translators: %s: reason */
 					$msg  = sprintf( __( 'The auto repair cannot start: %s.', 'ai-translator-for-translatepress' ), self::autofix_reason( $why ) );

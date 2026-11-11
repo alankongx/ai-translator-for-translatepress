@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 final class AITP_Schema {
 
-	const VERSION = '5';
+	const VERSION = '6';
 
 	/**
 	 * @param string $name Short name: cache, failures, review, log, queue, audit, repair.
@@ -152,10 +152,13 @@ final class AITP_Schema {
   original longtext NOT NULL,
   translated longtext,
   status int NOT NULL DEFAULT 0,
+  original_id bigint NULL DEFAULT NULL,
+  exact tinyint NOT NULL DEFAULT 0,
   restored varchar(20) NOT NULL DEFAULT '',
   created_at datetime NOT NULL,
   PRIMARY KEY  (id),
-  KEY batch (batch)
+  KEY batch (batch),
+  KEY lang_row (lang,row_id)
 ) $c;"
 		);
 		dbDelta(
@@ -212,11 +215,14 @@ final class AITP_Schema {
   original longtext NOT NULL,
   prev_translated longtext NULL,
   prev_status tinyint NOT NULL DEFAULT 0,
+  prev_original_id bigint NULL DEFAULT NULL,
   translated longtext NOT NULL,
+  exact tinyint NOT NULL DEFAULT 0,
   undone varchar(20) NOT NULL DEFAULT '',
   created_at datetime NOT NULL,
   PRIMARY KEY  (id),
-  KEY session (session)
+  KEY session (session),
+  KEY lang_row (lang,row_id)
 ) $c;"
 		);
 		update_option( 'aitp_db_version', self::VERSION, false );
@@ -228,9 +234,12 @@ final class AITP_Schema {
 		foreach ( array( 'cache', 'failures', 'review', 'log', 'queue', 'audit', 'repair', 'protect', 'pagemap', 'pagestr', 'journal' ) as $t ) {
 			$wpdb->query( 'DROP TABLE IF EXISTS ' . self::table( $t ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
 		}
-		foreach ( array( 'aitp_settings', 'aitp_db_version', 'aitp_breaker', 'aitp_caps', 'aitp_notice', 'aitp_queue_settings', 'aitp_queue_state', 'aitp_queue_lock', 'aitp_audit_state', 'aitp_audit_lock', 'aitp_audit_settings', 'aitp_repair_batches', 'aitp_autofix_settings', 'aitp_autofix_state', 'aitp_autofix_lock', 'aitp_map_state', 'aitp_map_lock', 'aitp_journal_state', 'aitp_purge_list', 'aitp_audit_actions' ) as $o ) {
+		foreach ( array( 'aitp_settings', 'aitp_db_version', 'aitp_breaker', 'aitp_caps', 'aitp_notice', 'aitp_queue_settings', 'aitp_queue_state', 'aitp_queue_lock', 'aitp_audit_state', 'aitp_audit_lock', 'aitp_audit_settings', 'aitp_repair_batches', 'aitp_autofix_settings', 'aitp_autofix_state', 'aitp_autofix_lock', 'aitp_map_state', 'aitp_map_lock', 'aitp_journal_state', 'aitp_purge_list', 'aitp_audit_actions', 'aitp_write_lock' ) as $o ) {
 			delete_option( $o );
 		}
+		// Short-lived notices and markers (flash messages, test results, used visit tokens).
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '\\_transient\\_aitp\\_%' OR option_name LIKE '\\_transient\\_timeout\\_aitp\\_%'" );
 		delete_site_transient( 'aitp_github_release' );
 	}
 }

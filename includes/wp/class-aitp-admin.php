@@ -585,6 +585,42 @@ final class AITP_Admin {
 	}
 
 	/**
+	 * Page addresses pasted one per line. Kept as typed (percent-encoded characters included:
+	 * sanitize_textarea_field() would drop them) and cleaned per address.
+	 *
+	 * @param string $raw Unslashed form value.
+	 * @return string[]
+	 */
+	public static function url_lines( $raw ) {
+		$out = array();
+		foreach ( preg_split( '~\R~', (string) $raw ) as $line ) {
+			$line = trim( $line );
+			if ( $line === '' ) {
+				continue;
+			}
+			$u = esc_url_raw( $line );
+			if ( $u !== '' ) {
+				$out[ $u ] = true;
+			}
+		}
+		return array_keys( $out );
+	}
+
+	/**
+	 * A note when a scheduled WP-Cron task is overdue (WP-Cron runs only when someone opens the site).
+	 *
+	 * @param int|false $next Next run of the task.
+	 * @return string '' or ' — note'.
+	 */
+	public static function cron_late( $next ) {
+		if ( ! $next || (int) $next > time() - 300 ) {
+			return '';
+		}
+		/* translators: %s: minutes */
+		return ' — ' . sprintf( __( 'WP-Cron is %s minutes late, so background tasks are not running now. Keep this page open, open the site, or have a server cron job call wp-cron.php.', 'ai-translator-for-translatepress' ), number_format_i18n( (int) floor( ( time() - (int) $next ) / 60 ) ) );
+	}
+
+	/**
 	 * Label for a failure / flag code.
 	 *
 	 * @param string $code Code.

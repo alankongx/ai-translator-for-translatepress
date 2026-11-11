@@ -1341,10 +1341,6 @@ msgstr "AI 复查所选"
 msgid "AI check all matching (at most %s)"
 msgstr "AI 复查筛选结果（最多 %s 条）"
 
-#: includes/wp/class-aitp-admin-audit.php:251
-msgid "After a reset the pages showing these strings are queued again; start the backfill queue (or wait for visitors) to get new translations. Clear CDN or server caches outside WordPress yourself."
-msgstr "改回后，显示这些文字的页面会重新排进补翻队列；开启补翻队列（或等访客访问）就会得到新译文。WordPress 之外的 CDN 或服务器缓存需要你自己清。"
-
 #: includes/wp/class-aitp-admin-audit.php:269
 msgid "Repairs"
 msgstr "修复记录"
@@ -1435,11 +1431,6 @@ msgstr "已备份并改回 %1$s 条译文；%2$s 个页面重新排队。"
 msgid "Skipped: %s."
 msgstr "跳过：%s。"
 
-#. translators: %s: languages
-#: includes/wp/class-aitp-admin-audit.php:363
-msgid "Some strings are not linked to a page (menus, widgets, interface text): every page of %s was queued again."
-msgstr "有些文字没有对应到具体页面（菜单、小工具、界面文字）：%s 的所有页面都重新排队了。"
-
 #: includes/wp/class-aitp-admin-audit.php:366
 msgid "The backfill queue is paused: start it, or the strings are translated again when visitors open the pages."
 msgstr "补翻队列目前暂停：开启它，或者等访客打开页面时重新翻译。"
@@ -1476,11 +1467,6 @@ msgstr "还有 %s 条没查（时间或接口限制），请再运行一次。"
 #: includes/wp/class-aitp-admin-audit.php:408
 msgid "No file, or the file is larger than 10 MB."
 msgstr "没有文件，或文件超过 10 MB。"
-
-#. translators: 1: rows read, 2: rows added, 3: changed, 4: manual, 5: missing or unreadable
-#: includes/wp/class-aitp-admin-audit.php:414
-msgid "Import: %1$s rows read, %2$s added. Not added — changed since: %3$s, translated manually: %4$s, missing or unreadable: %5$s."
-msgstr "导入：读到 %1$s 行，加入 %2$s 行。未加入——已变动：%3$s，已人工翻译：%4$s，找不到或读不懂：%5$s。"
 
 #: includes/wp/class-aitp-admin-audit.php:420
 msgid "Saved."
@@ -1570,12 +1556,6 @@ msgstr "清单名称"
 msgid "Add to the accepted list"
 msgstr "加入已验收清单"
 
-msgid "Import: %1$s rows read, %2$s added. Not added — changed since: %3$s, translated manually: %4$s, missing or unreadable: %5$s, on the accepted list: %6$s."
-msgstr "导入：读到 %1$s 行，加入 %2$s 行。未加入——已变动：%3$s，已人工翻译：%4$s，找不到或读不懂：%5$s，在已验收清单里：%6$s。"
-
-msgid "Accepted list: %1$s rows read, %2$s added, %3$s already on the list. Not added — text differs from the site: %4$s, translated manually (protected anyway): %5$s, missing or unreadable: %6$s."
-msgstr "已验收清单：读到 %1$s 行，加入 %2$s 行，已在清单里 %3$s 行。未加入——和网站当前文字不一致：%4$s，已人工翻译（本来就受保护）：%5$s，找不到或读不懂：%6$s。"
-
 msgid "%s rows removed from the accepted list."
 msgstr "已从已验收清单移除 %s 行。"
 
@@ -1587,9 +1567,6 @@ msgstr "TranslatePress 的自动翻译已关闭"
 
 msgid "TranslatePress is still translating with the HHG engine (%s). AI Translator is installed but not in use: choose \"AI Translator\" under TranslatePress → Automatic Translation, then deactivate HHG."
 msgstr "TranslatePress 仍在用 HHG 引擎（%s）翻译。AI Translator 已安装但没有在用：请在 TranslatePress → 自动翻译里选「AI Translator」，再停用 HHG。"
-
-msgid "Accepted list: %1$s rows read, %2$s added (%3$s of them found by their original text because the ID differs), %4$s already on the list. Not added — text differs from the site: %5$s, translated manually (protected anyway): %6$s, missing or unreadable: %7$s, original found more than once: %8$s."
-msgstr "已验收清单：读到 %1$s 行，加入 %2$s 行（其中 %3$s 行编号不同、按原文找到），已在清单里 %4$s 行。未加入——和网站当前文字不一致：%5$s，已人工翻译（本来就受保护）：%6$s，找不到或读不懂：%7$s，同一原文有多行：%8$s。"
 
 msgid "stopped by a person"
 msgstr "人工停止"
@@ -1692,9 +1669,6 @@ msgstr "%1$s 批，%2$s 行已重翻并通过检查"
 
 msgid "Left for a person"
 msgstr "留给人工处理"
-
-msgid "%1$s structured data, %2$s not on a page of the queue (menus, widgets, pages not in the page list)"
-msgstr "结构化数据 %1$s 行，不在补翻队列页面上的 %2$s 行（菜单、小工具、不在页面列表里的页面）"
 
 msgid "Stop auto repair"
 msgstr "停止自动修复"
@@ -1963,9 +1937,6 @@ msgstr "测试记录已打开。"
 msgid "Test journal off. What it recorded can still be undone."
 msgstr "测试记录已关闭，记下的内容仍然可以撤销。"
 
-msgid "%1$s rows put back to their state before the test; %2$s translations were new rows (listed, not deleted)."
-msgstr "%1$s 行已恢复到测试前的状态；%2$s 条译文是新增的行（已列出，不删除）。"
-
 msgid "Page map & test journal"
 msgstr "页面映射与测试记录"
 
@@ -2009,10 +1980,6 @@ msgstr "与原文相同，但原文本身就不是源语言（其他语言里没
 msgid "This batch: %s restored in all."
 msgstr "这一批累计恢复 %s 条。"
 
-#. translators: 1: time, 2: batch id or "-"
-msgid "This form was already sent at %1$s (batch %2$s); it was not run again. Check the repairs list below, then use the form on a freshly opened page if more is needed."
-msgstr "这张表单在 %1$s 已经提交过（批次 %2$s），这次没有再执行。请先看下面的修复记录；还要继续的话，请在重新打开的页面上操作。"
-
 msgid "roll back"
 msgstr "回滚"
 
@@ -2023,6 +1990,129 @@ msgstr "改回"
 msgid "Last action: %1$s at %2$s (batch %3$s) – finished, %4$s rows."
 msgstr "上次操作：%2$s %1$s（批次 %3$s）——已完成，%4$s 条。"
 
+#: includes/wp/class-aitp-admin-audit.php:115
+msgid "also reset by a newer repair that is not rolled back yet (roll that one back first, then this one again)"
+msgstr "较新的一批修复也改回过、还没回滚（先回滚那一批，再回滚这一批）"
+
+#: includes/wp/class-aitp-admin-audit.php:225
+msgid "the number of batches set for one start is done"
+msgstr "已跑完「每次启动的批数」"
+
+#: includes/wp/class-aitp-admin-audit.php:226
+msgid "a test load of a page before the next batch failed (nothing was reset)"
+msgstr "开始下一批前试打开一个页面失败（没有改回任何行）"
+
+#: includes/wp/class-aitp-admin-audit.php:227
+msgid "a repair, rollback or undo is running"
+msgstr "有改回、回滚或撤销正在进行"
+
+#: includes/wp/class-aitp-admin-audit.php:258
+msgid "Batches per start"
+msgstr "每次启动的批数"
+
+#: includes/wp/class-aitp-admin-audit.php:258
+msgid "Stops by itself after this many batches; 0 = no limit. Use 1 while trying it out."
+msgstr "跑完这么多批后自动停下；0 = 不限。试用时填 1。"
+
+#. translators: 1: batches not listed, 2: of them not rolled back
+#: includes/wp/class-aitp-admin-audit.php:454
+msgid "%1$s older batches are not listed; %2$s of them are not (fully) rolled back. Their backups stay in the database."
+msgstr "还有 %1$s 批较早的修复没列出，其中 %2$s 批没有（全部）回滚。它们的备份仍在数据库里。"
+
+#: includes/wp/class-aitp-admin-audit.php:464
+msgid "a repair"
+msgstr "一次改回"
+
+#: includes/wp/class-aitp-admin-audit.php:465
+msgid "a rollback"
+msgstr "一次回滚"
+
+#: includes/wp/class-aitp-admin-audit.php:466
+msgid "an undo of the test journal"
+msgstr "一次撤销测试译文"
+
+#: includes/wp/class-aitp-admin-audit.php:468
+msgid "another change"
+msgstr "另一个修改"
+
+#. translators: 1: what is running, 2: time it started
+#: includes/wp/class-aitp-admin-audit.php:470
+msgid "Nothing was changed: %1$s is running (since %2$s). Wait until it has finished, then open this page again and check the result before sending anything."
+msgstr "这次没有做任何修改：%1$s 正在进行（%2$s 开始）。请等它做完，重新打开本页，先看结果再提交。"
+
+#: includes/wp/class-aitp-admin-audit.php:587
+msgid "start the auto repair"
+msgstr "启动自动修复"
+
+#: includes/wp/class-aitp-admin-audit.php:588
+msgid "start mapping"
+msgstr "开始页面映射"
+
+#: includes/wp/class-aitp-admin-audit.php:589
+msgid "switch the test journal on"
+msgstr "打开测试记录"
+
+#: includes/wp/class-aitp-admin-audit.php:590
+msgid "undo translations of the test"
+msgstr "撤销测试期间的译文"
+
+#. translators: 1: action, 2: time, 3: batch id or "-"
+#: includes/wp/class-aitp-admin-audit.php:603
+msgid "This form (%1$s) was already sent at %2$s (batch %3$s); it was not run again. Check the result on the page, then use the form on a freshly opened page if more is needed."
+msgstr "这张表单（%1$s）已在 %2$s 提交过（批次 %3$s），这次没有再执行。请先在页面上看结果，还需要的话在新打开的页面上重新提交。"
+
 #. translators: 1: action, 2: time
-msgid "Last action: %1$s at %2$s – no result recorded yet. It may still be running, or the page failed after it ran: check the repairs list below before sending anything again."
-msgstr "上次操作：%2$s %1$s——还没有记录结果。可能还在执行，也可能已执行完但页面出错了：请先看下面的修复记录，不要重复提交。"
+#: includes/wp/class-aitp-admin-audit.php:627
+msgid "Last action: %1$s at %2$s – no result recorded yet. It may still be running, or the page failed after it ran: check the repairs list or the test journal before sending anything again."
+msgstr "上次操作：%2$s %1$s——还没有记录结果。可能还在进行，也可能执行后页面出错：再提交任何东西之前，先看修复记录或测试记录。"
+
+#. translators: %s: batch ids
+#: includes/wp/class-aitp-admin-audit.php:724
+msgid "Roll back these newer batches first, then roll back this one again: %s."
+msgstr "请先回滚这几批较新的修复，再回滚这一批一次：%s。"
+
+#. translators: 1: rows read, 2: rows added, 3: changed, 4: not translated now, 5: manual, 6: row missing, 7: unreadable, 8: on the accepted list
+#: includes/wp/class-aitp-admin-audit.php:763
+msgid "Import: %1$s rows read, %2$s added. Not added — text changed since: %3$s, not translated now: %4$s, translated manually: %5$s, row no longer exists: %6$s, unreadable line: %7$s, on the accepted list: %8$s."
+msgstr "导入：读到 %1$s 行，加入 %2$s 行。没加入的——文字已变动：%3$s，现在未翻译：%4$s，人工翻译：%5$s，行已不存在：%6$s，无法读取的行：%7$s，在已验收清单里：%8$s。"
+
+#. translators: 1: rows read, 2: added, 3: of them found by original text, 4: already on the list, 5: changed, 6: not translated now, 7: manual, 8: row missing, 9: unreadable, 10: original found more than once
+#: includes/wp/class-aitp-admin-audit.php:776
+msgid "Accepted list: %1$s rows read, %2$s added (%3$s of them found by their original text because the ID differs), %4$s already on the list. Not added — text differs from the site: %5$s, not translated now: %6$s, translated manually (protected anyway): %7$s, row no longer exists: %8$s, unreadable line: %9$s, original found more than once: %10$s."
+msgstr "已验收清单：读到 %1$s 行，加入 %2$s 行（其中 %3$s 行因 ID 不同按原文找到），%4$s 行已在清单里。没加入的——文字与网站不同：%5$s，现在未翻译：%6$s，人工翻译（本来就受保护）：%7$s，行已不存在：%8$s，无法读取的行：%9$s，原文找到不止一行：%10$s。"
+
+#: includes/wp/class-aitp-admin-pages.php:71
+msgid "put back by a rollback (nothing to undo)"
+msgstr "已由回滚恢复（不需要撤销）"
+
+#: includes/wp/class-aitp-admin-pages.php:292
+msgid "Nothing was undone: TranslatePress still translates automatically with this engine, so visits would translate the rows again at once. In TranslatePress → Automatic Translation switch automatic translation off (or choose another engine), then undo."
+msgstr "没有撤销任何行：TranslatePress 还在用本引擎自动翻译，一有访问就会把这些行重新翻译。请先在 TranslatePress → 自动翻译里关掉自动翻译（或换成别的引擎），再撤销。"
+
+#. translators: %s: batch ids
+#: includes/wp/class-aitp-admin-pages.php:295
+msgid "Nothing was undone: repair batches of this test are not rolled back yet. Roll them back first (tab \"Check & repair\" → Repairs, newest first), then undo: %s."
+msgstr "没有撤销任何行：这次测试里的修复批次还没回滚。请先回滚（「体检与修复」→ 修复记录，从最新的开始），再撤销：%s。"
+
+#: includes/wp/class-aitp-admin-pages.php:297
+msgid "Nothing to undo: no test was recorded."
+msgstr "没有可撤销的：没有记录过测试。"
+
+#. translators: 1: rows restored, 2: new rows
+#: includes/wp/class-aitp-admin-pages.php:302
+msgid "This round: %1$s rows put back to their state before the test; %2$s translations were new rows (listed, not deleted)."
+msgstr "这一轮：%1$s 行恢复到测试前的状态；%2$s 条译文是新增的行（已列出，不删除）。"
+
+#. translators: %s: outcomes and counts
+#: includes/wp/class-aitp-admin-pages.php:317
+msgid "Whole test so far: %s."
+msgstr "整个测试累计：%s。"
+
+#: includes/wp/class-aitp-admin-pages.php:320
+msgid "Not finished yet (time limit of one request): open this page again and press \"Undo translations of the test\" once more; what is done is skipped."
+msgstr "还没做完（一次请求有时间上限）：请重新打开本页，再点一次「撤销测试期间的译文」；已做完的会跳过。"
+
+#. translators: %s: minutes
+#: includes/wp/class-aitp-admin.php:620
+msgid "WP-Cron is %s minutes late, so background tasks are not running now. Keep this page open, open the site, or have a server cron job call wp-cron.php."
+msgstr "WP-Cron 已经晚了 %s 分钟，后台任务现在没有在跑。请开着本页、打开网站，或让服务器的定时任务调用 wp-cron.php。"

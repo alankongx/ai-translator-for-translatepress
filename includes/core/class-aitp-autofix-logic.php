@@ -50,14 +50,15 @@ final class AITP_Autofix_Logic {
 	 * @param array    $in       Raw input.
 	 * @param string[] $langs    Known languages.
 	 * @param int      $tp_limit TranslatePress daily limit.
-	 * @return array{enabled:bool,languages:string[],batch:int,cap:int}
+	 * @return array{enabled:bool,languages:string[],batch:int,cap:int,max_batches:int}
 	 */
 	public static function clean_settings( array $in, array $langs, $tp_limit ) {
 		$out = array(
-			'enabled'   => ! empty( $in['enabled'] ),
-			'languages' => array(),
-			'batch'     => self::DEFAULT_BATCH,
-			'cap'       => self::default_cap( $tp_limit ),
+			'enabled'     => ! empty( $in['enabled'] ),
+			'languages'   => array(),
+			'batch'       => self::DEFAULT_BATCH,
+			'cap'         => self::default_cap( $tp_limit ),
+			'max_batches' => 0, // Batches per start (0: no limit).
 		);
 		foreach ( isset( $in['languages'] ) ? (array) $in['languages'] : array() as $l ) {
 			if ( in_array( (string) $l, $langs, true ) && ! in_array( (string) $l, $out['languages'], true ) ) {
@@ -69,6 +70,9 @@ final class AITP_Autofix_Logic {
 		}
 		if ( isset( $in['cap'] ) && is_numeric( $in['cap'] ) && (int) $in['cap'] > 0 ) {
 			$out['cap'] = min( 100000000, (int) $in['cap'] );
+		}
+		if ( isset( $in['max_batches'] ) && is_numeric( $in['max_batches'] ) ) {
+			$out['max_batches'] = max( 0, min( 1000, (int) $in['max_batches'] ) );
 		}
 		return $out;
 	}

@@ -15,7 +15,8 @@ add_filter(
 		$p = wp_parse_url( $req['url'] );
 		if ( isset( $p['host'] ) && in_array( $p['host'], array( 'localhost', '127.0.0.1' ), true ) ) {
 			$req['args']['headers']['Host'] = $p['host'] . ( isset( $p['port'] ) ? ':' . $p['port'] : '' );
-			$req['url'] = 'http://wordpress' . ( isset( $p['path'] ) ? $p['path'] : '/' ) . ( isset( $p['query'] ) ? '?' . $p['query'] : '' );
+			// Rehearsal: through the front proxy with the 8 KB header limit (option aitp_e2e_via_proxy).
+			$req['url'] = ( get_option( 'aitp_e2e_via_proxy' ) ? 'http://hcdn' : 'http://wordpress' ) . ( isset( $p['path'] ) ? $p['path'] : '/' ) . ( isset( $p['query'] ) ? '?' . $p['query'] : '' );
 		}
 		return $req;
 	}

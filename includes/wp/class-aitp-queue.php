@@ -732,10 +732,10 @@ final class AITP_Queue {
 		$req   = array(
 			'url'  => $url,
 			'args' => array(
-				'timeout'     => $seconds + 40,
+				'timeout'     => $seconds + 80, // The page translates for up to $seconds, then saves and renders.
 				'redirection' => 0,
 				'sslverify'   => apply_filters( 'https_local_ssl_verify', false ), // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- core hook for loopbacks.
-				'user-agent'  => 'AITP-Queue/' . AITP_VERSION . '; ' . home_url( '/' ),
+				'user-agent'  => 'AITP-Queue/' . AITP_VERSION,
 				'headers'     => array(
 					self::HEADER    => AITP_Queue_Logic::sign( self::secret(), $path, time(), $nonce ),
 					'Cache-Control' => 'no-cache',
@@ -780,6 +780,7 @@ final class AITP_Queue {
 		for ( $i = 0; $i < 6; $i++ ) {
 			wp_cache_delete( $key, 'options' );
 			wp_cache_delete( '_transient_' . $key, 'options' );
+			wp_cache_delete( 'notoptions', 'options' ); // Else a first miss is remembered for the request.
 			$rep = get_transient( $key );
 			if ( is_array( $rep ) || $out['http'] === 0 ) {
 				break;

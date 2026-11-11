@@ -68,6 +68,7 @@ final class AITP_Admin_Pages {
 			'missing'   => __( 'row no longer exists', 'ai-translator-for-translatepress' ),
 			'not_saved' => __( 'never saved by TranslatePress', 'ai-translator-for-translatepress' ),
 			'new_row'   => __( 'new row (listed below, not deleted)', 'ai-translator-for-translatepress' ),
+			'rolled_back' => __( 'put back by a rollback (nothing to undo)', 'ai-translator-for-translatepress' ),
 		);
 		return isset( $map[ $k ] ) ? $map[ $k ] : $k;
 	}
@@ -88,6 +89,7 @@ final class AITP_Admin_Pages {
 
 	/** Render the tab. */
 	public static function render() {
+		AITP_Admin_Audit::render_last_action();
 		self::render_map();
 		self::render_journal();
 	}
@@ -114,6 +116,7 @@ final class AITP_Admin_Pages {
 			echo '</p><p><button type="button" class="button" id="aitp-map-live" data-label-stop="' . esc_attr__( 'Stop advancing from this page', 'ai-translator-for-translatepress' ) . '">' . esc_html__( 'Advance the mapping from this page now', 'ai-translator-for-translatepress' ) . '</button> <span id="aitp-map-live-status" class="description"></span></p>';
 		} else {
 			echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="aitp_pages"><input type="hidden" name="do" value="map_start">';
+			AITP_Admin_Audit::once_field();
 			wp_nonce_field( 'aitp_pages' );
 			echo '<table class="form-table" role="presentation"><tbody>';
 			echo '<tr><th>' . esc_html__( 'Page addresses', 'ai-translator-for-translatepress' ) . '</th><td><textarea name="urls" rows="5" class="large-text code" placeholder="' . esc_attr( home_url( '/' ) ) . '"></textarea><br><span class="description">' . esc_html__( 'Addresses in the default language, one per line. Empty = every page of the backfill queue\'s page list (generate it there first).', 'ai-translator-for-translatepress' ) . '</span></td></tr>';
@@ -194,11 +197,13 @@ final class AITP_Admin_Pages {
 			self::button( 'journal_stop', __( 'Switch the journal off', 'ai-translator-for-translatepress' ), '' );
 		} else {
 			echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline-block;margin-right:6px;"' . ( $s['session'] ? ' onsubmit="return confirm(this.dataset.q)" data-q="' . esc_attr__( 'Start a new test? What the previous test recorded can then no longer be undone here.', 'ai-translator-for-translatepress' ) . '"' : '' ) . '><input type="hidden" name="action" value="aitp_pages"><input type="hidden" name="do" value="journal_start">';
+			AITP_Admin_Audit::once_field();
 			wp_nonce_field( 'aitp_pages' );
 			echo '<input type="text" name="label" maxlength="64" placeholder="' . esc_attr__( 'Name of the test', 'ai-translator-for-translatepress' ) . '"> <button class="button button-primary">' . esc_html__( 'Switch the journal on', 'ai-translator-for-translatepress' ) . '</button></form>';
 		}
 		if ( $s['session'] ) {
 			echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline-block;margin-right:6px;" onsubmit="return confirm(this.dataset.q)" data-q="' . esc_attr__( 'Put every row this engine translated during the test back to its state before? Roll back the repair batches of the test first. Rows changed since are kept.', 'ai-translator-for-translatepress' ) . '"><input type="hidden" name="action" value="aitp_pages"><input type="hidden" name="do" value="journal_undo">';
+			AITP_Admin_Audit::once_field();
 			wp_nonce_field( 'aitp_pages' );
 			echo '<button class="button">' . esc_html__( 'Undo translations of the test', 'ai-translator-for-translatepress' ) . '</button></form>';
 			echo '<a class="button" href="' . esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=aitp_pages_download&what=new_rows' ), 'aitp_pages_download' ) ) . '">' . esc_html__( 'Download the new rows', 'ai-translator-for-translatepress' ) . '</a>';
@@ -226,11 +231,24 @@ final class AITP_Admin_Pages {
 		$do   = isset( $_POST['do'] ) ? sanitize_key( wp_unslash( $_POST['do'] ) ) : '';
 		$msg  = '';
 		$type = 'success';
+		$form = isset( $_POST['aitp_form'] ) ? sanitize_key( wp_unslash( $_POST['aitp_form'] ) ) : '';
+		if ( in_array( $do, array( 'map_start', 'journal_start', 'journal_undo' ), true ) ) {
+			$used = AITP_Admin_Audit::form_used( $form );
+			if ( $used ) {
+				// The same form again (reload after an error, back button, double click): not run twice.
+				$msg  = AITP_Admin_Audit::used_message( $used );
+				$type = 'warning';
+				$do   = '';
+			} else {
+				AITP_Admin_Audit::action_record( $form, array( 'do' => $do, 'time' => time(), 'state' => 'running', 'batch' => 0, 'n' => 0 ) );
+			}
+		}
 		switch ( $do ) {
 			case 'map_start':
-				$urls  = isset( $_POST['urls'] ) ? preg_split( '~\R~', sanitize_textarea_field( wp_unslash( $_POST['urls'] ) ) ) : array();
+				$urls  = isset( $_POST['urls'] ) ? AITP_Admin::url_lines( wp_unslash( $_POST['urls'] ) ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- each address goes through esc_url_raw().
 				$langs = isset( $_POST['langs'] ) && is_array( $_POST['langs'] ) ? array_map( 'sanitize_text_field', wp_unslash( $_POST['langs'] ) ) : array();
-				$r     = AITP_Pagemap::start( array_map( 'esc_url_raw', array_map( 'trim', (array) $urls ) ), $langs );
+				$r     = AITP_Pagemap::start( $urls, $langs );
+				AITP_Admin_Audit::action_record( $form, array( 'state' => 'done', 'n' => (int) $r['pages'] ) );
 				if ( $r['error'] !== '' ) {
 					/* translators: %s: reason */
 					$msg  = sprintf( __( 'Mapping cannot start: %s.', 'ai-translator-for-translatepress' ), self::reason( $r['error'] ) );
@@ -255,6 +273,7 @@ final class AITP_Admin_Pages {
 				break;
 			case 'journal_start':
 				$why = AITP_Journal::start( isset( $_POST['label'] ) ? sanitize_text_field( wp_unslash( $_POST['label'] ) ) : '' );
+				AITP_Admin_Audit::action_record( $form, array( 'state' => 'done' ) );
 				$msg = $why === '' ? __( 'Test journal on.', 'ai-translator-for-translatepress' ) : self::reason( $why );
 				$type = $why === '' ? 'success' : 'warning';
 				break;
@@ -264,8 +283,23 @@ final class AITP_Admin_Pages {
 				break;
 			case 'journal_undo':
 				$r = AITP_Journal::undo();
+				AITP_Admin_Audit::action_record( $form, array( 'state' => 'done', 'n' => (int) $r['restored'] ) );
+				if ( $r['blocked'] !== '' || $r['busy'] ) {
+					$type = 'warning';
+					if ( $r['busy'] ) {
+						$msg = AITP_Admin_Audit::busy_message( AITP_Audit::write_lock_holder() );
+					} elseif ( $r['blocked'] === 'translating' ) {
+						$msg = __( 'Nothing was undone: TranslatePress still translates automatically with this engine, so visits would translate the rows again at once. In TranslatePress → Automatic Translation switch automatic translation off (or choose another engine), then undo.', 'ai-translator-for-translatepress' );
+					} elseif ( $r['blocked'] === 'open_batches' ) {
+						/* translators: %s: batch ids */
+						$msg = sprintf( __( 'Nothing was undone: repair batches of this test are not rolled back yet. Roll them back first (tab "Check & repair" → Repairs, newest first), then undo: %s.', 'ai-translator-for-translatepress' ), '#' . implode( ', #', array_slice( $r['open'], 0, 20 ) ) . ( count( $r['open'] ) > 20 ? ' …' : '' ) );
+					} else {
+						$msg = __( 'Nothing to undo: no test was recorded.', 'ai-translator-for-translatepress' );
+					}
+					break;
+				}
 				/* translators: 1: rows restored, 2: new rows */
-				$msg = sprintf( __( '%1$s rows put back to their state before the test; %2$s translations were new rows (listed, not deleted).', 'ai-translator-for-translatepress' ), number_format_i18n( $r['restored'] ), number_format_i18n( $r['new_rows'] ) );
+				$msg = sprintf( __( 'This round: %1$s rows put back to their state before the test; %2$s translations were new rows (listed, not deleted).', 'ai-translator-for-translatepress' ), number_format_i18n( $r['restored'] ), number_format_i18n( $r['new_rows'] ) );
 				if ( $r['skipped'] ) {
 					$parts = array();
 					foreach ( $r['skipped'] as $k => $n ) {
@@ -273,6 +307,18 @@ final class AITP_Admin_Pages {
 					}
 					/* translators: %s: reasons and counts */
 					$msg .= ' ' . sprintf( __( 'Kept as they are: %s.', 'ai-translator-for-translatepress' ), implode( ', ', $parts ) );
+				}
+				if ( $r['total'] ) {
+					$parts = array();
+					foreach ( $r['total'] as $k => $n ) {
+						$parts[] = self::journal_label( $k ) . ': ' . number_format_i18n( $n );
+					}
+					/* translators: %s: outcomes and counts */
+					$msg .= ' ' . sprintf( __( 'Whole test so far: %s.', 'ai-translator-for-translatepress' ), implode( ', ', $parts ) );
+				}
+				if ( $r['more'] ) {
+					$msg .= ' ' . __( 'Not finished yet (time limit of one request): open this page again and press "Undo translations of the test" once more; what is done is skipped.', 'ai-translator-for-translatepress' );
+					$type = 'warning';
 				}
 				break;
 		}

@@ -45,6 +45,16 @@ services:
       - wp:/var/www/html
       - ../..:/var/www/html/wp-content/plugins/ai-translator-for-translatepress:ro
       - ./mu-plugins:/var/www/html/wp-content/mu-plugins:ro
+  hcdn:
+    # Rehearsal only: front proxy with an 8 KB response-header limit, like the test site's CDN.
+    image: nginx:1.27-alpine
+    depends_on:
+      - wordpress
+    volumes:
+      - ./hcdn.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "127.0.0.1:8091:80"
+    profiles: ["rehearsal"]
   cli:
     image: wordpress:cli-2.11-php8.2
     user: "33:33"

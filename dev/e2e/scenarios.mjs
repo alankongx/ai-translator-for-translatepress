@@ -803,7 +803,11 @@ const S = {
 		wp( 'aitp', 'journal', 'stop' );
 		const mid = h( 'dict', L );
 		const sumBefore = j( 'status' );
+		// 0.6.5: the undo runs only with TranslatePress' automatic translation off.
+		const mtAuto = ( v ) => wp( 'eval', `$m = get_option('trp_machine_translation_settings'); $m['machine-translation'] = '${ v }'; update_option('trp_machine_translation_settings', $m); echo 1;` );
+		mtAuto( 'no' );
 		const undo = j( 'undo' );
+		mtAuto( 'yes' );
 		const after = h( 'dict', L, base.max );
 		const rowsNow = pick.map( ( id ) => json( wp( 'eval', `global $wpdb; echo wp_json_encode($wpdb->get_row("SELECT translated, status FROM {$wpdb->prefix}trp_dictionary_en_us_${ L.toLowerCase() } WHERE id = ${ id }", ARRAY_A));` ) ) );
 		const rowD = h( 'find', L, FD );
@@ -1100,24 +1104,42 @@ const S = {
 		wp( 'aitp', 'map', 'start', `--languages=${ L }` );
 		m( 'run', '--ignore-rate', '--minutes=3' );
 		const mapped = m( 'list' ).rows.filter( ( r ) => r.http === '200' ).length;
-		wp( 'eval', '@unlink(WP_CONTENT_DIR . "/e2e-state/litespeed.log"); global $wpdb; $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_log"); echo 1;' );
+		// 0.6.5: with LiteSpeed, WP-CLI clears nothing itself (LiteSpeed would store the header for the
+		// next visitor): the earlier steps left their pages in the list. Start this step with it empty.
+		wp( 'eval', 'AITP_Cache_Purge::clear(); @unlink(WP_CONTENT_DIR . "/e2e-state/litespeed.log"); global $wpdb; $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_log"); echo 1;' );
 		a( 'import', h( 'cand', L, `${ rowA.id },${ four[ 0 ] }` ).file );
 		const t6 = Date.now();
 		const r6 = a( 'repair', `--ids=${ findIds( [ rowA.id, four[ 0 ] ] ).join( ',' ) }` );
 		const ms6 = Date.now() - t6;
 		const b6 = batches()[ r6.batch ] || {};
-		const left = Number( wp( 'eval', 'echo AITP_Cache_Purge::tick(10);' ) );
+		// The list is worked through in HTTP requests, as WP-Cron does on a host (at most 30 per request).
+		// The background step is run on its own (?aitp_e2e_crontick, as WP-Cron runs it): wp-cron.php
+		// would first run whatever else earlier scenarios left due.
+		const waiting = () => json( wp( 'eval', 'echo wp_json_encode(AITP_Cache_Purge::status());' ) ).waiting;
+		opt( 'aitp_e2e_purge_probe', 1 );
+		const ck = ev( '$u = get_user_by("login", "admin"); $e = time() + 3600; echo wp_json_encode(array("c" => LOGGED_IN_COOKIE . "=" . rawurlencode(wp_generate_auth_cookie($u->ID, $e, "logged_in"))));' ).c;
+		let left = waiting();
+		for ( let i = 0; i < 3 && left > 0; i++ ) {
+			const r = await fetchRetry( 'http://localhost:8088/?aitp_e2e_crontick=1', { headers: { cookie: ck, 'user-agent': 'aitp-e2e' } } );
+			await r.text();
+			left = waiting();
+		}
+		opt( 'aitp_e2e_purge_probe', 0 );
 		const ls = ev( '$f = WP_CONTENT_DIR . "/e2e-state/litespeed.log"; $l = is_readable($f) ? array_filter(explode("\\n", file_get_contents($f))) : array(); echo wp_json_encode(array("n" => count($l), "notice" => count(array_filter($l, function ($x) { return strpos($x, "NOTICE") === 0; }))));' );
 		const warn = Number( wp( 'eval', 'global $wpdb; echo (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}aitp_log WHERE event = \'cache_purge\'");' ) );
 		const rb6 = a( 'rollback', r6.batch );
-		wp( 'eval', 'AITP_Cache_Purge::tick(10); echo 1;' );
+		// WP-Cron run by WP-CLI (a server cron job): one "clear everything" for LiteSpeed, list emptied.
+		const queuedRb = waiting();
+		wp( 'eval', '@unlink(WP_CONTENT_DIR . "/e2e-state/litespeed.log"); echo 1;' );
+		wp( 'cron', 'event', 'run', 'aitp_purge_tick' );
+		const cliCron = { queued: queuedRb, left: waiting(), log: ev( '$f = WP_CONTENT_DIR . "/e2e-state/litespeed.log"; echo wp_json_encode(array("l" => is_readable($f) ? array_values(array_filter(explode("\\n", file_get_contents($f)))) : array()));' ).l };
 		const after6 = h( 'dict', L ).sum;
 		opt( 'aitp_e2e_purge_fault', 0 );
 		opt( 'aitp_e2e_fake_litespeed', 0 );
 		opt( 'aitp_e2e_visit_log', 0 );
 		opt( 'aitp_e2e_footer', [] ); // The other scenarios count the strings of the pages.
 		record( 'repairsafe: cache clearing in the background, silent, failures do not matter', {
-			mapped, r6: { reset: r6.reset, purge: r6.purge, ms: ms6 }, batch_state: b6.state, left, litespeed: ls, warnings: warn, rb6: rb6.restored,
+			mapped, r6: { reset: r6.reset, purge: r6.purge, ms: ms6 }, batch_state: b6.state, left, litespeed: ls, warnings: warn, rb6: rb6.restored, cliCron,
 		}, {
 			many_pages: mapped >= 6,
 			purge_deferred: r6.reset === 2 && r6.purge && r6.purge.now === 0 && r6.purge.later >= 6,
@@ -1126,6 +1148,7 @@ const S = {
 			no_litespeed_notices: ls.notice === 0,
 			failure_logged_not_fatal: warn >= 1,
 			rolled_back_exactly: rb6.restored === 2 && after6 === d1.sum,
+			cli_cron_clears_all_once: cliCron.queued >= 1 && cliCron.left === 0 && cliCron.log.length === 1 && cliCron.log[ 0 ] === 'ALL',
 		} );
 	},
 
@@ -1187,6 +1210,153 @@ const S = {
 			cut_found_and_rolled_back: cut.ok === false && cut.code === 3 && cutInfo && cutInfo.state === 'running' && cutInfo.reset === 601 && rb2.restored === 601 && after2.sum === d0.sum,
 			cleaned_up: removed === N,
 		} );
+	},
+
+	async journal065() {
+		// 0.6.5 findings from the rehearsal: stacked rollbacks (R1), undo after rollbacks (J1, also for
+		// batches rolled back before 0.6.5), when an undo may run (J3), the write lock (L1), the other
+		// engines' keys in TranslatePress' settings, and address spelling in the page map (F08).
+		const a = ( ...x ) => json( wp( 'aitp', 'audit', ...x ) );
+		const j = ( ...x ) => json( wp( 'aitp', 'journal', ...x ) );
+		const h = ( ...x ) => json( wp( 'eval-file', '/e2e/pagemap-help.php', ...x.map( String ) ) );
+		const b64 = ( v ) => Buffer.from( JSON.stringify( v ) ).toString( 'base64' );
+		const ev = ( php, v ) => json( wp( 'eval', `$in = json_decode(base64_decode('${ b64( v === undefined ? null : v ) }'), true); ${ php }` ) );
+		const L = 'fr_FR';
+		const auto = ( on ) => ev( `$m = get_option('trp_machine_translation_settings'); $m['machine-translation'] = '${ on ? 'yes' : 'no' }'; update_option('trp_machine_translation_settings', $m); echo wp_json_encode(array('on' => AITP_Plugin::automatic_translation_on()));` );
+		const unlockTp = () => wp( 'eval', 'global $wpdb; $wpdb->query("TRUNCATE {$wpdb->prefix}trp_machine_translation_locks"); echo 1;' );
+		const rowsOf = ( ids ) => ev( `global $wpdb; echo wp_json_encode(array('r' => $wpdb->get_results("SELECT id, translated, status, original_id FROM {$wpdb->prefix}trp_dictionary_en_us_fr_fr WHERE id IN (" . implode(',', array_map('intval', $in)) . ") ORDER BY id", ARRAY_A)));`, ids ).r;
+		const jcount = () => ev( 'global $wpdb; $s = AITP_Journal::state(); echo wp_json_encode((object) $wpdb->get_results($wpdb->prepare("SELECT undone, COUNT(*) n FROM {$wpdb->prefix}aitp_journal WHERE session = %d GROUP BY undone", $s["session"]), OBJECT_K));' );
+		const repairRows = ( ids ) => {
+			a( 'import', h( 'cand', L, ids.join( ',' ) ).file );
+			return a( 'repair', '--source=import', '--yes' );
+		};
+
+		await reset();
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_audit_state","aitp_repair_batches","aitp_autofix_state","aitp_map_state","aitp_journal_state","aitp_purge_list","aitp_write_lock") as $o) delete_option($o); echo 1;' );
+		auto( true );
+		await visit( L, 'okay-collection' );
+		const ids = ev( `global $wpdb; echo wp_json_encode(array('ids' => array_map('intval', $wpdb->get_col("SELECT d.id FROM {$wpdb->prefix}trp_dictionary_en_us_fr_fr d JOIN {$wpdb->prefix}trp_original_meta m ON m.original_id = d.original_id AND m.meta_key = 'post_parent_id' JOIN {$wpdb->posts} p ON p.ID = m.meta_value AND p.post_name = 'okay-collection' WHERE d.status = 1 AND d.original LIKE '% %' ORDER BY d.id LIMIT 2"))));` ).ids;
+		const base = h( 'dict', L );
+		const baseRows = rowsOf( ids );
+
+		// J3: when an undo may not run.
+		const noSession = j( 'undo' );
+		wp( 'aitp', 'journal', 'start', '--label=j065' );
+		const translating = j( 'undo' );
+
+		// R1: two batches reset the same rows; the older one cannot be rolled back first.
+		const r1 = repairRows( ids );
+		const r1Rows = rowsOf( ids );
+		auto( false );
+		const openBatch = j( 'undo' );
+		auto( true );
+		unlockTp();
+		await visit( L, 'okay-collection' );
+		const mid = h( 'dict', L, base.max );
+		const midRows = rowsOf( ids );
+		const r2 = repairRows( ids );
+		const afterR2 = h( 'dict', L, base.max );
+		const rb1 = a( 'rollback', r1.batch );
+		const afterRb1 = h( 'dict', L, base.max );
+		const rb2 = a( 'rollback', r2.batch );
+		const afterRb2 = h( 'dict', L, base.max );
+		const rb1b = a( 'rollback', r1.batch );
+		const afterAll = h( 'dict', L, base.max );
+		const rowsAfterAll = rowsOf( ids );
+		record( 'journal065: stacked batches roll back newest first (R1)', { ids, r: [ r1.batch, r1.reset, r2.batch, r2.reset ], rb1, rb2, rb1b, rows: [ baseRows, midRows, rowsAfterAll ] }, {
+			both_reset: r1.reset === 2 && r2.reset === 2,
+			// The mock translates deterministically: the new translation equals the old one.
+			retranslated_between: r1Rows.every( ( r ) => r.status === '0' ) && midRows.every( ( r ) => r.status === '1' ) && afterR2.sum !== mid.sum,
+			older_refused: rb1.restored === 0 && ( rb1.skipped || {} ).newer_batch === 2 && ( rb1.newer || [] ).map( Number ).includes( Number( r2.batch ) ) && afterRb1.sum === afterR2.sum,
+			newer_first: rb2.restored === 2 && afterRb2.sum === mid.sum,
+			then_older: rb1b.restored === 2 && afterAll.sum === base.sum,
+			original_id_back: JSON.stringify( rowsAfterAll ) === JSON.stringify( baseRows ),
+		} );
+
+		// J1: the undo after the rollbacks leaves the rows as they are (0.6.4 emptied them).
+		auto( false );
+		const counts1 = jcount();
+		const undo1 = j( 'undo' );
+		const afterUndo1 = h( 'dict', L, base.max );
+		record( 'journal065: undo after rollbacks keeps the rows (J1, J3)', { noSession, translating, openBatch: { blocked: openBatch.blocked, open: openBatch.open }, counts1, undo1 }, {
+			no_session_blocked: noSession.blocked === 'no_session' && noSession.restored === 0,
+			translating_blocked: translating.blocked === 'translating',
+			open_batch_blocked: openBatch.blocked === 'open_batches' && ( openBatch.open || [] ).map( Number ).includes( Number( r1.batch ) ),
+			entries_marked: ( counts1.rolled_back || {} ).n >= 2,
+			nothing_wiped: undo1.blocked === '' && undo1.restored === 0 && afterUndo1.sum === base.sum,
+		} );
+
+		// J1 for a batch rolled back before 0.6.5 (no journal mark): marked at undo time.
+		wp( 'aitp', 'journal', 'stop' );
+		wp( 'aitp', 'journal', 'start', '--label=j065-legacy' );
+		auto( true );
+		const r3 = repairRows( ids );
+		unlockTp();
+		await visit( L, 'okay-collection' );
+		const rb3 = a( 'rollback', r3.batch );
+		ev( `global $wpdb; $b = get_option('aitp_repair_batches'); unset($b[$in]['journal']); update_option('aitp_repair_batches', $b); $s = AITP_Journal::state(); $wpdb->query($wpdb->prepare("UPDATE {$wpdb->prefix}aitp_journal SET undone = '' WHERE session = %d", $s['session'])); echo 1;`, String( r3.batch ) );
+		auto( false );
+		const before3 = jcount();
+		const undo3 = j( 'undo' );
+		const counts3 = jcount();
+		const after3 = h( 'dict', L, base.max );
+		record( 'journal065: rollbacks from before 0.6.5 are marked before the undo', { r3: [ r3.batch, r3.reset ], rb3: rb3.restored, before3, undo3, counts3 }, {
+			legacy_entries: ( before3[ '' ] || {} ).n >= 2,
+			marked_at_undo: ( counts3.rolled_back || {} ).n >= 2,
+			nothing_wiped: undo3.restored === 0 && after3.sum === base.sum,
+		} );
+		wp( 'aitp', 'journal', 'stop' );
+
+		// L1: one repair, rollback or undo at a time; a lock left by a dead request is taken over.
+		ev( 'update_option("aitp_write_lock", array("until" => time() + 600, "who" => "repair", "since" => time()), false); echo 1;' );
+		const busyRepair = a( 'repair', '--source=import', '--yes' );
+		const busyRollback = a( 'rollback', r1.batch );
+		const busyUndo = j( 'undo' );
+		const heldDict = h( 'dict', L, base.max );
+		ev( 'update_option("aitp_write_lock", array("until" => time() - 1, "who" => "repair", "since" => time() - 901), false); echo 1;' );
+		const takeover = j( 'undo' );
+		const lockLeft = ev( 'wp_cache_delete("aitp_write_lock", "options"); echo wp_json_encode(array("v" => get_option("aitp_write_lock", null)));' ).v;
+		record( 'journal065: write lock (L1)', { busyRepair, busyRollback, busyUndo: busyUndo.busy, takeover: { busy: takeover.busy, blocked: takeover.blocked }, lockLeft }, {
+			repair_waits: busyRepair.busy && busyRepair.busy.who === 'repair' && ! busyRepair.reset,
+			rollback_waits: !! busyRollback.busy && busyRollback.restored === 0,
+			undo_waits: busyUndo.busy === true,
+			nothing_changed: heldDict.sum === base.sum,
+			expired_taken_over: takeover.busy === false && lockLeft === null,
+		} );
+
+		// TranslatePress' settings form keeps the keys of an engine that is switched off (HHG).
+		const keep = ev( `$old = get_option('trp_machine_translation_settings');
+			$s = $old; $s['hhgfotr-key'] = 'K-OLD'; $s['hhgfotr-model'] = 'M-OLD'; update_option('trp_machine_translation_settings', $s);
+			$tab = TRP_Translate_Press::get_trp_instance()->get_component('machine_translation_tab');
+			$form = $old; unset($form['hhgfotr-key'], $form['hhgfotr-model']);
+			$x = $tab->sanitize_settings($form);
+			$y = $tab->sanitize_settings(array_merge($form, array('hhgfotr-model' => 'M-NEW', 'bad key!' => 'z', 'aitp_x' => 'z')));
+			update_option('trp_machine_translation_settings', $old);
+			echo wp_json_encode(array('x' => array(isset($x['hhgfotr-key']) ? $x['hhgfotr-key'] : null, isset($x['hhgfotr-model']) ? $x['hhgfotr-model'] : null), 'y' => array(isset($y['hhgfotr-key']) ? $y['hhgfotr-key'] : null, isset($y['hhgfotr-model']) ? $y['hhgfotr-model'] : null), 'bad' => isset($y['bad key!']), 'aitp' => isset($y['aitp_x']), 'engine' => $x['translation-engine']));` );
+		record( 'journal065: TranslatePress settings keep HHG keys', keep, {
+			kept_when_missing: keep.x[ 0 ] === 'K-OLD' && keep.x[ 1 ] === 'M-OLD',
+			form_value_wins: keep.y[ 0 ] === 'K-OLD' && keep.y[ 1 ] === 'M-NEW',
+			odd_names_dropped: ! keep.bad && ! keep.aitp,
+		} );
+
+		// F08: however an address is typed, the page map uses the site's own spelling, once.
+		const f08 = ev( `$id = wp_insert_post(array('post_title' => 'F08 テスト', 'post_name' => 'f08-テスト-ページ', 'post_status' => 'publish', 'post_type' => 'page'));
+			$link = get_permalink($id);
+			$upper = preg_replace_callback('/%[0-9a-f]{2}/', function ($m) { return strtoupper($m[0]); }, $link);
+			$raw = implode("\\r\\n", array($upper, rawurldecode($link), '  ' . untrailingslashit($link) . '  ', $link, '', home_url(), home_url('/'), 'javascript:alert(1)'));
+			$lines = AITP_Admin::url_lines($raw);
+			$plan = AITP_Pagemap::plan($lines, array('fr_FR'));
+			wp_delete_post($id, true);
+			echo wp_json_encode(array('link' => $link, 'fr' => AITP_Queue::translated_url($link, 'fr_FR'), 'home_fr' => AITP_Queue::translated_url(home_url('/'), 'fr_FR'), 'lines' => $lines, 'items' => wp_list_pluck($plan['items'], 'url'), 'bad' => $plan['bad']));` );
+		record( 'journal065: page map addresses normalised (F08)', f08, {
+			encoded_link: /%e3%83%86/.test( f08.link ),
+			two_pages: f08.items.length === 2,
+			site_spelling: f08.items.includes( f08.fr ) && f08.items.includes( f08.home_fr ),
+			no_script_url: ! f08.lines.some( ( u ) => /javascript/i.test( u ) ),
+		} );
+
+		auto( true );
+		wp( 'eval', 'foreach (array("aitp_journal_state","aitp_write_lock") as $o) delete_option($o); echo 1;' );
 	},
 
 	async litespeed() {

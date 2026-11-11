@@ -86,7 +86,7 @@ final class AITP_Admin_Queue {
 		self::kv( __( 'Characters used by the queue today', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $s['day_bytes'] ) . ( $cap ? ' / ' . number_format_i18n( $cap ) : '' ) );
 		self::kv( __( 'Page list built', 'ai-translator-for-translatepress' ), $s['last_sync'] ? wp_date( 'Y-m-d H:i', (int) $s['last_sync'] ) : __( 'not yet', 'ai-translator-for-translatepress' ) );
 		$next = wp_next_scheduled( AITP_Queue::CRON );
-		self::kv( __( 'Background run (WP-Cron)', 'ai-translator-for-translatepress' ), $next ? __( 'scheduled every minute', 'ai-translator-for-translatepress' ) . ( defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON ? ' — ' . __( 'WP-Cron is disabled on this site; a server cron job must call wp-cron.php, or keep this page open, or use "wp aitp queue run".', 'ai-translator-for-translatepress' ) : '' ) : __( 'not scheduled', 'ai-translator-for-translatepress' ) );
+		self::kv( __( 'Background run (WP-Cron)', 'ai-translator-for-translatepress' ), $next ? __( 'scheduled every minute', 'ai-translator-for-translatepress' ) . ( defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON ? ' — ' . __( 'WP-Cron is disabled on this site; a server cron job must call wp-cron.php, or keep this page open, or use "wp aitp queue run".', 'ai-translator-for-translatepress' ) : '' ) . AITP_Admin::cron_late( $next ) : __( 'not scheduled', 'ai-translator-for-translatepress' ) );
 		echo '</tbody></table>';
 
 		// Controls.

@@ -14,3 +14,5 @@ wp_clear_scheduled_hook( 'aitp_daily' );
 wp_clear_scheduled_hook( 'aitp_autofix_tick' );
 wp_clear_scheduled_hook( 'aitp_map_tick' );
 wp_clear_scheduled_hook( 'aitp_purge_tick' );
+wp_clear_scheduled_hook( 'aitp_queue_tick' );
+wp_clear_scheduled_hook( 'aitp_audit_tick' );

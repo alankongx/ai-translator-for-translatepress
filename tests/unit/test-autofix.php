@@ -16,6 +16,10 @@ test( 'autofix: settings are off by default and clamped', function () {
 	eq( 1200, $s['cap'] );
 	eq( 20, AITP_Autofix_Logic::clean_settings( array( 'batch' => 1 ), array(), 0 )['batch'], 'at least 20 rows' );
 	eq( 500000, AITP_Autofix_Logic::clean_settings( array( 'cap' => 0 ), array(), 0 )['cap'], 'no TranslatePress limit -> fixed default' );
+	eq( 0, AITP_Autofix_Logic::clean_settings( array(), array(), 0 )['max_batches'], 'no batch limit by default' );
+	eq( 1, AITP_Autofix_Logic::clean_settings( array( 'max_batches' => '1' ), array(), 0 )['max_batches'], 'one batch per start' );
+	eq( 0, AITP_Autofix_Logic::clean_settings( array( 'max_batches' => '-3' ), array(), 0 )['max_batches'], 'negative -> no limit' );
+	eq( 1000, AITP_Autofix_Logic::clean_settings( array( 'max_batches' => 99999 ), array(), 0 )['max_batches'], 'at most 1000' );
 } );
 
 test( 'autofix: rounds of page visits', function () {

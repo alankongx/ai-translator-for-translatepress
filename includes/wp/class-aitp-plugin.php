@@ -42,6 +42,10 @@ final class AITP_Plugin {
 		AITP_Autofix::boot();
 		AITP_Pagemap::boot();
 		AITP_Cache_Purge::boot();
+		AITP_Journal::boot();
+		// TranslatePress keeps only the settings of engines that are active when its form is saved:
+		// keep what another engine stored (HHG's key and model) while it is switched off.
+		add_filter( 'trp_machine_translation_sanitize_settings', array( __CLASS__, 'keep_other_engine_settings' ), PHP_INT_MAX, 2 );
 		if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( 'WP_CLI' ) ) {
 			require_once AITP_DIR . 'includes/wp/class-aitp-cli.php';
 			WP_CLI::add_command( 'aitp', 'AITP_CLI' );
@@ -151,6 +155,33 @@ final class AITP_Plugin {
 		$wpdb->query( $wpdb->prepare( 'DELETE FROM ' . AITP_Schema::table( 'cache' ) . ' WHERE created_at < %s', gmdate( 'Y-m-d H:i:s', time() - 60 * DAY_IN_SECONDS ) ) );
 		$wpdb->query( $wpdb->prepare( 'DELETE FROM ' . AITP_Schema::table( 'failures' ) . ' WHERE updated_at < %s', gmdate( 'Y-m-d H:i:s', time() - 30 * DAY_IN_SECONDS ) ) );
 		// phpcs:enable
+	}
+
+	/**
+	 * TranslatePress drops every key of its automatic-translation option that no active engine
+	 * claims, each time the option is saved (its form, its daily counter, a restore from code).
+	 * Keys of an engine that is switched off (HHG's key and model) are kept: the value given
+	 * in this save if there is one, else the stored one. Keys some engine sanitized are left
+	 * as they are.
+	 *
+	 * @param mixed $out Sanitized settings.
+	 * @param mixed $in  Settings given to the save.
+	 * @return mixed
+	 */
+	public static function keep_other_engine_settings( $out, $in = array() ) {
+		if ( ! is_array( $out ) ) {
+			return $out;
+		}
+		$old = get_option( 'trp_machine_translation_settings', array() );
+		$old = is_array( $old ) ? $old : array();
+		$in  = is_array( $in ) ? $in : array();
+		foreach ( array_keys( $old + $in ) as $k ) {
+			if ( array_key_exists( $k, $out ) || ! preg_match( '~^[A-Za-z0-9_-]{1,64}$~', (string) $k ) || strpos( (string) $k, 'aitp' ) === 0 ) {
+				continue;
+			}
+			$out[ $k ] = array_key_exists( $k, $in ) ? $in[ $k ] : $old[ $k ];
+		}
+		return $out;
 	}
 
 	/** Activation. */

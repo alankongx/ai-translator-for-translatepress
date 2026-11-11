@@ -73,6 +73,7 @@ final class AITP_Autofix {
 				'day_chars'   => 0,
 				'batch'       => null,
 				'batches'     => 0,
+				'run_batches' => 0, // Batches finished since the last start.
 				'rows_ok'     => 0,
 				'left'        => array( 'structured' => 0, 'no_page' => 0 ),
 				'history'     => array(),
@@ -90,8 +91,23 @@ final class AITP_Autofix {
 		return $s;
 	}
 
-	/** @param array $s State. */
-	private static function save( array $s ) {
+	/**
+	 * @param array $s     State.
+	 * @param bool  $force Write the status as given (start); otherwise a stop saved meanwhile
+	 *                     (a person, or another request) is kept.
+	 */
+	private static function save( array $s, $force = false ) {
+		if ( ! $force && $s['status'] === 'running' ) {
+			wp_cache_delete( self::STATE, 'options' );
+			$cur = get_option( self::STATE, array() );
+			if ( is_array( $cur ) && isset( $cur['status'] ) && $cur['status'] !== 'running' ) {
+				foreach ( array( 'status', 'reason', 'ended' ) as $k ) {
+					if ( isset( $cur[ $k ] ) ) {
+						$s[ $k ] = $cur[ $k ];
+					}
+				}
+			}
+		}
 		update_option( self::STATE, $s, false );
 	}
 
@@ -140,7 +156,8 @@ final class AITP_Autofix {
 		$s['ended']       = 0;
 		$s['wait_until']  = 0;
 		$s['wait_reason'] = '';
-		self::save( $s );
+		$s['run_batches'] = 0;
+		self::save( $s, true );
 		if ( ! wp_next_scheduled( self::CRON ) ) {
 			wp_schedule_event( time() + 5, AITP_Queue::SCHEDULE, self::CRON );
 		}
@@ -237,6 +254,11 @@ final class AITP_Autofix {
 						$result = $r;
 						break;
 					}
+					if ( $r === 'busy' ) {
+						$result = 'waiting'; // A repair, rollback or undo is running: next tick.
+						$wait   = 60;
+						break;
+					}
 					if ( $r === 'empty' && ++$empty >= 5 ) {
 						break; // Picked rows had all changed; try again next tick.
 					}
@@ -281,6 +303,10 @@ final class AITP_Autofix {
 					continue;
 				}
 				$r = self::end_pass( $s );
+				if ( $r === 'batch_done' ) {
+					$result = 'running'; // The next batch starts in a new request (next tick, or the page).
+					break;
+				}
 				if ( $r !== '' ) {
 					$result = $r;
 					break;
@@ -323,10 +349,15 @@ final class AITP_Autofix {
 	 * Pick and reset the next batch.
 	 *
 	 * @param array $s State.
-	 * @return string started | empty | done | stopped.
+	 * @return string started | empty | done | stopped | busy.
 	 */
 	private static function begin_batch( array $s ) {
 		$set  = self::settings();
+		if ( $set['max_batches'] > 0 && (int) $s['run_batches'] >= $set['max_batches'] ) {
+			self::save( $s );
+			self::stop( 'max_batches' );
+			return 'stopped';
+		}
 		$pick = AITP_Audit::autofix_pick( $set['languages'], $set['batch'] );
 		$s['left'] = array( 'structured' => $pick['structured'], 'no_page' => $pick['no_page'] );
 		if ( ! $pick['ids'] ) {
@@ -338,7 +369,19 @@ final class AITP_Autofix {
 			( new AITP_WP_Log() )->log( 'notice', 'autofix_done', array( 'batches' => $s['batches'], 'rows_ok' => $s['rows_ok'], 'left' => $s['left'] ) );
 			return 'done';
 		}
+		// Load one page of the language first (read only: nothing is translated or saved). When the
+		// site cannot load its own pages now, stop before anything is reset.
+		$check = self::visit_check( $pick['lang'] );
+		if ( $check !== '' ) {
+			self::save( $s );
+			self::stop( $check );
+			return 'stopped';
+		}
 		$r = AITP_Audit::repair( $pick['ids'] );
+		if ( ! empty( $r['busy'] ) ) {
+			self::save( $s );
+			return 'busy';
+		}
 		if ( ! $r['reset'] ) {
 			self::save( $s );
 			if ( isset( $r['skipped']['engine_not_selected'] ) || isset( $r['skipped']['backup_failed'] ) ) {
@@ -371,6 +414,34 @@ final class AITP_Autofix {
 		);
 		self::save( $s );
 		return 'started';
+	}
+
+	/**
+	 * Read-only test load of one known page of a language.
+	 *
+	 * @param string $lang Language.
+	 * @return string '' when it loaded, otherwise visit_signature | visit_check.
+	 */
+	private static function visit_check( $lang ) {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$url = (string) $wpdb->get_var( $wpdb->prepare( 'SELECT url FROM ' . AITP_Schema::table( 'pagemap' ) . ' WHERE lang = %s AND http BETWEEN 200 AND 299 ORDER BY mapped_at DESC LIMIT 1', $lang ) );
+		if ( $url === '' ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$url = (string) $wpdb->get_var( $wpdb->prepare( 'SELECT url FROM ' . AITP_Schema::table( 'queue' ) . ' WHERE lang = %s ORDER BY id LIMIT 1', $lang ) );
+		}
+		if ( $url === '' ) {
+			return ''; // Nothing known to load; the batch's own visits are checked as before.
+		}
+		$v = AITP_Queue::visit( $url, $lang, AITP_Queue::page_seconds(), true );
+		if ( $v['sig'] !== '' ) {
+			return 'visit_signature';
+		}
+		if ( $v['http'] < 200 || $v['http'] >= 300 || empty( $v['report'] ) ) {
+			( new AITP_WP_Log() )->log( 'warning', 'autofix_check', array( 'url' => $url, 'http' => $v['http'], 'ms' => $v['ms'] ) );
+			return 'visit_check';
+		}
+		return '';
 	}
 
 	/**
@@ -459,14 +530,20 @@ final class AITP_Autofix {
 		$s['history'] = array_slice( $s['history'], 0, self::HISTORY );
 		$s['batch']   = null;
 		$s['batches']++;
-		$s['rows_ok'] += (int) $c['ok'];
+		$s['run_batches'] = (int) $s['run_batches'] + 1;
+		$s['rows_ok']    += (int) $c['ok'];
 		self::save( $s );
 		( new AITP_WP_Log() )->log( $j['result'] === 'ok' ? 'info' : 'warning', 'autofix_batch', $entry );
 		if ( $j['result'] !== 'ok' ) {
 			self::stop( $j['result'] );
 			return 'stopped';
 		}
-		return '';
+		$max = (int) self::settings()['max_batches'];
+		if ( $max > 0 && (int) $s['run_batches'] >= $max ) {
+			self::stop( 'max_batches' );
+			return 'stopped';
+		}
+		return 'batch_done';
 	}
 
 	/* -------------------------------------------------------------------------------------

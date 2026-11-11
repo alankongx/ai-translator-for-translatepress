@@ -16,6 +16,12 @@
  * and with LiteSpeed active a list of more than ALL_OVER addresses clears its whole
  * cache once instead (a header of a few bytes).
  *
+ * LiteSpeed sends a header stored by an earlier request at the start of the next one; a purge
+ * of ours in that request would replace it (0.6.5). So a request that already carries such a
+ * header clears nothing per address through LiteSpeed. Under WP-CLI LiteSpeed only stores the
+ * header for later: the list waits for a web request. In WP-Cron the stored header is sent at
+ * once with a request to the site (LiteSpeed's own "kick"), not by the next visitor.
+ *
  * @package AI_Translator_For_TranslatePress
  */
 
@@ -57,7 +63,7 @@ final class AITP_Cache_Purge {
 			return $out;
 		}
 		$s = self::state();
-		if ( self::litespeed() && count( $urls ) + count( $s['urls'] ) > self::ALL_OVER ) {
+		if ( self::litespeed() && ! self::cli() && count( $urls ) + count( $s['urls'] ) > self::ALL_OVER ) {
 			// Many pages: one "clear everything" for LiteSpeed covers the list and what is waiting.
 			self::litespeed_all( count( $urls ) );
 			$out['all'] = true;
@@ -101,6 +107,20 @@ final class AITP_Cache_Purge {
 	 */
 	public static function tick( $seconds = 10 ) {
 		$end = microtime( true ) + max( 1, (int) $seconds );
+		$s   = self::state();
+		// A long list (for example left by WP-CLI): one "clear everything" for LiteSpeed. So is any
+		// list in WP-Cron run by WP-CLI (a server cron job): there LiteSpeed stores one header for
+		// the next visitor, which stays a few bytes for "everything" but grows with every address.
+		$whole = self::cli() ? wp_doing_cron() : count( $s['urls'] ) > self::ALL_OVER;
+		if ( $s['urls'] && empty( $s['ls_done'] ) && self::litespeed() && $whole ) {
+			self::litespeed_all( count( $s['urls'] ) );
+			if ( ! self::others() ) {
+				self::save( array( 'urls' => array(), 'dropped' => 0, 'ls_done' => false ) );
+				return 0;
+			}
+			$s['ls_done'] = true;
+			self::save( $s );
+		}
 		do {
 			$s = self::state();
 			if ( ! $s['urls'] ) {
@@ -145,6 +165,7 @@ final class AITP_Cache_Purge {
 			try {
 				if ( $ls ) {
 					++self::$done;
+					self::kick_later();
 				}
 				if ( ! $ls ) {
 					// LiteSpeed absent, or already cleared as a whole.
@@ -181,7 +202,51 @@ final class AITP_Cache_Purge {
 
 	/** @return int Addresses this request may still clear (LiteSpeed: PER_REQUEST in all; others: no limit). */
 	private static function room() {
-		return self::litespeed() ? max( 0, self::PER_REQUEST - self::$done ) : PHP_INT_MAX;
+		if ( ! self::litespeed() ) {
+			return PHP_INT_MAX;
+		}
+		if ( self::cli() || ( self::$done === 0 && self::foreign_header() ) ) {
+			return 0;
+		}
+		return max( 0, self::PER_REQUEST - self::$done );
+	}
+
+	/** @return bool Running under WP-CLI (LiteSpeed only stores its header there). */
+	private static function cli() {
+		return defined( 'LITESPEED_CLI' ) || ( defined( 'WP_CLI' ) && WP_CLI );
+	}
+
+	/** @return bool This request already carries a LiteSpeed purge header that is not ours. */
+	private static function foreign_header() {
+		if ( ! function_exists( 'headers_list' ) ) {
+			return false;
+		}
+		foreach ( headers_list() as $h ) {
+			if ( stripos( $h, 'x-litespeed-purge' ) === 0 ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** In WP-Cron: have LiteSpeed send the header it stored at the end of this request. */
+	private static function kick_later() {
+		static $hooked = false;
+		if ( $hooked || ! wp_doing_cron() || ! class_exists( '\LiteSpeed\Core' ) || ! is_callable( array( '\LiteSpeed\Core', 'kick_purge_queue' ) ) ) {
+			return;
+		}
+		$hooked = true;
+		add_action(
+			'shutdown',
+			function () {
+				try {
+					\LiteSpeed\Core::kick_purge_queue();
+				} catch ( \Throwable $e ) {
+					self::failed( $e );
+				}
+			},
+			PHP_INT_MAX
+		);
 	}
 
 	/** @return bool LiteSpeed Cache is active. */
@@ -206,6 +271,7 @@ final class AITP_Cache_Purge {
 			} else {
 				do_action( 'litespeed_purge_all' ); // Older versions.
 			}
+			self::kick_later();
 			( new AITP_WP_Log() )->log( 'notice', 'cache_purge_all', array( 'addresses' => (int) $n ) );
 		} catch ( \Throwable $e ) {
 			self::failed( $e );

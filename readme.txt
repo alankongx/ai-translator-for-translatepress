@@ -4,7 +4,7 @@ Tags: translatepress, translation, gemini, openai, multilingual
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.6.4
+Stable tag: 0.6.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -117,6 +117,17 @@ Not by itself. The engine only translates strings TranslatePress sends to it, wh
 Updates come from the GitHub releases of this plugin. To turn update checks off: `add_filter( 'aitp_github_updates', '__return_false' );`
 
 == Changelog ==
+
+= 0.6.5 =
+* Fix: "Undo" of the test journal after rolled-back repair batches emptied the rows those batches had put back (they went back to untranslated). Rollbacks now mark the journal entries they make obsolete, and batches rolled back by an earlier version are marked when the undo runs. The undo runs only when automatic translation is off and every repair batch of the test is rolled back, and goes on where it stopped when pressed again.
+* Fix: rolling back an older batch before a newer one that reset the same rows wrote the older text over the newer batch's backup. Such rows are now skipped and the notice names the newer batches to roll back first.
+* Fix: a rollback put the text back but left the row linked to a different original id in some cases; it is restored too.
+* Repairs, rollbacks and the undo run one at a time (a lock left by a request that died is taken over after 15 minutes); a second one says what is running.
+* Fix: the batch auto repair could start a second batch in the same request. New setting "Batches per start"; before each batch one mapped page is read without translating to check the signed internal visits work.
+* Fix: TranslatePress' settings form dropped the keys of other translation engines that are switched off (for example HHG's key and model) whenever it was saved. They are kept.
+* The page map takes addresses however they are typed (percent-encoded in upper or lower case, readable, with or without the trailing slash) and maps each page once.
+* Page caches with LiteSpeed: WP-CLI commands leave changed pages to the background list instead of storing a growing purge header for the next visitor; WP-Cron run by WP-CLI (a server cron job) clears the LiteSpeed page cache once for the list; nothing is added to a response that already carries a LiteSpeed purge header; a purge stored in WP-Cron is sent right away.
+* Notices for overdue WP-Cron tasks; the import and accepted-list notices count changed, untranslated, missing and unreadable rows apart. Uninstall also removes the lock, transients and cron hooks.
 
 = 0.6.4 =
 * Manual actions on findings (reset, "Not a problem", reopen, AI check, `wp aitp audit repair --yes`) take up to 1,000 rows at a time instead of 500. The batch auto repair keeps at most 500 rows per batch.
