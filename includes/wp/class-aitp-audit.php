@@ -916,23 +916,36 @@ final class AITP_Audit {
 		$b = is_array( $b ) ? $b : array();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$rows = (array) $wpdb->get_results( 'SELECT batch, COUNT(*) AS n, MIN(created_at) AS t, SUM(restored = \'yes\') AS yes, SUM(restored = \'\') AS todo, GROUP_CONCAT(DISTINCT lang ORDER BY lang) AS langs FROM ' . AITP_Schema::table( 'repair' ) . ' GROUP BY batch', ARRAY_A );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$skips   = (array) $wpdb->get_results( 'SELECT batch, restored, COUNT(*) AS n FROM ' . AITP_Schema::table( 'repair' ) . ' WHERE restored LIKE \'skip:%\' GROUP BY batch, restored', ARRAY_A );
+		$skip_of = array();
+		foreach ( $skips as $s ) {
+			$skip_of[ (int) $s['batch'] ][ substr( (string) $s['restored'], 5 ) ] = (int) $s['n'];
+		}
 		foreach ( $rows as $r ) {
 			$id = (int) $r['batch'];
 			if ( isset( $b[ $id ] ) && ( ! isset( $b[ $id ]['state'] ) || $b[ $id ]['state'] === 'done' ) ) {
-				continue;
+				$info = $b[ $id ];
+			} else {
+				$info               = isset( $b[ $id ] ) ? $b[ $id ] : array(
+					'time'    => (int) strtotime( $r['t'] . ' UTC' ),
+					'user'    => 0,
+					'skipped' => array(),
+					'pages'   => 0,
+				);
+				$info['incomplete'] = true;
+				$info['reset']      = (int) $r['n'];
+				$info['langs']      = (string) $r['langs'];
+				if ( (int) $r['todo'] === 0 && empty( $info['rolled_back'] ) ) {
+					$info['rolled_back'] = (int) strtotime( $r['t'] . ' UTC' ); // Every row handled by a rollback whose record is missing.
+				}
 			}
-			$info = isset( $b[ $id ] ) ? $b[ $id ] : array(
-				'time'    => (int) strtotime( $r['t'] . ' UTC' ),
-				'user'    => 0,
-				'skipped' => array(),
-				'pages'   => 0,
-			);
-			$info['incomplete'] = true;
-			$info['reset']      = (int) $r['n'];
-			$info['langs']      = (string) $r['langs'];
-			if ( (int) $r['todo'] === 0 && empty( $info['rolled_back'] ) ) {
-				$info['rolled_back'] = (int) strtotime( $r['t'] . ' UTC' ); // Every row handled by a rollback whose record is missing.
-				$info['restored']    = (int) $r['yes'];
+			// Rollback counts always come from the backup rows: every round marks the rows it handled
+			// there, so rounds cut off, repeated or without a record are never counted twice or lost.
+			$info['todo'] = (int) $r['todo'];
+			if ( ! empty( $info['rolled_back'] ) || (int) $r['yes'] || isset( $skip_of[ $id ] ) ) {
+				$info['restored']        = (int) $r['yes'];
+				$info['restore_skipped'] = isset( $skip_of[ $id ] ) ? $skip_of[ $id ] : array();
 			}
 			$b[ $id ] = $info;
 		}
@@ -983,6 +996,7 @@ final class AITP_Audit {
 			@set_time_limit( 300 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
 		}
 		$allowed  = isset( $opts['pages'] ) && is_array( $opts['pages'] ) && $opts['pages'] ? AITP_Audit_Logic::page_keys( $opts['pages'] ) : null;
+		$only     = $allowed !== null ? array_values( array_unique( array_filter( array_map( 'strval', $opts['pages'] ) ) ) ) : array(); // Kept with the batch.
 		$audit    = AITP_Schema::table( 'audit' );
 		$repair   = AITP_Schema::table( 'repair' );
 		$started  = false;
@@ -1053,6 +1067,7 @@ final class AITP_Audit {
 							'pages'     => 0,
 							'urls'      => array(),
 							'all_pages' => array(),
+							'only'      => $only,
 						)
 					);
 					$started = true;
@@ -1116,6 +1131,7 @@ final class AITP_Audit {
 					'pages'     => $out['pages'],
 					'urls'      => $out['urls'],
 					'all_pages' => $out['all_pages'],
+					'only'      => $only,
 				)
 			);
 			// Cached copies of every page showing the rows: cleared in the background, in small steps.
@@ -1241,7 +1257,7 @@ final class AITP_Audit {
 	 * Restore a repair batch from its backup.
 	 *
 	 * @param int $batch Batch id.
-	 * @return array{restored:int,skipped:array<string,int>}
+	 * @return array{restored:int,skipped:array<string,int>,total?:int} restored and skipped: this round; total: rows of the batch restored by all rounds.
 	 */
 	public static function rollback( $batch ) {
 		global $wpdb;
@@ -1291,11 +1307,11 @@ final class AITP_Audit {
 				$out['restored']++;
 			}
 		}
-		$info = self::batches();
+		$info = self::batches(); // Counts read from the backup rows, this round included.
 		if ( isset( $info[ $batch ] ) ) {
-			$info[ $batch ]['rolled_back']      = time();
-			$info[ $batch ]['restored']         = ( isset( $info[ $batch ]['restored'] ) ? (int) $info[ $batch ]['restored'] : 0 ) + $out['restored'];
-			$info[ $batch ]['restore_skipped'] = $out['skipped'];
+			$info[ $batch ]['rolled_back'] = time();
+			$out['total']                  = (int) $info[ $batch ]['restored'];
+			unset( $info[ $batch ]['todo'] );
 			self::save_batch( $batch, $info[ $batch ] );
 		}
 		if ( $restored ) {
@@ -1311,6 +1327,25 @@ final class AITP_Audit {
 		}
 		( new AITP_WP_Log() )->log( 'notice', 'rollback', array( 'batch' => $batch ) + $out );
 		return $out;
+	}
+
+	/**
+	 * Everything recorded for a batch, for download: the pages it queued, the "only these
+	 * pages" list given for it (empty: none given), languages queued as a whole, backup rows.
+	 *
+	 * @param int $batch Batch id.
+	 * @return array{batch:int,urls:array,only_pages:string[],all_pages:string[],rows:array}
+	 */
+	public static function backup_export( $batch ) {
+		$all  = self::batches();
+		$info = isset( $all[ $batch ] ) ? $all[ $batch ] : array();
+		return array(
+			'batch'      => (int) $batch,
+			'urls'       => isset( $info['urls'] ) ? array_values( (array) $info['urls'] ) : array(),
+			'only_pages' => isset( $info['only'] ) ? array_values( (array) $info['only'] ) : array(),
+			'all_pages'  => isset( $info['all_pages'] ) ? array_values( (array) $info['all_pages'] ) : array(),
+			'rows'       => self::backup_rows( $batch ),
+		);
 	}
 
 	/**

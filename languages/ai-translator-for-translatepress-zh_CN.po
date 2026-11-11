@@ -2004,3 +2004,7 @@ msgstr "待清理的页面缓存列表已清空。"
 
 msgid "same as the original, which is not in the source language (no other language has it); probably fine"
 msgstr "与原文相同，但原文本身就不是源语言（其他语言里没有这条原文），多半没问题"
+
+#. translators: %s: rows of the batch restored by all rollbacks
+msgid "This batch: %s restored in all."
+msgstr "这一批累计恢复 %s 条。"

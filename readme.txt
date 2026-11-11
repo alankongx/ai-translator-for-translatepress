@@ -4,7 +4,7 @@ Tags: translatepress, translation, gemini, openai, multilingual
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.6.2
+Stable tag: 0.6.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -117,6 +117,10 @@ Not by itself. The engine only translates strings TranslatePress sends to it, wh
 Updates come from the GitHub releases of this plugin. To turn update checks off: `add_filter( 'aitp_github_updates', '__return_false' );`
 
 == Changelog ==
+
+= 0.6.3 =
+* Rollback counts in the repair list are read from the backup rows, so a rollback of a batch found from its backup rows, a rollback finished in several runs and a repeated rollback each count every row once (a record lost before showed twice its rows). Rows kept as they are stay counted apart. The notice after a rollback adds the total of the batch when earlier runs restored rows too.
+* "Download backup" also lists the pages the batch queued and the "Only use these pages" list it was given.
 
 = 0.6.2 =
 * Repairs can no longer leave a batch without a record: the batch is recorded before the first row changes, and repairs and rollbacks keep running when the browser goes away. Batches whose record is missing or unfinished are found from their backup rows ("batch record incomplete") and can be downloaded and rolled back; a cut-off rollback finishes when run again.

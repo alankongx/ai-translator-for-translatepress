@@ -423,7 +423,7 @@ final class AITP_Admin_Audit {
 			$auto = ! empty( $info['auto'] ) ? ' · ' . __( 'auto repair', 'ai-translator-for-translatepress' ) . ( isset( $info['auto_result'] ) && $info['auto_result'] !== 'ok' ? ' (' . self::autofix_reason( $info['auto_result'] ) . ')' : '' ) : '';
 			echo '<tr><td>' . esc_html( wp_date( 'Y-m-d H:i:s', (int) $info['time'] ) . $auto ) . ( $inc !== '' ? '<br><strong>' . esc_html( $inc ) . '</strong>' : '' ) . '<br><span class="description">#' . esc_html( (string) $id ) . '</span></td><td>' . esc_html( number_format_i18n( (int) $info['reset'] ) ) . '</td><td>' . esc_html( self::skipped_text( (array) $info['skipped'] ) ) . '</td><td>' . esc_html( number_format_i18n( (int) $info['pages'] ) ) . '</td><td>' . esc_html( $rolled ) . '</td><td>';
 			echo '<a class="button" href="' . esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=aitp_audit_backup&batch=' . rawurlencode( (string) $id ) ), 'aitp_audit_backup' ) ) . '">' . esc_html__( 'Download backup', 'ai-translator-for-translatepress' ) . '</a> ';
-			if ( empty( $info['rolled_back'] ) ) {
+			if ( empty( $info['rolled_back'] ) || ! empty( $info['todo'] ) ) {
 				echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline-block;" onsubmit="return confirm(' . esc_attr( wp_json_encode( __( 'Put the old translations of this repair back? Rows translated manually since then are kept.', 'ai-translator-for-translatepress' ) ) ) . ');"><input type="hidden" name="action" value="aitp_audit"><input type="hidden" name="do" value="rollback"><input type="hidden" name="batch" value="' . esc_attr( (string) $id ) . '">';
 				wp_nonce_field( 'aitp_audit' );
 				echo '<button class="button">' . esc_html__( 'Roll back', 'ai-translator-for-translatepress' ) . '</button></form>';
@@ -559,6 +559,10 @@ final class AITP_Admin_Audit {
 				$r     = AITP_Audit::rollback( $batch );
 				/* translators: %s: rows restored */
 				$msg = sprintf( __( '%s translations restored.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['restored'] ) );
+				if ( isset( $r['total'] ) && $r['total'] !== $r['restored'] ) {
+					/* translators: %s: rows of the batch restored by all rollbacks */
+					$msg .= ' ' . sprintf( __( 'This batch: %s restored in all.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['total'] ) );
+				}
 				if ( $r['skipped'] ) {
 					/* translators: %s: reasons and counts */
 					$msg .= ' ' . sprintf( __( 'Kept as they are: %s.', 'ai-translator-for-translatepress' ), self::skipped_text( $r['skipped'] ) );
@@ -660,7 +664,7 @@ final class AITP_Admin_Audit {
 		nocache_headers();
 		header( 'Content-Type: application/json; charset=utf-8' );
 		header( 'Content-Disposition: attachment; filename="aitp-repair-' . $batch . '.json"' );
-		echo wp_json_encode( array( 'batch' => $batch, 'rows' => AITP_Audit::backup_rows( $batch ) ), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT );
+		echo wp_json_encode( AITP_Audit::backup_export( $batch ), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT );
 		exit;
 	}
 

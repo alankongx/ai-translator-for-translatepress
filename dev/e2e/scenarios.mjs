@@ -1010,6 +1010,7 @@ const S = {
 		const nowB = h( 'find', L, FB );
 		const rb2 = a( 'rollback', r2.batch );
 		const u1 = r1.urls.map( ( u ) => u.url ).sort();
+		const exp2 = ev( 'echo wp_json_encode(AITP_Audit::backup_export((int) $in));', r2.batch ); // 0.6.3: pages kept with the batch.
 		record( 'repairsafe: repairs visit mapped pages first, and only listed pages', {
 			r1: { reset: r1.reset, urls: u1, pages: r1.pages }, r2: { reset: r2.reset, skipped: r2.skipped, urls: r2.urls.map( ( u ) => u.url ) }, x_state: xState, visits, B: nowB.status, rollbacks: [ rb1.restored, rb2.restored ],
 		}, {
@@ -1063,6 +1064,36 @@ const S = {
 			lost_record_found: r4.reset === 4 && b4.incomplete === true && b4.reset === 4 && b4.langs === L,
 			lost_record_rolled_back_exactly: rb4.restored === 4 && after4 === d1.sum && b4after.rolled_back,
 			cut_rollback_finished: cut5.ok === false && mid5 !== d1.sum && rb5.restored === 2 && after5 === d1.sum,
+		} );
+
+		// 0.6.3 (F06): rollback counts come from the backup rows, never added up twice.
+		const hist = ( id ) => batches()[ id ] || {};
+		const h5 = hist( r5.batch );
+		const rb5again = a( 'rollback', r5.batch );
+		const h5again = hist( r5.batch );
+		// A row changed by hand before the rollback is kept and counted apart.
+		const r7 = a( 'repair', `--ids=${ findIds( four ).join( ',' ) }` );
+		const back7 = ev( 'global $wpdb; echo wp_json_encode($wpdb->get_row($wpdb->prepare("SELECT row_id, translated, status FROM {$wpdb->prefix}aitp_repair WHERE batch = %d AND row_id <> %d ORDER BY id DESC LIMIT 1", (int) $in[0], (int) $in[1]), ARRAY_A));', [ r7.batch, four[ 0 ] ] );
+		const setRow = ( v ) => ev( 'global $wpdb; $wpdb->query($wpdb->prepare("UPDATE {$wpdb->prefix}trp_dictionary_en_us_fr_fr SET translated = %s, status = %d WHERE id = %d", (string) $in[0], (int) $in[1], (int) $in[2])); echo wp_json_encode(array("ok" => 1));', v );
+		setRow( [ 'fait à la main', 2, back7.row_id ] );
+		const rb7 = a( 'rollback', r7.batch );
+		const rb7again = a( 'rollback', r7.batch );
+		const h7 = hist( r7.batch );
+		setRow( [ back7.translated, back7.status, back7.row_id ] );
+		const after7 = h( 'dict', L ).sum;
+		// A record 0.6.2 stored with the count added twice shows the real count.
+		ev( '$b = get_option("aitp_repair_batches"); $b[(int) $in]["restored"] = 999; update_option("aitp_repair_batches", $b, false); echo wp_json_encode(array("ok" => 1));', r4.batch );
+		const h4 = hist( r4.batch );
+		record( 'repairsafe: rollback counts are the backup rows, pages kept with the batch', {
+			lost: { rb: rb4.restored, hist: b4after.restored }, cut: { rb: rb5.restored, total: rb5.total, hist: h5.restored }, again: { rb: rb5again.restored, hist: h5again.restored, todo: h5again.todo },
+			manual: { rb: rb7, again: rb7again.restored, hist: h7.restored, skipped: h7.restore_skipped }, stored_999: h4.restored, export: { urls: exp2.urls, only: exp2.only_pages, rows: exp2.rows.length },
+		}, {
+			lost_record_counted_once: rb4.restored === 4 && b4after.restored === 4,
+			cut_rollback_counted_in_all: rb5.restored === 2 && rb5.total === 4 && h5.restored === 4,
+			repeated_rollback_no_growth: rb5again.restored === 0 && h5again.restored === 4 && h5again.todo === 0,
+			skipped_counted_apart: rb7.restored === 3 && rb7.skipped.manual === 1 && rb7again.restored === 0 && h7.restored === 3 && h7.restore_skipped && h7.restore_skipped.manual === 1 && after7 === d1.sum,
+			stored_wrong_count_corrected: h4.restored === 4,
+			export_has_pages: exp2.only_pages.length === 1 && exp2.only_pages[ 0 ] === pg.home.src && exp2.urls.length === 1 && exp2.urls[ 0 ].url === pg.home.url && exp2.rows.length === 1,
 		} );
 
 		// 6. Many pages: cache clearing goes to the background list; the cache plugin keeps failing.
