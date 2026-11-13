@@ -4,7 +4,7 @@ Tags: translatepress, translation, gemini, openai, multilingual
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.6.5
+Stable tag: 0.6.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -117,6 +117,12 @@ Not by itself. The engine only translates strings TranslatePress sends to it, wh
 Updates come from the GitHub releases of this plugin. To turn update checks off: `add_filter( 'aitp_github_updates', '__return_false' );`
 
 == Changelog ==
+
+= 0.6.6 =
+* Fix: text that is already in the target language (TranslatePress keeps, for example, the language switcher labels of each language as originals) and comes back unchanged was rejected as "untranslated"; with two such strings in a batch the whole answer was thrown away as misaligned and after three such answers the engine paused for every language. Text with clear signs of the target language and no English function word is now asked about once and then kept and listed for review ("already in this language"). Entries handed back unchanged no longer make a batch look misaligned: they fail on their own and the rest of the batch is used. Only when half a batch or more comes back unchanged (strings already rejected for that before not counted) is the whole answer distrusted and counted against the provider. Real English left unchanged (titles, sentences, phrases with English function words) is still rejected and never saved.
+* Fix: the same sentence stored twice by TranslatePress, once with "&" and once with "&amp;", received the same translation and the batch was thrown away as misaligned.
+* Gemini 3.8 Flash and other models that refuse the MINIMAL thinking level: with thinking off the engine now sends a thinking budget of 0 instead of falling back to LOW (a batch of 40 strings used about 3,000 thinking tokens at LOW). LOW is used only when the budget is refused as well.
+* DeepSeek: the preset model is deepseek-flash; with thinking off the engine switches DeepSeek's thinking off (about three times faster and cheaper) and uses JSON mode directly, as DeepSeek does not accept a JSON schema.
 
 = 0.6.5 =
 * Fix: "Undo" of the test journal after rolled-back repair batches emptied the rows those batches had put back (they went back to untranslated). Rollbacks now mark the journal entries they make obsolete, and batches rolled back by an earlier version are marked when the undo runs. The undo runs only when automatic translation is off and every repair batch of the test is rolled back, and goes on where it stopped when pressed again.

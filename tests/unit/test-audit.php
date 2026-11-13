@@ -189,9 +189,15 @@ test( 'audit: repair visits mapped pages first, and only listed pages when given
 } );
 
 test( 'audit: text that is already in the target language is not called untranslated', function () {
-	$f = audit_row( 'Sprachauswahl der Website', 'Sprachauswahl der Website', 'de_DE' );
+	// Recognised from the text itself (0.6.6): review, never an error to retranslate.
+	$a = audit_row( 'Sprachauswahl der Website', 'Sprachauswahl der Website', 'de_DE' );
+	eq( 'review', $a['severity'] );
+	eq( array( 'already_target' ), $a['codes'] );
+	eq( $a, AITP_Audit_Logic::native_identical( $a, 'Sprachauswahl der Website', 'Sprachauswahl der Website', false ) );
+	// No sign of the language in the text: only the database check can tell.
+	$f = audit_row( 'Langues disponibles', 'Langues disponibles', 'fr_FR' );
 	eq( array( 'untranslated' ), $f['codes'] );
-	$n = AITP_Audit_Logic::native_identical( $f, 'Sprachauswahl der Website', 'Sprachauswahl der Website', false );
+	$n = AITP_Audit_Logic::native_identical( $f, 'Langues disponibles', 'Langues disponibles', false );
 	eq( 'review', $n['severity'] );
 	eq( array( 'identical_native' ), $n['codes'] );
 	// English text left untranslated exists in the other languages too: still an error.

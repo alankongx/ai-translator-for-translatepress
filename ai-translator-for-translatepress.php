@@ -3,7 +3,7 @@
  * Plugin Name:       AI Translator for TranslatePress
  * Plugin URI:        https://github.com/alankongx/ai-translator-for-translatepress
  * Description:       Translation engine for TranslatePress using Google Gemini or any OpenAI-compatible API. Translations are mapped by ID and validated before TranslatePress saves them; failed strings stay untranslated and are retried later instead of being saved wrong.
- * Version:           0.6.5
+ * Version:           0.6.6
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            alankongx
@@ -25,7 +25,7 @@ if ( defined( 'AITP_VERSION' ) ) {
 	return; // Another copy is already loaded.
 }
 
-define( 'AITP_VERSION', '0.6.5' );
+define( 'AITP_VERSION', '0.6.6' );
 define( 'AITP_FILE', __FILE__ );
 define( 'AITP_DIR', plugin_dir_path( __FILE__ ) );
 define( 'AITP_URL', plugin_dir_url( __FILE__ ) );

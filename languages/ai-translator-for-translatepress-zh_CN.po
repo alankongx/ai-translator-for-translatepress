@@ -217,8 +217,8 @@ msgid "Model"
 msgstr "模型"
 
 #: includes/wp/class-aitp-admin.php:306
-msgid "Model name exactly as the provider writes it, e.g. gemini-3.5-flash, gpt-4.1-mini, deepseek-chat."
-msgstr "按服务商写法填写模型名称，例如 gemini-3.5-flash、gpt-4.1-mini、deepseek-chat。"
+msgid "Model name exactly as the provider writes it, e.g. gemini-3.5-flash, gpt-4.1-mini, deepseek-flash."
+msgstr "按服务商写法填写模型名称，例如 gemini-3.5-flash、gpt-4.1-mini、deepseek-flash。"
 
 #: includes/wp/class-aitp-admin.php:308
 msgid "Thinking"
@@ -2116,3 +2116,6 @@ msgstr "还没做完（一次请求有时间上限）：请重新打开本页，
 #: includes/wp/class-aitp-admin.php:620
 msgid "WP-Cron is %s minutes late, so background tasks are not running now. Keep this page open, open the site, or have a server cron job call wp-cron.php."
 msgstr "WP-Cron 已经晚了 %s 分钟，后台任务现在没有在跑。请开着本页、打开网站，或让服务器的定时任务调用 wp-cron.php。"
+
+msgid "left unchanged: the original already seems to be in this language"
+msgstr "保持原样：原文似乎本来就是这种语言"

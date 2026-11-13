@@ -32,6 +32,7 @@ class AITP_Provider_Gemini extends AITP_Provider {
 			'json'             => $structured !== 'off',
 			'thinking'         => true,
 			'thinking_minimal' => true,
+			'thinking_budget0' => true,
 			'temperature'      => $this->config['temperature'] !== null && $this->config['temperature'] !== '',
 		);
 	}
@@ -54,7 +55,15 @@ class AITP_Provider_Gemini extends AITP_Provider {
 		$m    = strtolower( $this->model_name() );
 		$mode = $this->config['thinking'];
 		if ( preg_match( '~gemini-(?:[3-9]|\d{2})~', $m ) ) {
-			return array( 'thinkingLevel' => ( $mode === 'off' && ! empty( $caps['thinking_minimal'] ) ) ? 'minimal' : 'low' );
+			// Thinking off: MINIMAL where the model accepts it; models that refuse MINIMAL
+			// (e.g. 3.8 Flash) still accept a zero budget; LOW only when both were refused.
+			if ( $mode === 'off' && ! empty( $caps['thinking_minimal'] ) ) {
+				return array( 'thinkingLevel' => 'minimal' );
+			}
+			if ( $mode === 'off' && ( ! isset( $caps['thinking_budget0'] ) || $caps['thinking_budget0'] ) ) {
+				return array( 'thinkingBudget' => 0 );
+			}
+			return array( 'thinkingLevel' => 'low' );
 		}
 		if ( strpos( $m, 'gemini-2.5-flash' ) !== false ) {
 			return array( 'thinkingBudget' => $mode === 'low' ? 512 : 0 );
@@ -91,6 +100,10 @@ class AITP_Provider_Gemini extends AITP_Provider {
 	public function downgrade( array $caps, $feature ) {
 		if ( $feature === 'thinking' && ! empty( $caps['thinking_minimal'] ) && $this->config['thinking'] === 'off' ) {
 			$caps['thinking_minimal'] = false;
+			return $caps;
+		}
+		if ( $feature === 'thinking' && ( ! isset( $caps['thinking_budget0'] ) || $caps['thinking_budget0'] ) && $this->config['thinking'] === 'off' && preg_match( '~gemini-(?:[3-9]|\d{2})~', strtolower( $this->model_name() ) ) ) {
+			$caps['thinking_budget0'] = false;
 			return $caps;
 		}
 		if ( $feature === 'schema' && ! empty( $caps['schema'] ) ) {

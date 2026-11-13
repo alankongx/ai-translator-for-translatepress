@@ -23,7 +23,7 @@ class AITP_Provider_OpenAI extends AITP_Provider {
 	public static function presets() {
 		return array(
 			'openai'     => array( 'label' => 'OpenAI', 'base_url' => 'https://api.openai.com/v1', 'model' => 'gpt-4.1-mini' ),
-			'deepseek'   => array( 'label' => 'DeepSeek', 'base_url' => 'https://api.deepseek.com/v1', 'model' => 'deepseek-chat' ),
+			'deepseek'   => array( 'label' => 'DeepSeek', 'base_url' => 'https://api.deepseek.com/v1', 'model' => 'deepseek-flash' ),
 			'zhipu'      => array( 'label' => 'Zhipu GLM (智谱)', 'base_url' => 'https://open.bigmodel.cn/api/paas/v4', 'model' => 'glm-4-flash' ),
 			'openrouter' => array( 'label' => 'OpenRouter', 'base_url' => 'https://openrouter.ai/api/v1', 'model' => 'google/gemini-2.5-flash' ),
 			'groq'       => array( 'label' => 'Groq', 'base_url' => 'https://api.groq.com/openai/v1', 'model' => 'llama-3.3-70b-versatile' ),
@@ -48,6 +48,22 @@ class AITP_Provider_OpenAI extends AITP_Provider {
 	}
 
 	/** @return bool */
+	private function is_deepseek_host() {
+		$host = strtolower( (string) parse_url( $this->base_url(), PHP_URL_HOST ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url
+		return $host === 'api.deepseek.com';
+	}
+
+	/**
+	 * Caps remembered before 0.6.6 had thinking off for DeepSeek because the plugin did not
+	 * know its switch; a new key makes them be found out again.
+	 *
+	 * @return string
+	 */
+	public function fingerprint() {
+		return parent::fingerprint() . ( $this->is_deepseek_host() ? '|ds-thinking' : '' );
+	}
+
+	/** @return bool */
 	private function is_reasoning_model() {
 		return (bool) preg_match( '~(^|/)(o\d|gpt-5|gpt-[6-9])~', strtolower( $this->model() ) );
 	}
@@ -56,9 +72,10 @@ class AITP_Provider_OpenAI extends AITP_Provider {
 	public function default_caps() {
 		$structured = $this->config['structured'];
 		return array(
-			'schema'                => in_array( $structured, array( 'auto', 'schema' ), true ),
+			// DeepSeek rejects json_schema; with "auto" it goes straight to JSON mode.
+			'schema'                => $structured === 'schema' || ( $structured === 'auto' && ! $this->is_deepseek_host() ),
 			'json'                  => $structured !== 'off',
-			'thinking'              => $this->is_reasoning_model(),
+			'thinking'              => $this->is_reasoning_model() || $this->is_deepseek_host(),
 			'max_completion_tokens' => $this->is_openai_host(),
 			'temperature'           => $this->config['temperature'] !== null && $this->config['temperature'] !== '',
 		);
@@ -103,6 +120,9 @@ class AITP_Provider_OpenAI extends AITP_Provider {
 		if ( $this->is_reasoning_model() ) {
 			return ! empty( $caps['thinking'] ) ? 4096 : 8192;
 		}
+		if ( $this->is_deepseek_host() ) {
+			return ! empty( $caps['thinking'] ) && $this->config['thinking'] === 'off' ? 0 : 8192;
+		}
 		return preg_match( '~reason|r1|think|qwq~', strtolower( $this->model() ) ) ? 8192 : 0;
 	}
 
@@ -142,6 +162,9 @@ class AITP_Provider_OpenAI extends AITP_Provider {
 		}
 		if ( ! empty( $caps['thinking'] ) && $this->is_reasoning_model() ) {
 			$body['reasoning_effort'] = $this->config['thinking'] === 'off' ? 'minimal' : 'low';
+		} elseif ( ! empty( $caps['thinking'] ) && $this->is_deepseek_host() && $this->config['thinking'] !== 'auto' ) {
+			// DeepSeek thinks by default; translation does not need it (3x slower and dearer).
+			$body['thinking'] = array( 'type' => $this->config['thinking'] === 'off' ? 'disabled' : 'enabled' );
 		}
 		if ( ! empty( $caps['temperature'] ) ) {
 			$body['temperature'] = (float) $this->config['temperature'];

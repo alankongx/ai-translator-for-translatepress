@@ -325,7 +325,7 @@ final class AITP_Admin {
 		echo '</td></tr>';
 
 		echo '<tr><th scope="row"><label for="aitp-model">' . esc_html__( 'Model', 'ai-translator-for-translatepress' ) . '</label></th><td><input type="text" class="regular-text code" id="aitp-model" name="' . esc_attr( $name ) . '[model]" value="' . esc_attr( $s['model'] ) . '">';
-		echo '<p class="description">' . esc_html__( 'Model name exactly as the provider writes it, e.g. gemini-3.5-flash, gpt-4.1-mini, deepseek-chat.', 'ai-translator-for-translatepress' ) . '</p></td></tr>';
+		echo '<p class="description">' . esc_html__( 'Model name exactly as the provider writes it, e.g. gemini-3.5-flash, gpt-4.1-mini, deepseek-flash.', 'ai-translator-for-translatepress' ) . '</p></td></tr>';
 
 		echo '<tr><th scope="row">' . esc_html__( 'Thinking', 'ai-translator-for-translatepress' ) . '</th><td><select name="' . esc_attr( $name ) . '[thinking]">';
 		foreach ( array( 'off' => __( 'Minimal (fastest, recommended)', 'ai-translator-for-translatepress' ), 'low' => __( 'Low', 'ai-translator-for-translatepress' ), 'auto' => __( 'Model default', 'ai-translator-for-translatepress' ) ) as $v => $l ) {
@@ -667,6 +667,7 @@ final class AITP_Admin {
 			'imported'                  => __( 'from imported list', 'ai-translator-for-translatepress' ),
 			'near_misaligned'           => __( 'next to misplaced translations', 'ai-translator-for-translatepress' ),
 			'identical'                 => __( 'left exactly as the original', 'ai-translator-for-translatepress' ),
+			'already_target'            => __( 'left unchanged: the original already seems to be in this language', 'ai-translator-for-translatepress' ),
 			'identical_native'          => __( 'same as the original, which is not in the source language (no other language has it); probably fine', 'ai-translator-for-translatepress' ),
 			'ai_mismatch'               => __( 'AI: belongs to another text or incomplete', 'ai-translator-for-translatepress' ),
 			'control_chars'             => __( 'control characters', 'ai-translator-for-translatepress' ),

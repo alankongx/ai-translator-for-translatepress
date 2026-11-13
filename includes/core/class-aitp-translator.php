@@ -431,7 +431,34 @@ final class AITP_Translator {
 					$round_suspect++;
 					continue;
 				}
-				$this->breaker->success();
+				// Half the batch or more handed back unchanged, at least two of them rejected for it,
+				// and not entries already rejected for that earlier: the provider is not translating.
+				// Nothing from such an answer is trusted, not even "confirmed" names.
+				$echo = self::echo_counts( $ids, $units, $parsed, $checks );
+				if ( count( $ids ) >= 4 && $echo['hard_new'] >= 2 && $echo['new'] * 2 >= count( $ids ) ) {
+					$this->breaker->failure( 'bad_output', null, 'misaligned:echoed' );
+					$this->log->log(
+						'warning',
+						'request',
+						$logd + array(
+							'error'    => 'misaligned',
+							'why'      => 'echoed',
+							'missing'  => 0,
+							'rejected' => count( $ids ),
+						)
+					);
+					foreach ( $ids as $uid ) {
+						$units[ $uid ]['note'] = '';
+					}
+					$this->mark( $units, $ids, 'misaligned', true, $requeue );
+					$round_suspect++;
+					continue;
+				}
+				// A retry batch made mostly of entries echoed before (text that may well be in the
+				// target language already) says nothing about the provider either way.
+				if ( $echo['again'] * 2 < count( $ids ) ) {
+					$this->breaker->success();
+				}
 				$round_clean++;
 
 				$rejected = 0;
@@ -627,6 +654,9 @@ final class AITP_Translator {
 		if ( $v['hard'] ) {
 			$u['attempts']++;
 			$u['reason'] = $v['hard'][0];
+			if ( self::is_echo( $u['text'], $cand ) ) {
+				$u['echoed'] = true;
+			}
 			$notes       = array();
 			foreach ( $v['hard'] as $code ) {
 				$notes[] = AITP_Validator::hint( $code, $v['details'], $ti );
@@ -691,11 +721,16 @@ final class AITP_Translator {
 		$hard = 0;
 		$seen = array();
 		foreach ( $checks as $id => $v ) {
-			if ( $v['hard'] ) {
+			$cand = $parsed['translations'][ $id ];
+			$src  = $units[ $ids[ $id ] ]['text'];
+			// An entry returned unchanged sits on its own id, so it is no sign of misalignment:
+			// it fails on its own (e.g. text that was already in the target language) and
+			// must not take the rest of the batch or the whole engine down with it.
+			if ( $v['hard'] && ! self::is_echo( $src, $cand ) ) {
 				$hard++;
 			}
-			$t = self::fold( $parsed['translations'][ $id ] );
-			$s = self::fold( $units[ $ids[ $id ] ]['text'] );
+			$t = self::fold( $cand );
+			$s = self::fold( $src );
 			if ( $t !== '' && isset( $seen[ $t ] ) && $seen[ $t ] !== $s ) {
 				return 'repeated_output';
 			}
@@ -708,13 +743,57 @@ final class AITP_Translator {
 	}
 
 	/**
-	 * Case- and spacing-insensitive form used to compare texts.
+	 * Entries returned unchanged: rejected for it, or waiting for the model to confirm them.
+	 * Text recognised as already in the target language is not counted. Entries rejected
+	 * for an unchanged answer before ("again") are counted apart: echoing those again is a
+	 * property of the text, not of the provider.
+	 *
+	 * @param array $ids    id => uid.
+	 * @param array $units  Units.
+	 * @param array $parsed Parsed response.
+	 * @param array $checks id => validator result.
+	 * @return array{new:int,hard_new:int,again:int}
+	 */
+	private static function echo_counts( array $ids, array $units, array $parsed, array $checks ) {
+		$out = array( 'new' => 0, 'hard_new' => 0, 'again' => 0 );
+		foreach ( $checks as $id => $v ) {
+			$u = $units[ $ids[ $id ] ];
+			if ( in_array( AITP_Validator::ALREADY_TARGET, $v['soft'], true ) || ! self::is_echo( $u['text'], $parsed['translations'][ $id ] ) ) {
+				continue;
+			}
+			if ( ! empty( $u['echoed'] ) ) {
+				$out['again']++;
+			} elseif ( $v['hard'] ) {
+				$out['new']++;
+				$out['hard_new']++;
+			} elseif ( in_array( AITP_Validator::CONFIRM_IDENTICAL, $v['soft'], true ) ) {
+				$out['new']++;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Whether a candidate is the source returned unchanged.
+	 *
+	 * @param string $src  Source.
+	 * @param mixed  $cand Candidate.
+	 * @return bool
+	 */
+	private static function is_echo( $src, $cand ) {
+		return is_string( $cand ) && trim( $cand ) !== '' && self::fold( $src ) === self::fold( $cand );
+	}
+
+	/**
+	 * Case-, spacing- and entity-insensitive form used to compare texts
+	 * ("TR90 &amp; TPEE" and "TR90 & TPEE" are the same text).
 	 *
 	 * @param string $s Text.
 	 * @return string
 	 */
 	private static function fold( $s ) {
-		$s = function_exists( 'mb_strtolower' ) ? mb_strtolower( (string) $s, 'UTF-8' ) : strtolower( (string) $s );
+		$s = AITP_Text::decode_entities( (string) $s );
+		$s = function_exists( 'mb_strtolower' ) ? mb_strtolower( $s, 'UTF-8' ) : strtolower( $s );
 		return trim( (string) preg_replace( '~[\s\p{P}]+~u', ' ', $s ) );
 	}
 

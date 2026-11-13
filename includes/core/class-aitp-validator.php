@@ -22,6 +22,13 @@ final class AITP_Validator {
 	/** Soft code meaning "identical to the source, ask the model once to confirm". */
 	const CONFIRM_IDENTICAL = 'identical_confirm';
 
+	/**
+	 * Soft review flag: returned unchanged, and the text itself already reads like the target
+	 * language (TranslatePress stores some originals in other languages, e.g. language
+	 * switcher labels). Asked once like CONFIRM_IDENTICAL, then kept for a person to look at.
+	 */
+	const ALREADY_TARGET = 'already_target';
+
 	/** @var AITP_Rules */
 	private $rules;
 
@@ -59,6 +66,40 @@ final class AITP_Validator {
 		'ro' => array( 'are' ),
 		'it' => array( 'are' ),
 		'tr' => array( 'her' ),
+	);
+
+	/**
+	 * Short, frequent words that mark text as written in a language (two letters or more,
+	 * none of them an ordinary English word), and that language's accented letters.
+	 * Used only to recognise text that is already in the target language.
+	 *
+	 * @var array<string,array{words:string[],letters:string}>
+	 */
+	private static $markers = array(
+		'fr' => array(
+			'words'   => array( 'le', 'la', 'les', 'des', 'du', 'de', 'et', 'pour', 'avec', 'sur', 'dans', 'une', 'un', 'au', 'aux', 'est', 'sont', 'vos', 'votre', 'nos', 'notre', 'sans', 'ou', 'qui', 'que', 'nous', 'vous', 'ces', 'cette', 'leur', 'leurs', 'en' ),
+			'letters' => 'àâæçéèêëîïôœùûüÿ',
+		),
+		'de' => array(
+			'words'   => array( 'der', 'die', 'das', 'den', 'dem', 'des', 'und', 'für', 'mit', 'von', 'zu', 'zum', 'zur', 'ein', 'eine', 'einen', 'ist', 'sind', 'sie', 'wir', 'ihr', 'ihre', 'auf', 'bei', 'nach', 'oder', 'nicht', 'unser', 'unsere' ),
+			'letters' => 'äöüß',
+		),
+		'es' => array(
+			'words'   => array( 'el', 'la', 'los', 'las', 'del', 'de', 'para', 'con', 'por', 'en', 'una', 'un', 'su', 'sus', 'es', 'nuestro', 'nuestra', 'nuestros', 'que', 'más' ),
+			'letters' => 'áéíóúñü¿¡',
+		),
+		'pt' => array(
+			'words'   => array( 'de', 'da', 'dos', 'das', 'para', 'por', 'em', 'uma', 'seu', 'sua', 'seus', 'suas', 'nosso', 'nossa', 'ao', 'ou', 'que', 'mais' ),
+			'letters' => 'ãõçáéíóúâêôà',
+		),
+		'it' => array(
+			'words'   => array( 'il', 'la', 'gli', 'le', 'di', 'del', 'della', 'dei', 'con', 'una', 'un', 'che', 'sono', 'nostro', 'nostra' ),
+			'letters' => 'àèéìòù',
+		),
+		'nl' => array(
+			'words'   => array( 'de', 'het', 'een', 'en', 'uw', 'onze', 'naar', 'bij', 'niet' ),
+			'letters' => 'ëï',
+		),
 	);
 
 	/**
@@ -228,6 +269,9 @@ final class AITP_Validator {
 		$untranslated = $this->untranslated( $s_text, $t_text, $s_an, $t_an, $si, $ti );
 		if ( $untranslated === self::CONFIRM_IDENTICAL ) {
 			$soft[] = self::CONFIRM_IDENTICAL;
+		} elseif ( $untranslated === self::ALREADY_TARGET ) {
+			$soft[] = self::CONFIRM_IDENTICAL;
+			$soft[] = self::ALREADY_TARGET;
 		} elseif ( $untranslated !== '' ) {
 			$hard[] = $untranslated;
 		}
@@ -370,7 +414,58 @@ final class AITP_Validator {
 	}
 
 	/**
-	 * @return string '' when fine, a hard code, or CONFIRM_IDENTICAL.
+	 * Whether a text shows clear signs of being written in the target language already and
+	 * none of being English when the source language is English.
+	 *
+	 * Latin-script targets: at least one marker word or accented letter of the target language
+	 * and no distinctive English function word. Other targets: more letters in the target's
+	 * writing system than Latin letters, when the source language uses a different one.
+	 *
+	 * @param string $s  Source text without markup and protected terms.
+	 * @param array  $si Source language info.
+	 * @param array  $ti Target language info.
+	 * @return bool
+	 */
+	private function already_in_target( $s, array $si, array $ti ) {
+		if ( ! in_array( 'Latin', $ti['scripts'], true ) ) {
+			if ( array_intersect( $si['scripts'], $ti['scripts'] ) ) {
+				return false;
+			}
+			$counts = AITP_Text::script_counts( $s );
+			$own    = 0;
+			foreach ( $ti['scripts'] as $sc ) {
+				$own += isset( $counts[ $sc ] ) ? $counts[ $sc ] : 0;
+			}
+			return $own > 0 && $own > ( isset( $counts['Latin'] ) ? $counts['Latin'] : 0 );
+		}
+		if ( ! isset( self::$markers[ $ti['base'] ] ) || ! in_array( 'Latin', $si['scripts'], true ) ) {
+			return false;
+		}
+		$words = array_map( array( 'AITP_Text', 'lower' ), AITP_Text::latin_words( $s, 2 ) );
+		if ( ! $words ) {
+			return false;
+		}
+		if ( $si['base'] === 'en' ) {
+			$exempt = isset( self::$en_exempt[ $ti['base'] ] ) ? self::$en_exempt[ $ti['base'] ] : array();
+			foreach ( $words as $w ) {
+				if ( in_array( $w, self::$en_function_words, true ) && ! in_array( $w, $exempt, true ) ) {
+					return false;
+				}
+			}
+		} elseif ( isset( self::$markers[ $si['base'] ] ) ) {
+			// Source language with its own markers: words shared by both languages prove nothing.
+			$own = array_diff( self::$markers[ $ti['base'] ]['words'], self::$markers[ $si['base'] ]['words'] );
+			return (bool) array_intersect( $words, $own );
+		}
+		$m = self::$markers[ $ti['base'] ];
+		if ( array_intersect( $words, $m['words'] ) ) {
+			return true;
+		}
+		return (bool) preg_match( '~[' . $m['letters'] . ']~u', AITP_Text::lower( $s ) );
+	}
+
+	/**
+	 * @return string '' when fine, a hard code, CONFIRM_IDENTICAL or ALREADY_TARGET.
 	 */
 	private function untranslated( $s_text, $t_text, $s_an, $t_an, array $si, array $ti ) {
 		if ( $si['base'] === $ti['base'] ) {
@@ -392,6 +487,12 @@ final class AITP_Validator {
 			$st = trim( $s_text );
 			if ( ! preg_match( '~\s~u', $st ) && preg_match( '~[_/\\\\]|\.[A-Za-z0-9]{2,5}$~u', $st ) ) {
 				return '';
+			}
+			// Text that is already in the target language (no English function word, clear
+			// signs of the target language): ask once, then keep it for review. Real English
+			// left unchanged still falls through to the hard rules below.
+			if ( $this->already_in_target( $s_an, $si, $ti ) ) {
+				return self::ALREADY_TARGET;
 			}
 			if ( count( $lower_words ) >= 2 || ( count( $lower_words ) >= 1 && count( $words ) >= 2 ) ) {
 				return 'untranslated';
@@ -505,7 +606,8 @@ final class AITP_Validator {
 			case 'english_residue':
 				return 'Translate all of the text into ' . $lang . '; keep only names, brands and codes unchanged.';
 			case self::CONFIRM_IDENTICAL:
-				return 'Your previous answer was identical to the source. If this is a name, brand or code that must stay unchanged, return it unchanged; otherwise translate it into ' . $lang . '.';
+			case self::ALREADY_TARGET:
+				return 'Your previous answer was identical to the source. If this is a name, brand or code that must stay unchanged, or the text is already written in ' . $lang . ', return it unchanged; otherwise translate it into ' . $lang . '.';
 			case 'too_short':
 			case 'sentences_missing':
 				return 'Translate the whole text completely. Do not shorten, summarise or skip sentences.';
