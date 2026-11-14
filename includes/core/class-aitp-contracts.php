@@ -58,6 +58,15 @@ interface AITP_Log {
 	public function log( $level, $event, array $data );
 }
 
+/** Token usage per day, for the cost overview. */
+interface AITP_Usage_Store {
+	/**
+	 * @param string $target_locale Target language.
+	 * @param array  $usage         input, output (visible), thinking, requests.
+	 */
+	public function add( $target_locale, array $usage );
+}
+
 interface AITP_Caps_Store {
 	/** @return array|null */
 	public function get( $fingerprint );
@@ -161,5 +170,12 @@ class AITP_Memory_Caps implements AITP_Caps_Store {
 	}
 	public function set( $fingerprint, array $caps ) {
 		$this->rows[ $fingerprint ] = $caps;
+	}
+}
+
+class AITP_Memory_Usage implements AITP_Usage_Store {
+	public $rows = array();
+	public function add( $target_locale, array $usage ) {
+		$this->rows[] = array( 'target' => $target_locale ) + $usage;
 	}
 }

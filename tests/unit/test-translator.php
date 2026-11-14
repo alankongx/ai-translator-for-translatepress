@@ -66,8 +66,12 @@ test( 'translator: same text for two different sources -> answer distrusted', fu
 		return $out;
 	} ) );
 	$items = array( 'a' => 'Home', 'b' => 'Shop', 'c' => 'Contact' );
-	$r     = make_translator( $tr )->translate( $items, 'en_US', 'fr_FR', later() );
-	eq( 2, count( $tr->calls ) );
+	$st    = new AITP_Memory_State();
+	$r     = make_translator( $tr, array(), array( 'breaker' => new AITP_Circuit_Breaker( $st ) ) )->translate( $items, 'en_US', 'fr_FR', later() );
+	eq( 4, count( $tr->calls ), 'the two entries with one text asked on their own, the rest again' );
+	list( $solo ) = req_items( $tr->calls[2] );
+	eq( 1, count( $solo ) );
+	ok( empty( $st->state['locales'] ) && ( empty( $st->state['status'] ) || $st->state['status'] === 'closed' ), 'not counted against the provider' );
 	foreach ( $items as $k => $v ) {
 		eq( pseudo( $v ), $r['translations'][ $k ] );
 	}
@@ -109,8 +113,9 @@ test( 'translator: model keeps shifting -> nothing saved, breaker opens, retried
 	eq( 2, count( $tr->calls ), 'stops after the first round' );
 	ok( count( $f->rows ) > 0, 'items backed off for a later page view' );
 	$t->translate( array( 'x' => 'Cases', 'y' => 'Lenses' ), 'en_US', 'fr_FR', later() );
-	eq( 'open', $st->state['status'], 'breaker opens after repeated misaligned answers' );
-	eq( 'bad_output', $st->state['reason'] );
+	$b = new AITP_Circuit_Breaker( $st );
+	ok( ! $b->allow( 'fr_FR' ), 'French held after repeated misaligned answers' );
+	ok( $b->allow( 'de_DE' ), 'other languages go on' );
 } );
 
 test( 'translator: duplicate id rejects batch, retried', function () {
@@ -126,7 +131,7 @@ test( 'translator: duplicate id rejects batch, retried', function () {
 		return gemini_ok( $o );
 	} );
 	$r  = make_translator( $tr )->translate( array( 'Alpha frames for men', 'Bravo frames for women' ), 'en_US', 'fr_FR', later() );
-	eq( 2, count( $tr->calls ) );
+	eq( 3, count( $tr->calls ), 'split in two' );
 	eq( 2, count( $r['translations'] ) );
 } );
 
@@ -232,10 +237,11 @@ test( 'translator: timeouts commit quota (may be billed), item not held', functi
 	$q  = new AITP_Memory_Quota();
 	$f  = new AITP_Memory_Failures( 1000 );
 	$r  = make_translator( $tr, array(), array( 'quota' => $q, 'failures' => $f ) )->translate( array( 'Alpha frames for men' ), 'en_US', 'fr_FR', later() );
-	eq( 'timeout', $r['failed'][0] );
+	eq( 'timeout_item', $r['failed'][0], 'a single entry that times out is recorded for itself' );
 	eq( 3, count( $tr->calls ) );
 	eq( 3 * strlen( 'Alpha frames for men' ), $q->used );
-	eq( array(), $f->rows );
+	eq( 1, count( $f->rows ) );
+	ok( ! $f->held( AITP_Translator::failure_key( 'Alpha frames for men', 'en_US', 'fr_FR' ) ), 'first failure is not held' );
 } );
 
 test( 'translator: 500 then success; failed attempt not charged', function () {

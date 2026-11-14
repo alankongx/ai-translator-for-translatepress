@@ -20,16 +20,118 @@ final class AITP_Text {
 	 *
 	 * @return string[]
 	 */
+	/**
+	 * Shortcode names registered on the site, or null when unknown (outside WordPress). With
+	 * a list, a bare "[word]" is only protected when it is a real shortcode, so "[more]" in
+	 * running text can be translated.
+	 *
+	 * @var string[]|null
+	 */
+	public static $shortcodes = null;
+
 	public static function placeholder_patterns() {
-		return array(
-			'~%(?:\d+\$)?(?:\.\d+)?[sdfu]~',                // printf: %s %d %1$s %.2f
-			'~%%~',                                          // escaped percent
-			'~\{\{[^{}]+\}\}~',                              // {{var}}
-			'~(?<!\{)\{[A-Za-z0-9_.\-]+\}(?!\})~',           // {name} {0}
-			'~\[/?[a-z_][a-z0-9_\-]*(?:\s+[^\]]*=[^\]]*)?/?\]~', // [shortcode attr="x"] [/shortcode] (not "[Silicone loop]")
-			'~%%[A-Za-z_]+%%~',                              // %%title%% (SEO plugins)
-			'~\b\d*TP\d+T\b~',                               // TranslatePress tokens (1TP0T ...)
-			'~#!trpst#[^#]*#!trpen#~',                       // TranslatePress gettext wrappers
+		static $cache = array();
+		$key = self::$shortcodes === null ? '-' : md5( implode( ',', self::$shortcodes ) );
+		if ( isset( $cache[ $key ] ) ) {
+			return $cache[ $key ];
+		}
+		if ( self::$shortcodes === null ) {
+			$short = array( '~\[/?[a-z_][a-z0-9_\-]*(?:\s+[^\]]*=[^\]]*)?/?\]~' ); // [shortcode attr="x"] [/shortcode] (not "[Silicone loop]")
+		} else {
+			$short = array( '~\[/?[a-z_][a-z0-9_\-]*\s+[^\]]*=[^\]]*/?\]~' ); // With attributes: always a shortcode.
+			$names = array();
+			foreach ( self::$shortcodes as $n ) {
+				if ( preg_match( '~^[A-Za-z0-9_\-]+$~', (string) $n ) ) {
+					$names[] = preg_quote( (string) $n, '~' );
+				}
+			}
+			if ( $names ) {
+				$short[] = '~\[/?(?:' . implode( '|', $names ) . ')\s*/?\]~';
+			}
+		}
+		$cache[ $key ] = array_merge(
+			array(
+				'~%(?:\d+\$)?(?:\.\d+)?[sdfu]~',                // printf: %s %d %1$s %.2f
+				'~%%~',                                          // escaped percent
+				'~\{\{[^{}]+\}\}~',                              // {{var}}
+				'~(?<!\{)\{[A-Za-z0-9_.\-]+\}(?!\})~',           // {name} {0}
+			),
+			$short,
+			array(
+				'~%%[A-Za-z_]+%%~',                              // %%title%% (SEO plugins)
+				'~\b\d*TP\d+T\b~',                               // TranslatePress tokens (1TP0T ...)
+				'~#!trpst#[^#]*#!trpen#~',                       // TranslatePress gettext wrappers
+			)
+		);
+		return $cache[ $key ];
+	}
+
+	/**
+	 * Whether a string is a PHP date/time format ("F j, Y", "Y-m-d", "g:i a", "jS F Y").
+	 * Such strings come from themes' __( 'F j, Y' ) and must not be translated into words.
+	 *
+	 * @param string $s Input.
+	 * @return bool
+	 */
+	public static function is_date_format( $s ) {
+		$s = trim( (string) $s );
+		if ( $s === '' || strlen( $s ) > 40 || ! preg_match( '~^(?:[dDjlNSwzWFmMntLoYyaABgGhHisuveIOPTZcrUx]|\\\\.|[\s,.:/\-@|])+$~u', $s ) ) {
+			return false;
+		}
+		$tokens = preg_split( '~[^A-Za-z]+~', preg_replace( '~\\\\.~', ' ', $s ), -1, PREG_SPLIT_NO_EMPTY );
+		if ( count( $tokens ) < 2 ) {
+			return false;
+		}
+		$single_upper = false;
+		foreach ( $tokens as $t ) {
+			if ( strlen( $t ) > 2 ) {
+				return false; // "Yes", "May", "Day" are words.
+			}
+			if ( strlen( $t ) === 1 && ctype_upper( $t ) ) {
+				$single_upper = true;
+			}
+		}
+		if ( ! $single_upper && ! preg_match( '~[,:/\-\\\\]~', $s ) ) {
+			return false; // "do it", "is at".
+		}
+		// A real format names a year with a month or day, a month with a day, or a time
+		// ("H:i"). "AM / PM", "Mo - Fr", "S, M, L", "Y/N", "A - Z" do not.
+		$f = (string) preg_replace( '~\\\\.~', ' ', $s );
+		$year  = (bool) preg_match( '~[Yy]~', $f );
+		$month = (bool) preg_match( '~[FMmn]~', $f );
+		$day   = (bool) preg_match( '~[dj]~', $f );
+		$time  = (bool) preg_match( '~[gGhH]\s*:\s*i~', $f );
+		return $time || ( $year && ( $month || $day ) ) || ( $month && $day );
+	}
+
+	/**
+	 * Case-, spacing-, punctuation- and entity-insensitive form used to compare texts
+	 * ("TR90 &amp; TPEE" and "TR90 & TPEE", "Men's" and "Men’s" are the same text).
+	 *
+	 * @param string $s Text.
+	 * @return string
+	 */
+	public static function fold( $s ) {
+		$s = self::lower( self::decode_entities( (string) $s ) );
+		return trim( (string) preg_replace( '~[\s\p{P}]+~u', ' ', $s ) );
+	}
+
+	/**
+	 * Write Chinese/Japanese/Korean number units out ("1万" → "10000", "3.5万" → "35000",
+	 * "5千" → "5000"), so they compare with "10,000" in a translation.
+	 *
+	 * @param string $s Input.
+	 * @return string
+	 */
+	public static function expand_cjk_units( $s ) {
+		$units = array( '千' => 1000, '万' => 10000, '萬' => 10000, '만' => 10000, '천' => 1000, '亿' => 100000000, '億' => 100000000, '억' => 100000000 );
+		return (string) preg_replace_callback(
+			'~(\d+(?:[.,]\d+)?)\s*(千|万|萬|亿|億|만|천|억)~u',
+			function ( $m ) use ( $units ) {
+				$v = (float) str_replace( ',', '.', $m[1] ) * $units[ $m[2] ];
+				return abs( $v - round( $v ) ) < 1e-6 ? (string) (int) round( $v ) : $m[0];
+			},
+			self::normalize_digits( (string) $s )
 		);
 	}
 
@@ -281,7 +383,8 @@ final class AITP_Text {
 	 */
 	public static function numbers( $s ) {
 		$s = self::normalize_punct( self::normalize_digits( $s ) );
-		if ( ! preg_match_all( '~(?<![\p{L}\d])\d{1,3}(?:[ .,\'](?=\d{3}(?!\d))\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?~u', $s, $m ) ) {
+		// Indian grouping (1,00,000) first, then thousands groups, then plain numbers.
+		if ( ! preg_match_all( '~(?<![\p{L}\d])\d{1,2}(?:,\d{2})+,\d{3}(?!\d)(?:\.\d+)?|(?<![\p{L}\d])\d{1,3}(?:[ .,\'](?=\d{3}(?!\d))\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?~u', $s, $m ) ) {
 			return array();
 		}
 		$out = array();
@@ -298,7 +401,8 @@ final class AITP_Text {
 	 * @return int
 	 */
 	public static function sentence_count( $s ) {
-		return (int) preg_match_all( '~[.!?](?=\s|$)|[。！？؟।။։።]~u', $s );
+		// Includes the Urdu full stop ۔, Khmer ។, Tibetan ། and the Greek question mark ;.
+		return (int) preg_match_all( '~[.!?\x{037E}](?=\s|$)|[。！？؟।။։።\x{06D4}\x{17D4}\x{0F0D}]~u', $s );
 	}
 
 	/**

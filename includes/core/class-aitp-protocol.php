@@ -167,7 +167,9 @@ final class AITP_Protocol {
 		);
 
 		$raw = trim( (string) $raw );
-		$raw = preg_replace( '~^\xEF\xBB\xBF~', '', $raw );
+		$raw = (string) preg_replace( '~^\xEF\xBB\xBF~', '', $raw );
+		// Reasoning some models write before the answer (local Qwen3 / R1 distills, MiniMax, relays).
+		$raw = trim( (string) preg_replace( '~^\s*<(think|thinking|reasoning)>.*?</\1>~is', '', $raw ) );
 		if ( preg_match( '~^```(?:json|JSON)?\s*(.*?)\s*```$~s', $raw, $m ) ) {
 			$raw = $m[1];
 		}
@@ -177,6 +179,11 @@ final class AITP_Protocol {
 		}
 
 		$data = json_decode( $raw, true );
+		if ( ! is_array( $data ) ) {
+			// Text around the JSON ("Here is the JSON: {…}"): take the first complete object
+			// that carries "translations".
+			$data = self::embedded_object( $raw );
+		}
 		if ( ! is_array( $data ) ) {
 			$res['status'] = 'invalid_json';
 			return $res;
@@ -198,6 +205,9 @@ final class AITP_Protocol {
 		$expected = array_fill_keys( array_map( 'strval', $expected_ids ), true );
 		$seen     = array();
 		foreach ( $entries as $entry ) {
+			if ( is_array( $entry ) && isset( $entry['id'] ) && is_int( $entry['id'] ) ) {
+				$entry['id'] = (string) $entry['id'];
+			}
 			if ( ! is_array( $entry ) || ! isset( $entry['id'] ) || ! is_string( $entry['id'] ) || ! array_key_exists( 'text', $entry ) || ! is_string( $entry['text'] ) ) {
 				$res['status']       = 'invalid_structure';
 				$res['translations'] = array();
@@ -228,5 +238,52 @@ final class AITP_Protocol {
 			}
 		}
 		return $res;
+	}
+
+	/**
+	 * First balanced JSON object in a text that decodes and has a "translations" key.
+	 *
+	 * @param string $s Text.
+	 * @return array|null
+	 */
+	private static function embedded_object( $s ) {
+		$len   = strlen( $s );
+		$start = strpos( $s, '{' );
+		$tries = 0;
+		while ( $start !== false && $tries < 20 ) {
+			$tries++;
+			$depth = 0;
+			$in    = false;
+			$esc   = false;
+			for ( $i = $start; $i < $len; $i++ ) {
+				$c = $s[ $i ];
+				if ( $in ) {
+					if ( $esc ) {
+						$esc = false;
+					} elseif ( $c === '\\' ) {
+						$esc = true;
+					} elseif ( $c === '"' ) {
+						$in = false;
+					}
+					continue;
+				}
+				if ( $c === '"' ) {
+					$in = true;
+				} elseif ( $c === '{' ) {
+					$depth++;
+				} elseif ( $c === '}' ) {
+					$depth--;
+					if ( $depth === 0 ) {
+						$data = json_decode( substr( $s, $start, $i - $start + 1 ), true );
+						if ( is_array( $data ) && isset( $data['translations'] ) ) {
+							return $data;
+						}
+						break;
+					}
+				}
+			}
+			$start = strpos( $s, '{', $start + 1 );
+		}
+		return null;
 	}
 }

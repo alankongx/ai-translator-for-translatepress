@@ -118,6 +118,18 @@ Updates come from the GitHub releases of this plugin. To turn update checks off:
 
 == Changelog ==
 
+= 0.7.0 (in progress, not released) =
+* Requires TranslatePress 3.3.5 or newer; older versions get an admin notice and the engine is not offered.
+* One text that the provider's content review refuses (HTTP 400 "Content Exists Risk" and similar) no longer pauses the engine: failed batches are split in halves until the one text is isolated; the rest of the batch is translated. The same applies to timeouts, safety blocks, truncated or unreadable answers.
+* Two different texts that get the same translation ("Contact" / "Contact us") no longer make the whole answer look misaligned: only those texts are asked again on their own.
+* Unusable answers for one language pause that language only; the provider is paused only when three languages are paused at once.
+* Rate limits are no longer mistaken for billing problems (Gemini's per-minute 429 mentions "billing"); daily quotas and HTTP-date Retry-After are recognised.
+* Thinking models behind OpenAI-compatible endpoints (DeepSeek reasoner, Qwen3, GLM, Kimi …) get output room for thinking; output limits stated in error messages are learned; reasoning blocks and text around the JSON answer are ignored. OpenAI reasoning models fall back from "minimal" to "low", never to the default effort.
+* About 45 more languages, TranslatePress' three-letter codes, Simplified/Traditional, Japanese-without-kana and Korean-without-Hangul checks, non-English source languages, 万/千 units, Indian digit grouping and 12/24-hour times.
+* PHP date formats and text direction strings are answered locally instead of being translated.
+* TranslatePress' quote and punctuation rewrite of machine translations is switched off while this engine is selected.
+* Status tab: languages currently paused and tokens used per day (last 7 days).
+
 = 0.6.6 =
 * Fix: text that is already in the target language (TranslatePress keeps, for example, the language switcher labels of each language as originals) and comes back unchanged was rejected as "untranslated"; with two such strings in a batch the whole answer was thrown away as misaligned and after three such answers the engine paused for every language. Text with clear signs of the target language and no English function word is now asked about once and then kept and listed for review ("already in this language"). Entries handed back unchanged no longer make a batch look misaligned: they fail on their own and the rest of the batch is used. Only when half a batch or more comes back unchanged (strings already rejected for that before not counted) is the whole answer distrusted and counted against the provider. Real English left unchanged (titles, sentences, phrases with English function words) is still rejected and never saved.
 * Fix: the same sentence stored twice by TranslatePress, once with "&" and once with "&amp;", received the same translation and the batch was thrown away as misaligned.

@@ -31,9 +31,11 @@ test( 'protocol: unknown / extra id rejects whole batch', function () use ( $ids
 	eq( array( 't4' ), $p['unknown'] );
 } );
 
-test( 'protocol: numeric id is invalid structure', function () use ( $ids ) {
-	$p = AITP_Protocol::parse( '{"translations":[{"id":1,"text":"A"}]}', $ids );
-	eq( 'invalid_structure', $p['status'] );
+test( 'protocol: numeric id is read as text, unknown ids still rejected', function () {
+	$p = AITP_Protocol::parse( '{"translations":[{"id":1,"text":"A"},{"id":"2","text":"B"}]}', array( '1', '2' ) );
+	eq( 'ok', $p['status'] );
+	eq( array( '1' => 'A', '2' => 'B' ), $p['translations'] );
+	eq( 'id_conflict', AITP_Protocol::parse( '{"translations":[{"id":1,"text":"A"}]}', array( 't1' ) )['status'] );
 } );
 
 test( 'protocol: invalid json / plain text / empty', function () use ( $ids ) {
@@ -53,8 +55,15 @@ test( 'protocol: whole-answer code fence accepted, top-level list accepted', fun
 	eq( 3, count( $p['translations'] ) );
 } );
 
-test( 'protocol: text before json is rejected', function () use ( $ids ) {
-	eq( 'invalid_json', AITP_Protocol::parse( "Sure!\n{\"translations\":[]}", $ids )['status'] );
+test( 'protocol: reasoning block and text around the JSON are ignored', function () use ( $ids ) {
+	$json = '{"translations":[{"id":"t1","text":"A {b}"},{"id":"t2","text":"B"},{"id":"t3","text":"C"}]}';
+	foreach ( array( "<think>first {draft}</think>\n" . $json, "Here is the JSON: " . $json . "\nHope this helps.", "```json\n" . $json . "\n```\nDone." ) as $raw ) {
+		$p = AITP_Protocol::parse( $raw, $ids );
+		eq( 'ok', $p['status'], substr( $raw, 0, 20 ) );
+		eq( 'A {b}', $p['translations']['t1'] );
+	}
+	eq( 'invalid_json', AITP_Protocol::parse( "Sure, here you go: translations are A, B, C", $ids )['status'] );
+	eq( 'invalid_structure', AITP_Protocol::parse( '{"result":{"t1":"A"}}', $ids )['status'], 'object without translations' );
 } );
 
 test( 'protocol: user payload keeps ids and separates context', function () {

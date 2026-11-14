@@ -2119,3 +2119,69 @@ msgstr "WP-Cron 已经晚了 %s 分钟，后台任务现在没有在跑。请开
 
 msgid "left unchanged: the original already seems to be in this language"
 msgstr "保持原样：原文似乎本来就是这种语言"
+
+msgid "AI Translator needs TranslatePress %1$s or newer (installed: %2$s). The engine is not offered until TranslatePress is updated."
+msgstr "AI Translator 需要 TranslatePress %1$s 或更新版本（当前：%2$s）。更新 TranslatePress 之前，翻译引擎列表里不会出现本插件。"
+
+msgid "The provider's content review refused the text."
+msgstr "接口方的内容审核拒绝了这段文字。"
+
+msgid "%1$s until %2$s"
+msgstr "%1$s（到 %2$s）"
+
+msgid "Languages waiting (answers kept failing the checks)"
+msgstr "暂停中的语言（译文接连没通过校验）"
+
+msgid "Tokens used (last 7 days, UTC)"
+msgstr "Token 用量（最近 7 天，UTC）"
+
+msgid "Counted from the provider's answers, for comparison with its bill. \"Thinking\" tokens are billed like output by most providers."
+msgstr "按接口返回的数字统计，用来和账单对照。多数接口把「思考」Token 按输出计费。"
+
+msgid "Day"
+msgstr "日期"
+
+msgid "Input tokens"
+msgstr "输入 Token"
+
+msgid "Output tokens"
+msgstr "输出 Token"
+
+msgid "Thinking tokens"
+msgstr "思考 Token"
+
+msgid "refused by the provider's content review"
+msgstr "被接口方的内容审核拒绝"
+
+msgid "the provider rejects this text on its own"
+msgstr "这段文字单独发送也被接口拒绝"
+
+msgid "this text alone timed out"
+msgstr "这段文字单独发送也超时"
+
+msgid "wrong script (Simplified/Traditional, Hangul …)"
+msgstr "文字写法不对（简繁体、韩文字母等）"
+
+msgid "Japanese without kana (looks like Chinese)"
+msgstr "日语里没有假名（像是中文）"
+
+msgid "batch split into smaller requests"
+msgstr "整批拆成小批重发"
+
+msgid "same translation given to different texts"
+msgstr "不同原文给了同一译文"
+
+msgid "most of the answer failed the checks"
+msgstr "整批回答大半没通过校验"
+
+msgid "answer in the wrong language"
+msgstr "回答的语言不对"
+
+msgid "request too large for the model"
+msgstr "请求超出模型上限"
+
+msgid "model stopped for an unknown reason"
+msgstr "模型因未知原因中途停止"
+
+msgid "format code kept as is (not sent)"
+msgstr "格式代码保持原样（不发送）"

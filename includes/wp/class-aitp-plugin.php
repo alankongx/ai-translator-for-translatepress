@@ -25,6 +25,25 @@ final class AITP_Plugin {
 		return self::$instance;
 	}
 
+	/** Oldest TranslatePress release with the engine API this plugin relies on (lock timeout). */
+	const MIN_TP = '3.3.5';
+
+	/**
+	 * Whether the active TranslatePress is new enough. True while TranslatePress is not loaded
+	 * yet (the check is repeated where it matters).
+	 *
+	 * @return bool
+	 */
+	public static function tp_supported() {
+		if ( defined( 'TRP_PLUGIN_VERSION' ) ) {
+			return version_compare( (string) TRP_PLUGIN_VERSION, self::MIN_TP, '>=' );
+		}
+		if ( class_exists( 'TRP_Machine_Translator' ) ) {
+			return method_exists( 'TRP_Machine_Translator', 'get_machine_translation_lock_timeout' );
+		}
+		return true;
+	}
+
 	/** Register hooks. */
 	public function boot() {
 		add_action( 'plugins_loaded', array( 'AITP_Schema', 'maybe_upgrade' ), 5 );
@@ -32,6 +51,12 @@ final class AITP_Plugin {
 		add_filter( 'trp_automatic_translation_engines_classes', array( $this, 'add_engine_class' ), 30 );
 		add_action( 'aitp_daily', array( $this, 'daily_cleanup' ) );
 		add_action( 'init', array( $this, 'load_textdomain' ) );
+		add_action( 'init', array( __CLASS__, 'remember_shortcodes' ), 999 );
+		// TranslatePress rewrites quotes and punctuation in machine translations after the
+		// engine returns them; that would undo what the validator checked (and HHG's damage
+		// came partly from it). Switch it off while this engine is selected.
+		add_filter( 'trp_disable_restore_translation_quotes', array( __CLASS__, 'disable_tp_rewrite' ), 30 );
+		add_filter( 'trp_disable_restore_punctuation_patterns', array( __CLASS__, 'disable_tp_rewrite' ), 30 );
 
 		if ( is_admin() ) {
 			AITP_Admin::instance()->boot();
@@ -62,6 +87,9 @@ final class AITP_Plugin {
 	 * @return array
 	 */
 	public function add_engine( $engines ) {
+		if ( ! self::tp_supported() ) {
+			return $engines; // Notice on the admin screens explains why.
+		}
 		$engines[] = array(
 			'value' => AITP_TP_ENGINE,
 			'label' => __( 'AI Translator (Gemini / OpenAI-compatible)', 'ai-translator-for-translatepress' ),
@@ -74,6 +102,9 @@ final class AITP_Plugin {
 	 * @return array
 	 */
 	public function add_engine_class( $classes ) {
+		if ( ! self::tp_supported() ) {
+			return $classes;
+		}
 		if ( class_exists( 'TRP_Machine_Translator' ) && ! class_exists( 'AITP_TP_Engine' ) ) {
 			require_once AITP_DIR . 'includes/wp/class-aitp-tp-engine.php';
 		}
@@ -81,6 +112,21 @@ final class AITP_Plugin {
 			$classes[ AITP_TP_ENGINE ] = 'AITP_TP_Engine';
 		}
 		return $classes;
+	}
+
+	/**
+	 * @param mixed $disabled Current value.
+	 * @return mixed
+	 */
+	public static function disable_tp_rewrite( $disabled ) {
+		return self::engine_selected() ? true : $disabled;
+	}
+
+	/** Registered shortcodes: only these "[name]" tokens are protected as placeholders. */
+	public static function remember_shortcodes() {
+		if ( isset( $GLOBALS['shortcode_tags'] ) && is_array( $GLOBALS['shortcode_tags'] ) ) {
+			AITP_Text::$shortcodes = array_map( 'strval', array_keys( $GLOBALS['shortcode_tags'] ) );
+		}
 	}
 
 	/** @return bool Whether TranslatePress currently uses this engine. */
@@ -135,6 +181,7 @@ final class AITP_Plugin {
 			'review'    => new AITP_WP_Review(),
 			'log'       => new AITP_WP_Log(),
 			'caps'      => new AITP_WP_Caps(),
+			'usage'     => new AITP_WP_Usage(),
 		);
 		$this->translator = new AITP_Translator( $provider, AITP_Settings::rules(), $deps, AITP_Settings::translator_options() );
 		return $this->translator;

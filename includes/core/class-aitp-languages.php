@@ -99,6 +99,66 @@ final class AITP_Languages {
 		'ka' => array( 'Georgian', 'Geor', 1.1 ),
 		'hy' => array( 'Armenian', 'Armn', 1.1 ),
 		'am' => array( 'Amharic', 'Ethi', 0.8 ),
+		// Further languages in TranslatePress' list (and common WordPress locales).
+		'ary' => array( 'Moroccan Arabic', 'Arab', 0.85 ),
+		'azb' => array( 'South Azerbaijani', 'Arab', 0.9 ),
+		'ckb' => array( 'Central Kurdish (Sorani)', 'Arab', 0.9 ),
+		'haz' => array( 'Hazaragi', 'Arab', 0.9 ),
+		'ug'  => array( 'Uyghur', 'Arab', 0.9 ),
+		'sd'  => array( 'Sindhi', 'Arab', 0.9 ),
+		'skr' => array( 'Saraiki', 'Arab', 0.9 ),
+		'as'  => array( 'Assamese', 'Beng', 1.0 ),
+		'or'  => array( 'Odia', 'Orya', 1.0 ),
+		'bo'  => array( 'Tibetan', 'Tibt', 1.0 ),
+		'dzo' => array( 'Dzongkha', 'Tibt', 1.0 ),
+		'dv'  => array( 'Dhivehi', 'Thaa', 0.9 ),
+		'yi'  => array( 'Yiddish', 'Hebr', 0.9 ),
+		'sah' => array( 'Sakha', 'Cyrl', 1.05 ),
+		'tt'  => array( 'Tatar', 'Cyrl', 1.05 ),
+		'tg'  => array( 'Tajik', 'Cyrl', 1.05 ),
+		'ba'  => array( 'Bashkir', 'Cyrl', 1.05 ),
+		'ceb' => array( 'Cebuano', 'Latn', 1.15 ),
+		'eo'  => array( 'Esperanto', 'Latn', 1.05 ),
+		'gd'  => array( 'Scottish Gaelic', 'Latn', 1.15 ),
+		'kab' => array( 'Kabyle', 'Latn', 1.1 ),
+		'oci' => array( 'Occitan', 'Latn', 1.12 ),
+		'rhg' => array( 'Rohingya', 'Latn', 1.0 ),
+		'szl' => array( 'Silesian', 'Latn', 1.0 ),
+		'tah' => array( 'Tahitian', 'Latn', 1.1 ),
+		'tk'  => array( 'Turkmen', 'Latn', 1.05 ),
+		'ku'  => array( 'Kurdish (Kurmanji)', 'Latn', 1.05 ),
+		'lb'  => array( 'Luxembourgish', 'Latn', 1.1 ),
+		'fy'  => array( 'Frisian', 'Latn', 1.05 ),
+		'br'  => array( 'Breton', 'Latn', 1.1 ),
+		'fo'  => array( 'Faroese', 'Latn', 1.05 ),
+		'zu'  => array( 'Zulu', 'Latn', 1.1 ),
+		'xh'  => array( 'Xhosa', 'Latn', 1.1 ),
+		'yo'  => array( 'Yoruba', 'Latn', 1.1 ),
+		'ha'  => array( 'Hausa', 'Latn', 1.1 ),
+		'so'  => array( 'Somali', 'Latn', 1.1 ),
+		'jv'  => array( 'Javanese', 'Latn', 1.1 ),
+		'su'  => array( 'Sundanese', 'Latn', 1.1 ),
+		'mg'  => array( 'Malagasy', 'Latn', 1.15 ),
+		'ht'  => array( 'Haitian Creole', 'Latn', 1.1 ),
+		'mi'  => array( 'Maori', 'Latn', 1.1 ),
+		'sm'  => array( 'Samoan', 'Latn', 1.1 ),
+		'ig'  => array( 'Igbo', 'Latn', 1.1 ),
+		'rw'  => array( 'Kinyarwanda', 'Latn', 1.1 ),
+	);
+
+	/**
+	 * Three-letter and other codes TranslatePress / WordPress use for languages listed above.
+	 *
+	 * @var array<string,string>
+	 */
+	private static $aliases = array(
+		'bel' => 'be',
+		'kir' => 'ky',
+		'fil' => 'tl',
+		'tuk' => 'tk',
+		'snd' => 'sd',
+		'ory' => 'or',
+		'hat' => 'ht',
 	);
 
 	/** @var array<string,string> */
@@ -149,6 +209,10 @@ final class AITP_Languages {
 		'Geor' => array( 'Georgian' ),
 		'Armn' => array( 'Armenian' ),
 		'Ethi' => array( 'Ethiopic' ),
+		'Orya' => array( 'Oriya' ),
+		'Tibt' => array( 'Tibetan' ),
+		'Thaa' => array( 'Thaana' ),
+		'Syrc' => array( 'Syriac' ),
 	);
 
 	/**
@@ -161,6 +225,7 @@ final class AITP_Languages {
 			'Latin', 'Cyrillic', 'Greek', 'Arabic', 'Hebrew', 'Han', 'Hiragana', 'Katakana', 'Hangul',
 			'Thai', 'Devanagari', 'Bengali', 'Gurmukhi', 'Gujarati', 'Tamil', 'Telugu', 'Kannada',
 			'Malayalam', 'Sinhala', 'Myanmar', 'Khmer', 'Lao', 'Georgian', 'Armenian', 'Ethiopic',
+			'Oriya', 'Tibetan', 'Thaana', 'Syriac',
 		);
 	}
 
@@ -190,6 +255,14 @@ final class AITP_Languages {
 			}
 		}
 
+		$latin_sr = $base !== '' && strpos( strtolower( $locale ), 'latin' ) !== false;
+		$base     = (string) preg_replace( '~@.*$~', '', $base );
+		if ( isset( self::$aliases[ $base ] ) ) {
+			$base = self::$aliases[ $base ];
+		}
+		if ( $base === 'sr' && $latin_sr ) {
+			$script = 'Latn';
+		}
 		$known = isset( self::$base[ $base ] );
 		$row   = $known ? self::$base[ $base ] : array( $base !== '' ? $base : 'Unknown', 'Latn', 1.0 );
 
@@ -206,12 +279,16 @@ final class AITP_Languages {
 			if ( $region !== '' ) {
 				$name .= ' (' . ( isset( self::$regions[ $region ] ) ? self::$regions[ $region ] : $region ) . ')';
 			}
-			if ( $base === 'zh' ) {
-				$name .= $script === 'Hant' ? ', Traditional script' : ', Simplified script';
-			}
 			if ( $formal ) {
 				$name .= ', formal register';
 			}
+		}
+		// The writing system is spelled out even when TranslatePress supplies the name
+		// ("Chinese (Taiwan)" says nothing about Traditional characters).
+		if ( $base === 'zh' && stripos( $name, 'script' ) === false ) {
+			$name .= $script === 'Hant' ? ', Traditional script' : ', Simplified script';
+		} elseif ( $base === 'sr' && stripos( $name, 'script' ) === false ) {
+			$name .= $script === 'Latn' ? ', Latin script' : ', Cyrillic script';
 		}
 
 		$tag = $base . ( $region !== '' ? '-' . $region : '' );
@@ -228,6 +305,23 @@ final class AITP_Languages {
 			'formal'  => $formal,
 			'known'   => $known,
 		);
+	}
+
+	/**
+	 * Teach an unknown language code the ISO code TranslatePress maps it to (e.g. a custom
+	 * language "bel" → "be"), so its writing system is known.
+	 *
+	 * @param string $code Language code as used by the site.
+	 * @param string $iso  ISO code given by TranslatePress.
+	 */
+	public static function alias( $code, $iso ) {
+		$parts = preg_split( '/[_-]/', strtolower( trim( (string) $code ) ) );
+		$base  = isset( $parts[0] ) ? $parts[0] : '';
+		$ip    = preg_split( '/[_-]/', strtolower( trim( (string) $iso ) ) );
+		$ib    = isset( $ip[0] ) ? $ip[0] : '';
+		if ( $base !== '' && $ib !== '' && ! isset( self::$base[ $base ] ) && ! isset( self::$aliases[ $base ] ) && isset( self::$base[ $ib ] ) ) {
+			self::$aliases[ $base ] = $ib;
+		}
 	}
 
 	/**

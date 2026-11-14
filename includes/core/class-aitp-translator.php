@@ -20,7 +20,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class AITP_Translator {
 
 	/** Failure reasons that say nothing about the item itself (no per-item backoff). */
-	const SYSTEMIC = array( 'structured_data', 'deferred', 'breaker', 'quota', 'rate_limit', 'quota_daily', 'auth', 'billing', 'not_found', 'bad_request', 'network', 'timeout', 'server', 'unsupported', 'held', 'invalid_response' );
+	const SYSTEMIC = array( 'structured_data', 'deferred', 'breaker', 'quota', 'rate_limit', 'quota_daily', 'auth', 'billing', 'not_found', 'bad_request', 'network', 'timeout', 'server', 'unsupported', 'held', 'invalid_response', 'split', 'repeated_output', 'refused' );
+
+	/**
+	 * Hard codes that describe the language of the answer rather than where it sits. Many of
+	 * them in one batch mean a rule misjudges this language (or the model writes the wrong
+	 * one), not that answers moved onto the wrong ids: each entry is judged on its own.
+	 */
+	const LANGUAGE_CODES = array( 'foreign_script', 'source_residue', 'wrong_script', 'english_residue', 'untranslated' );
+
+	/** Extra passes allowed only to narrow down a batch that failed as a whole. */
+	const MAX_SPLIT_PASSES = 8;
 
 	/** @var AITP_Provider */
 	private $provider;
@@ -44,6 +54,8 @@ final class AITP_Translator {
 	private $log;
 	/** @var AITP_Caps_Store */
 	private $caps_store;
+	/** @var AITP_Usage_Store */
+	private $usage;
 	/** @var callable */
 	private $clock;
 	/** @var array */
@@ -70,6 +82,7 @@ final class AITP_Translator {
 		$this->review     = isset( $deps['review'] ) ? $deps['review'] : new AITP_Memory_Review();
 		$this->log        = isset( $deps['log'] ) ? $deps['log'] : new AITP_Memory_Log();
 		$this->caps_store = isset( $deps['caps'] ) ? $deps['caps'] : new AITP_Memory_Caps();
+		$this->usage      = isset( $deps['usage'] ) ? $deps['usage'] : new AITP_Memory_Usage();
 		$this->clock      = isset( $deps['clock'] ) ? $deps['clock'] : 'microtime';
 		$this->opt        = array_merge(
 			array(
@@ -160,6 +173,7 @@ final class AITP_Translator {
 				'items'       => count( $items ),
 				'cached'      => 0,
 				'held'        => 0,
+				'fixed'       => 0,
 				'requests'    => 0,
 				'rounds'      => 0,
 				'sent_bytes'  => 0,
@@ -184,6 +198,14 @@ final class AITP_Translator {
 			}
 			if ( AITP_Text::is_structured_data( $text ) ) {
 				$out['failed'][ $key ] = 'structured_data';
+				continue;
+			}
+			// Code-like interface strings (date formats, text direction): a model would turn
+			// "F j, Y" into words that break date(); they are answered here and never sent.
+			$fixed = self::fixed_translation( $text, $ti );
+			if ( $fixed !== null ) {
+				$out['translations'][ $key ] = $fixed;
+				$out['stats']['fixed']++;
 				continue;
 			}
 			$fkey = self::failure_key( $text, $src, $tgt );
@@ -234,35 +256,91 @@ final class AITP_Translator {
 					'soft_candidate' => null,
 					'soft_flags'     => array(),
 					'confirm_asked'  => false,
+					'solo'           => false,
 				);
 				$item_units[ $key ][] = $uid;
 			}
 		}
 
 		// 3. Rounds.
+		//
+		// A request that fails as a whole (moderation, safety block, truncation, broken JSON,
+		// a 400 that only this batch gets, a timeout) is split in half and the halves are sent
+		// in the next pass, without counting an attempt against the entries: one bad text must
+		// not keep its neighbours untranslated. Only a single entry that still fails is charged.
+		// Splitting may run past max_rounds (MAX_SPLIT_PASSES), sending only the halves.
 		$queue       = array_keys( $units );
+		$forced      = array(); // Groups of uids that must be sent together in the next pass.
 		$stop_reason = '';
 		$round       = 0;
+		$passes      = 0;
 		$downgrades  = 0;
-		while ( $queue && $round < (int) $this->opt['max_rounds'] ) {
+		$usage       = array( 'input' => 0, 'output' => 0, 'thinking' => 0, 'requests' => 0 );
+		while ( $queue && $passes < (int) $this->opt['max_rounds'] + self::MAX_SPLIT_PASSES ) {
+			$extra = $round >= (int) $this->opt['max_rounds'];
+			if ( $extra && ! $forced ) {
+				break;
+			}
 			$round++;
+			$passes++;
 			if ( $this->now() >= $deadline - (float) $this->opt['min_request_seconds'] ) {
 				$stop_reason = 'deferred';
 				break;
 			}
-			if ( ! $this->breaker->allow() ) {
+			if ( ! $this->breaker->allow( $tgt ) ) {
 				$stop_reason = 'breaker';
 				break;
 			}
 			$out['stats']['rounds'] = $round;
 
-			$max_items = max( 1, (int) floor( $this->opt['batch_items'] / pow( 2, $round - 1 ) ) );
-			$queue_txt = array();
-			foreach ( $queue as $uid ) {
-				$queue_txt[ $uid ] = $units[ $uid ]['text'];
+			$in_queue = array_flip( $queue );
+			$batches  = array();
+			$grouped  = array();
+			$split_bi = array(); // Batches that are halves of an earlier batch.
+			foreach ( $forced as $g ) {
+				$g = array_values(
+					array_filter(
+						$g,
+						function ( $uid ) use ( $in_queue ) {
+							return isset( $in_queue[ $uid ] );
+						}
+					)
+				);
+				if ( $g ) {
+					$split_bi[ count( $batches ) ] = true;
+					$batches[] = $g;
+					foreach ( $g as $uid ) {
+						$grouped[ $uid ] = true;
+					}
+				}
 			}
-			$batches = AITP_Batcher::build( $queue_txt, (int) $this->opt['batch_tokens'], $max_items );
+			$forced = array();
+			if ( ! $extra ) {
+				$max_items = max( 1, (int) floor( $this->opt['batch_items'] / pow( 2, min( $round, (int) $this->opt['max_rounds'] ) - 1 ) ) );
+				$queue_txt = array();
+				foreach ( $queue as $uid ) {
+					if ( isset( $grouped[ $uid ] ) ) {
+						continue;
+					}
+					if ( $units[ $uid ]['solo'] ) {
+						$batches[] = array( $uid );
+						continue;
+					}
+					$queue_txt[ $uid ] = $units[ $uid ]['text'];
+				}
+				foreach ( AITP_Batcher::build( $queue_txt, (int) $this->opt['batch_tokens'], $max_items ) as $b ) {
+					$batches[] = $b;
+				}
+			}
 
+			$cap      = (int) $this->opt['max_output_cap'];
+			if ( ! empty( $this->caps['max_out'] ) ) {
+				$cap = min( $cap, (int) $this->caps['max_out'] );
+			}
+			$reserve  = $this->provider->thinking_reserve( $this->caps );
+			if ( ! empty( $this->caps['thinks'] ) ) {
+				$reserve = max( $reserve, 8192 ); // Learnt: the model thinks even when asked not to.
+			}
 			$requests = array();
 			$meta     = array();
 			foreach ( $batches as $bi => $uids ) {
@@ -283,16 +361,18 @@ final class AITP_Translator {
 					$stop_reason = 'quota';
 					break;
 				}
+				$visible   = AITP_Batcher::max_output_tokens( $payload, $ti, 0, $cap );
+				$max_out   = AITP_Batcher::max_output_tokens( $payload, $ti, $reserve, $cap );
 				$remaining = $deadline - $this->now();
-				$timeout   = max( 5.0, min( (float) $this->opt['http_timeout'], $remaining ) );
+				// Long answers take longer: 5 s more per 1000 expected output tokens (at most double).
+				$timeout   = max( 5.0, min( (float) $this->opt['http_timeout'] + min( (float) $this->opt['http_timeout'], 5.0 * floor( $visible / 1000 ) ), $remaining ) );
 				$user      = AITP_Protocol::user_payload( $payload, $si, $ti, $this->payload_extra( $uids, $units, $order, $pos, $texts, $ti, $notes ) );
-				$max_out   = AITP_Batcher::max_output_tokens( $payload, $ti, $this->provider->thinking_reserve( $this->caps ), (int) $this->opt['max_output_cap'] );
 				$req       = $this->provider->build_request( $system, $user, $max_out, $this->caps );
 				$req['timeout']   = $timeout;
 				$req['not_after'] = $deadline - (float) $this->opt['min_request_seconds'];
 				$req['deadline']  = $deadline;
 				$requests[ $bi ] = $req;
-				$meta[ $bi ]     = array( 'ids' => $ids, 'bytes' => $bytes, 'caps' => $this->caps );
+				$meta[ $bi ]     = array( 'ids' => $ids, 'bytes' => $bytes, 'caps' => $this->caps, 'max_out' => $max_out );
 			}
 
 			if ( ! $requests ) {
@@ -305,17 +385,22 @@ final class AITP_Translator {
 			$requeue           = array();
 			$fatal             = '';
 			$round_unsupported = 0;
+			$round_split       = 0;
+			$round_isolated    = 0;
 			$skipped           = 0;
 			$round_suspect     = 0;
 			$round_clean       = 0;
+			$bad_requests      = array();
+			$refused           = array(); // bi => ids of batches the provider refused for their content.
 			foreach ( $requests as $bi => $req ) {
 				$ids   = $meta[ $bi ]['ids'];
 				$bytes = $meta[ $bi ]['bytes'];
+				$n     = count( $ids );
 				$res   = isset( $results[ $bi ] ) ? $results[ $bi ] : array( 'status' => 0, 'headers' => array(), 'body' => '', 'error' => 'no result', 'error_type' => 'network', 'duration_ms' => 0 );
 				$logd  = array(
 					'round'       => $round,
 					'target'      => $tgt,
-					'items'       => count( $ids ),
+					'items'       => $n,
 					'bytes'       => $bytes,
 					'status'      => (int) $res['status'],
 					'duration_ms' => (int) $res['duration_ms'],
@@ -328,6 +413,7 @@ final class AITP_Translator {
 					$skipped++;
 					continue;
 				}
+				$usage['requests']++;
 				if ( ! empty( $res['error'] ) ) {
 					$code = $res['error_type'] === 'timeout' ? 'timeout' : 'network';
 					if ( $code === 'timeout' ) {
@@ -338,17 +424,44 @@ final class AITP_Translator {
 					}
 					$this->breaker->failure( $code, null, $this->provider->redact( (string) $res['error'] ) );
 					$this->log->log( 'warning', 'request', $logd + array( 'error' => $code, 'message' => $this->provider->redact( (string) $res['error'] ) ) );
-					$this->mark( $units, $ids, $code, true, $requeue );
+					if ( $code === 'timeout' && $n > 1 ) {
+						$this->split( $units, $ids, $requeue, $forced );
+						$round_split++;
+					} else {
+						// A single entry that times out on its own is too slow for this provider:
+						// it gets a per-item record and backs off instead of being resent every view.
+						$this->mark( $units, $ids, $code === 'timeout' ? 'timeout_item' : $code, true, $requeue );
+						$this->solo( $units, $ids );
+					}
 					continue;
 				}
 
 				$pr = $this->provider->parse_response( (int) $res['status'], (array) $res['headers'], (string) $res['body'], $meta[ $bi ]['caps'] );
 				$logd['request_id'] = $pr['request_id'];
 				$logd['usage']      = $pr['usage'];
+				foreach ( array( 'input', 'output', 'thinking' ) as $uk ) {
+					$usage[ $uk ] += isset( $pr['usage'][ $uk ] ) ? (int) $pr['usage'][ $uk ] : 0;
+				}
 
 				if ( ! $pr['ok'] ) {
 					if ( $pr['unsupported'] !== null ) {
-						$new = $this->provider->downgrade( $this->caps, $pr['unsupported'] );
+						if ( $meta[ $bi ]['caps'] !== $this->caps ) {
+							// Another request of this round already changed the capabilities:
+							// resend with the new ones instead of downgrading a second time.
+							$this->quota->release( $bytes );
+							$this->mark( $units, $ids, 'unsupported', false, $requeue );
+							$round_unsupported++;
+							continue;
+						}
+						$new = null;
+						if ( $pr['unsupported'] === 'max_out' ) {
+							if ( ! empty( $pr['max_out'] ) && ( empty( $this->caps['max_out'] ) || (int) $pr['max_out'] < (int) $this->caps['max_out'] ) ) {
+								$new            = $this->caps;
+								$new['max_out'] = (int) $pr['max_out'];
+							}
+						} else {
+							$new = $this->provider->downgrade( $this->caps, $pr['unsupported'] );
+						}
 						if ( $new !== null ) {
 							$this->caps = $new;
 							$this->caps_store->set( $this->provider->fingerprint(), $new );
@@ -361,13 +474,39 @@ final class AITP_Translator {
 						}
 					}
 					$this->quota->release( $bytes );
+					if ( $pr['error'] === 'content_rejected' ) {
+						// The provider refuses this text (moderation). Narrow it down; the
+						// provider is fine and the other entries are translated.
+						$this->log->log( 'warning', 'request', $logd + array( 'error' => $pr['error'], 'message' => $pr['message'] ) );
+						$refused[ $bi ] = $ids;
+						if ( $n > 1 ) {
+							$this->split( $units, $ids, $requeue, $forced );
+							$round_split++;
+						} else {
+							$this->give_up( $units, $ids, 'content_rejected' );
+						}
+						continue;
+					}
+					if ( $pr['error'] === 'bad_request' ) {
+						// Judged after the round: one batch alone is narrowed down, two at once
+						// mean the request itself is wrong.
+						$bad_requests[ $bi ] = $pr;
+						continue;
+					}
+					if ( $pr['error'] === 'too_large' && $n > 1 ) {
+						// Too much in one request: halves are the cure, the provider is fine.
+						$this->log->log( 'warning', 'request', $logd + array( 'error' => $pr['error'], 'message' => $pr['message'] ) );
+						$this->split( $units, $ids, $requeue, $forced );
+						$round_split++;
+						continue;
+					}
 					$this->breaker->failure( $pr['error'], $pr['retry_after'], $pr['message'] );
 					$this->log->log( 'error', 'request', $logd + array( 'error' => $pr['error'], 'message' => $pr['message'] ) );
-					if ( in_array( $pr['error'], array( 'auth', 'billing', 'not_found', 'bad_request', 'quota_daily', 'rate_limit' ), true ) ) {
+					if ( in_array( $pr['error'], array( 'auth', 'billing', 'not_found', 'quota_daily', 'rate_limit' ), true ) ) {
 						$fatal = $pr['error'];
 						$this->mark( $units, $ids, $pr['error'], false, $requeue );
 					} else {
-						$this->mark( $units, $ids, $pr['error'] === 'too_large' ? 'too_large' : (string) $pr['error'], true, $requeue );
+						$this->mark( $units, $ids, (string) $pr['error'], true, $requeue );
 					}
 					continue;
 				}
@@ -378,18 +517,30 @@ final class AITP_Translator {
 				if ( $pr['finish'] !== 'stop' ) {
 					$reason = $pr['finish'] === 'length' ? 'truncated' : ( $pr['finish'] === 'safety' ? 'blocked' : 'finish_other' );
 					if ( $reason === 'truncated' ) {
-						$this->breaker->failure( 'bad_output', null, $reason );
+						$this->learn_thinking( $pr['usage'], (int) $meta[ $bi ]['max_out'] );
+					}
+					if ( $reason === 'blocked' ) {
+						$refused[ $bi ] = $ids; // Safety filter: about the text, like content_rejected.
 					} else {
-						$this->breaker->success();
+						// Cut off or stopped: billed, and slow (the whole budget was generated).
+						// Counted for this language so a batch that keeps being cut off on every
+						// page view is held instead of paid for again and again.
+						$this->breaker->failure( 'bad_output', null, $reason, $tgt );
 					}
 					$this->log->log( 'warning', 'request', $logd + array( 'error' => $reason, 'message' => $pr['message'] ) );
-					$this->mark( $units, $ids, $reason, true, $requeue );
+					if ( $n > 1 ) {
+						$this->split( $units, $ids, $requeue, $forced );
+						$round_split++;
+					} else {
+						$this->mark( $units, $ids, $reason, true, $requeue );
+						$this->solo( $units, $ids );
+					}
 					continue;
 				}
 
 				$parsed = AITP_Protocol::parse( $pr['text'], array_keys( $ids ) );
 				if ( $parsed['status'] !== 'ok' ) {
-					$this->breaker->failure( 'bad_output', null, $parsed['status'] );
+					$this->breaker->failure( 'bad_output', null, $parsed['status'], $tgt );
 					$this->log->log(
 						'warning',
 						'request',
@@ -399,7 +550,13 @@ final class AITP_Translator {
 							'duplicate' => count( $parsed['duplicate'] ),
 						)
 					);
-					$this->mark( $units, $ids, $parsed['status'], true, $requeue );
+					if ( $n > 1 ) {
+						$this->split( $units, $ids, $requeue, $forced );
+						$round_split++;
+					} else {
+						$this->mark( $units, $ids, $parsed['status'], true, $requeue );
+						$this->solo( $units, $ids );
+					}
 					continue;
 				}
 
@@ -411,9 +568,29 @@ final class AITP_Translator {
 						$checks[ $id ] = $this->validator->check( $units[ $uid ]['text'], $parsed['translations'][ $id ], $si, $ti );
 					}
 				}
-				$suspect = self::suspect_response( $ids, $units, $parsed, $checks );
+				$suspect  = self::suspect_response( $ids, $units, $parsed, $checks );
+				$repeated = $suspect === 'repeated_output' ? self::repeated_ids( $ids, $units, $parsed ) : array();
+				if ( $repeated && count( $repeated ) <= max( 2, (int) ceil( $n / 4 ) ) ) {
+					// Two different sources, one translation ("Product"/"Products" → 製品,
+					// "Search"/"Search:" → "Buscar"): often simply correct. Each of them is asked
+					// again on its own, where no misalignment is possible; the rest of the batch
+					// is asked again too. Nothing is charged, the provider is not blamed.
+					$rest = $ids;
+					foreach ( $repeated as $id ) {
+						$units[ $ids[ $id ] ]['solo'] = true;
+						$forced[]                     = array( $ids[ $id ] );
+						unset( $rest[ $id ] );
+					}
+					if ( $rest ) {
+						$forced[] = array_values( $rest );
+					}
+					$this->log->log( 'notice', 'request', $logd + array( 'error' => 'repeated_output', 'repeated' => count( $repeated ) ) );
+					$this->mark( $units, $ids, 'repeated_output', false, $requeue );
+					$round_isolated++;
+					continue;
+				}
 				if ( $suspect !== '' ) {
-					$this->breaker->failure( 'bad_output', null, 'misaligned:' . $suspect );
+					$this->breaker->failure( 'bad_output', null, 'misaligned:' . $suspect, $tgt );
 					$this->log->log(
 						'warning',
 						'request',
@@ -421,7 +598,7 @@ final class AITP_Translator {
 							'error'    => 'misaligned',
 							'why'      => $suspect,
 							'missing'  => count( $parsed['missing'] ),
-							'rejected' => count( $ids ),
+							'rejected' => $n,
 						)
 					);
 					foreach ( $ids as $uid ) {
@@ -435,8 +612,8 @@ final class AITP_Translator {
 				// and not entries already rejected for that earlier: the provider is not translating.
 				// Nothing from such an answer is trusted, not even "confirmed" names.
 				$echo = self::echo_counts( $ids, $units, $parsed, $checks );
-				if ( count( $ids ) >= 4 && $echo['hard_new'] >= 2 && $echo['new'] * 2 >= count( $ids ) ) {
-					$this->breaker->failure( 'bad_output', null, 'misaligned:echoed' );
+				if ( $n >= 4 && $echo['hard_new'] >= 2 && $echo['new'] * 2 >= $n ) {
+					$this->breaker->failure( 'bad_output', null, 'misaligned:echoed', $tgt );
 					$this->log->log(
 						'warning',
 						'request',
@@ -444,7 +621,7 @@ final class AITP_Translator {
 							'error'    => 'misaligned',
 							'why'      => 'echoed',
 							'missing'  => 0,
-							'rejected' => count( $ids ),
+							'rejected' => $n,
 						)
 					);
 					foreach ( $ids as $uid ) {
@@ -454,10 +631,20 @@ final class AITP_Translator {
 					$round_suspect++;
 					continue;
 				}
-				// A retry batch made mostly of entries echoed before (text that may well be in the
-				// target language already) says nothing about the provider either way.
-				if ( $echo['again'] * 2 < count( $ids ) ) {
-					$this->breaker->success();
+				// Every entry of a sizeable batch rejected for its language: judged entry by
+				// entry, but this language's answers count as unusable for the breaker.
+				$lang_only = 0;
+				foreach ( $checks as $v ) {
+					if ( $v['hard'] && ! array_diff( $v['hard'], self::LANGUAGE_CODES ) ) {
+						$lang_only++;
+					}
+				}
+				if ( $n >= 4 && $lang_only === $n ) {
+					$this->breaker->failure( 'bad_output', null, 'wrong_language', $tgt );
+				} elseif ( $echo['again'] * 2 < $n ) {
+					// A retry batch made mostly of entries echoed before (text that may well be in
+					// the target language already) says nothing about the provider either way.
+					$this->breaker->success( $tgt );
 				}
 				$round_clean++;
 
@@ -483,6 +670,53 @@ final class AITP_Translator {
 				);
 			}
 
+			// HTTP 400 for one batch only: something in it (a text the provider refuses without
+			// saying so) is the cause. Two separate batches failing at once: the request itself
+			// is wrong (parameter, model), which needs the site owner.
+			// Halves of one split batch are not independent evidence: only batches that were not
+			// produced by splitting count towards "the request itself is wrong".
+			$independent = 0;
+			foreach ( $bad_requests as $bi => $pr ) {
+				if ( ! isset( $split_bi[ $bi ] ) ) {
+					$independent++;
+				}
+			}
+			if ( $independent >= 2 ) {
+				$first = reset( $bad_requests );
+				$this->breaker->failure( 'bad_request', $first['retry_after'], $first['message'] ); // Once per round.
+				foreach ( $bad_requests as $bi => $pr ) {
+					$this->log->log( 'error', 'request', array( 'round' => $round, 'target' => $tgt, 'items' => count( $meta[ $bi ]['ids'] ), 'error' => 'bad_request', 'message' => $pr['message'], 'request_id' => $pr['request_id'] ) );
+					$this->mark( $units, $meta[ $bi ]['ids'], 'bad_request', false, $requeue );
+				}
+				$fatal = 'bad_request';
+			} else {
+				foreach ( $bad_requests as $bi => $pr ) {
+					$ids = $meta[ $bi ]['ids'];
+					$this->log->log( 'warning', 'request', array( 'round' => $round, 'target' => $tgt, 'items' => count( $ids ), 'error' => 'bad_request', 'message' => $pr['message'], 'request_id' => $pr['request_id'] ) );
+					$refused[ $bi ] = $ids;
+					if ( count( $ids ) > 1 ) {
+						$this->split( $units, $ids, $requeue, $forced );
+						$round_split++;
+					} else {
+						$this->give_up( $units, $ids, 'provider_rejected' );
+					}
+				}
+			}
+
+			// The provider refused every request of this round (at least four) for its content:
+			// it refuses this whole language or everything, not a single text. Narrowing down
+			// further would cost about two requests per entry; give the entries up (per-item
+			// backoff), hold this language and stop.
+			if ( count( $refused ) >= 4 && count( $refused ) === count( $requests ) - $skipped ) {
+				foreach ( $refused as $ids ) {
+					$this->give_up( $units, $ids, 'content_rejected' );
+				}
+				$forced = array();
+				$this->breaker->failure( 'bad_output', null, 'refused', $tgt );
+				$stop_reason = 'refused';
+				break;
+			}
+
 			if ( $fatal !== '' ) {
 				$stop_reason = $fatal;
 				break;
@@ -501,14 +735,14 @@ final class AITP_Translator {
 				$stop_reason = 'misaligned';
 				break;
 			}
-			// A round spent only on discovering unsupported optional features does not count.
-			if ( $round_unsupported === count( $requests ) && $downgrades <= 6 ) {
+			// A round spent only on capabilities, splitting or isolating does not count.
+			if ( ! $extra && $round_unsupported + $round_split + $round_isolated === count( $requests ) && $downgrades <= 6 ) {
 				$round--;
 			}
 
 			$queue = array();
 			foreach ( array_keys( $requeue ) as $uid ) {
-				if ( $units[ $uid ]['done'] ) {
+				if ( $units[ $uid ]['done'] || $units[ $uid ]['dead'] ) {
 					continue;
 				}
 				if ( $units[ $uid ]['attempts'] >= (int) $this->opt['max_attempts'] ) {
@@ -525,6 +759,9 @@ final class AITP_Translator {
 					return $order_index[ $a ] - $order_index[ $b ];
 				}
 			);
+		}
+		if ( $usage['requests'] ) {
+			$this->usage->add( $tgt, $usage );
 		}
 
 		// Units that never finished: fall back to a soft-flagged candidate if one exists.
@@ -719,27 +956,138 @@ final class AITP_Translator {
 			return 'missing_id';
 		}
 		$hard = 0;
-		$seen = array();
 		foreach ( $checks as $id => $v ) {
 			$cand = $parsed['translations'][ $id ];
 			$src  = $units[ $ids[ $id ] ]['text'];
 			// An entry returned unchanged sits on its own id, so it is no sign of misalignment:
 			// it fails on its own (e.g. text that was already in the target language) and
-			// must not take the rest of the batch or the whole engine down with it.
-			if ( $v['hard'] && ! self::is_echo( $src, $cand ) ) {
+			// must not take the rest of the batch or the whole engine down with it. Neither is
+			// a rejection only for the language of the answer (see LANGUAGE_CODES).
+			if ( $v['hard'] && ! self::is_echo( $src, $cand ) && array_diff( $v['hard'], self::LANGUAGE_CODES ) ) {
 				$hard++;
 			}
-			$t = self::fold( $cand );
-			$s = self::fold( $src );
-			if ( $t !== '' && isset( $seen[ $t ] ) && $seen[ $t ] !== $s ) {
-				return 'repeated_output';
-			}
-			$seen[ $t ] = $s;
 		}
 		if ( $hard >= max( 2, (int) ceil( 0.2 * $n ) ) ) {
 			return 'many_rejected';
 		}
+		if ( self::repeated_ids( $ids, $units, $parsed ) ) {
+			return 'repeated_output';
+		}
 		return '';
+	}
+
+	/**
+	 * Ids of entries whose translation equals the translation of an entry with a different
+	 * source.
+	 *
+	 * @param array $ids    id => uid.
+	 * @param array $units  Units.
+	 * @param array $parsed Parsed response.
+	 * @return string[]
+	 */
+	private static function repeated_ids( array $ids, array $units, array $parsed ) {
+		$by = array();
+		foreach ( $parsed['translations'] as $id => $cand ) {
+			if ( ! isset( $ids[ $id ] ) ) {
+				continue;
+			}
+			$t = self::fold( $cand );
+			if ( $t === '' ) {
+				continue;
+			}
+			$by[ $t ][ $id ] = self::fold( $units[ $ids[ $id ] ]['text'] );
+		}
+		$out = array();
+		foreach ( $by as $group ) {
+			if ( count( array_unique( $group ) ) > 1 ) {
+				foreach ( array_keys( $group ) as $id ) {
+					$out[] = (string) $id;
+				}
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Requeue a batch that failed as a whole as two halves for the next pass, without
+	 * charging an attempt to its entries.
+	 *
+	 * @param array $units   Units (by reference).
+	 * @param array $ids     id => uid.
+	 * @param array $requeue uid => true (by reference).
+	 * @param array $forced  Groups for the next pass (by reference).
+	 */
+	private function split( array &$units, array $ids, array &$requeue, array &$forced ) {
+		$this->mark( $units, $ids, 'split', false, $requeue );
+		$uids     = array_values( $ids );
+		$half     = (int) ceil( count( $uids ) / 2 );
+		$forced[] = array_slice( $uids, 0, $half );
+		$forced[] = array_slice( $uids, $half );
+	}
+
+	/**
+	 * An entry that failed on its own is sent on its own next time, so it cannot make a
+	 * batch of other entries fail again.
+	 *
+	 * @param array $units Units (by reference).
+	 * @param array $ids   id => uid.
+	 */
+	private function solo( array &$units, array $ids ) {
+		foreach ( $ids as $uid ) {
+			$units[ $uid ]['solo'] = true;
+		}
+	}
+
+	/**
+	 * Stop trying an entry in this call (the provider refuses this very text); it gets a
+	 * per-item record and backs off.
+	 *
+	 * @param array  $units  Units (by reference).
+	 * @param array  $ids    id => uid.
+	 * @param string $reason Reason.
+	 */
+	private function give_up( array &$units, array $ids, $reason ) {
+		foreach ( $ids as $uid ) {
+			if ( ! $units[ $uid ]['done'] ) {
+				$units[ $uid ]['reason'] = $reason;
+				$units[ $uid ]['dead']   = true;
+			}
+		}
+	}
+
+	/**
+	 * A cut-off answer where reasoning took a large share of the output budget: the model
+	 * thinks even when asked not to. Remember it so later requests reserve room for it.
+	 *
+	 * @param array $usage   Usage of the response.
+	 * @param int   $max_out Output budget of the request.
+	 */
+	private function learn_thinking( array $usage, $max_out ) {
+		$thinking = isset( $usage['thinking'] ) ? (int) $usage['thinking'] : 0;
+		if ( ! empty( $this->caps['thinks'] ) || $thinking <= 0 || $thinking < 0.3 * max( 1, $max_out ) ) {
+			return;
+		}
+		$this->caps['thinks'] = true;
+		$this->caps_store->set( $this->provider->fingerprint(), $this->caps );
+		$this->log->log( 'notice', 'capability', array( 'feature' => 'thinks', 'thinking' => $thinking, 'max_out' => $max_out ) );
+	}
+
+	/**
+	 * Translation of code-like interface strings that must not go to a model, or null.
+	 *
+	 * @param string $text Source.
+	 * @param array  $ti   Target info.
+	 * @return string|null
+	 */
+	public static function fixed_translation( $text, array $ti ) {
+		$t = trim( (string) $text );
+		if ( $t === 'ltr' || $t === 'rtl' ) {
+			return in_array( $ti['script'], array( 'Arab', 'Hebr', 'Thaa', 'Syrc' ), true ) ? 'rtl' : 'ltr';
+		}
+		if ( AITP_Text::is_date_format( $t ) ) {
+			return (string) $text;
+		}
+		return null;
 	}
 
 	/**
@@ -792,9 +1140,7 @@ final class AITP_Translator {
 	 * @return string
 	 */
 	private static function fold( $s ) {
-		$s = AITP_Text::decode_entities( (string) $s );
-		$s = function_exists( 'mb_strtolower' ) ? mb_strtolower( $s, 'UTF-8' ) : strtolower( $s );
-		return trim( (string) preg_replace( '~[\s\p{P}]+~u', ' ', $s ) );
+		return AITP_Text::fold( $s );
 	}
 
 	/**

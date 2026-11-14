@@ -135,19 +135,35 @@ abstract class AITP_Provider {
 		return strlen( $s ) > 300 ? substr( $s, 0, 300 ) . '…' : $s;
 	}
 
+	/** Text of a real billing problem (no money or credit left), as opposed to a rate limit. */
+	const BILLING_HARD = '~insufficient[_ ]quota|insufficient[_ ]balance|insufficient[_ ]funds|insufficient[_ ]credit|credit balance is too low|billing hard limit|account (?:is )?(?:not active|deactivated|suspended)|arrear|欠费|余额不足|账户余额|limit:\s*0\b~u';
+
+	/** Content moderation: the provider refuses this text. Only this item is affected. */
+	const MODERATION = '~content exists risk|content[_ ]filter|content[_ ]management[_ ]policy|data[_ ]inspection[_ ]failed|inappropriate content|unsafe content|sensitive content|\b1301\b|敏感|不安全|违规|high risk~u';
+
+	/** The model name is wrong or unavailable (also the wording relays and DeepSeek use). */
+	const MODEL_MISSING = '~model[^.\n]{0,40}(?:not exist|does not exist|not found|not available|is invalid)|invalid model|unknown model|model_not_found|no available channel|无可用渠道|模型不存在~u';
+
 	/**
 	 * Map an HTTP failure to an error category.
 	 *
-	 * auth / billing / not_found / bad_request pause the engine until fixed;
-	 * quota_daily and rate_limit open the circuit for a while; server is transient.
+	 * auth / billing / not_found pause the engine until fixed; quota_daily and rate_limit open
+	 * the circuit for a while; server is transient. content_rejected concerns one text only.
+	 * bad_request is judged by the translator: one batch alone is narrowed down item by item,
+	 * two separate batches failing at once means the request itself is wrong.
+	 *
+	 * Many providers word an ordinary rate limit like a billing problem (Gemini: "You exceeded
+	 * your current quota, please check your plan and billing details"; free tiers point to a
+	 * payment page). A 429 is therefore a rate limit unless it says plainly that no money or
+	 * credit is left.
 	 *
 	 * @param int    $status HTTP status.
 	 * @param string $body   Body or error message.
 	 * @return string
 	 */
 	public static function classify_error( $status, $body ) {
-		$b = strtolower( (string) $body );
-		$billing = '~insufficient[_ ]quota|insufficient[_ ]balance|insufficient[_ ]funds|billing|credit|balance|payment|exceeded your current quota|arrear|欠费|余额不足~u';
+		$b       = function_exists( 'mb_strtolower' ) ? mb_strtolower( (string) $body, 'UTF-8' ) : strtolower( (string) $body );
+		$billing = '~insufficient[_ ]quota|insufficient[_ ]balance|insufficient[_ ]funds|billing|credit|balance|payment|arrear|欠费|余额不足~u';
 		if ( $status === 402 ) {
 			return 'billing';
 		}
@@ -164,22 +180,28 @@ abstract class AITP_Provider {
 			return 'too_large';
 		}
 		if ( $status === 429 ) {
-			if ( preg_match( $billing, $b ) ) {
+			if ( preg_match( self::BILLING_HARD, $b ) ) {
 				return 'billing';
 			}
-			if ( preg_match( '~perday|per day|per_day|daily~', $b ) ) {
+			if ( preg_match( '~perday|per day|per_day|daily|每日|每天|当日~u', $b ) ) {
 				return 'quota_daily';
 			}
 			return 'rate_limit';
 		}
-		if ( $status === 400 || $status === 422 ) {
+		if ( $status === 400 || $status === 422 || $status === 451 ) {
+			if ( preg_match( self::MODERATION, $b ) ) {
+				return 'content_rejected';
+			}
 			if ( preg_match( '~api[_ ]?key[_ ]?(?:invalid|not valid|expired)|invalid[_ ]api[_ ]?key|incorrect api key|unauthori[sz]ed|permission[_ ]denied~', $b ) ) {
 				return 'auth';
+			}
+			if ( preg_match( self::MODEL_MISSING, $b ) ) {
+				return 'not_found';
 			}
 			if ( preg_match( $billing, $b ) ) {
 				return 'billing';
 			}
-			if ( preg_match( '~context length|context_length|too long|maximum context|token limit|too many tokens|request too large~', $b ) ) {
+			if ( preg_match( '~context length|context_length|too long|maximum context|token limit|too many tokens|request too large~', $b ) && self::output_limit( $b ) === null ) {
 				return 'too_large';
 			}
 			return 'bad_request';
@@ -187,7 +209,38 @@ abstract class AITP_Provider {
 		if ( $status === 0 ) {
 			return 'network';
 		}
+		// On 5xx relays also say "no available channel" for short outages: that stays a server
+		// error (retried soon); only a model that does not exist pauses the engine.
+		if ( ( $status === 503 || $status === 500 ) && preg_match( self::MODEL_MISSING, $b ) && ! preg_match( '~no available channel|无可用渠道~u', $b ) ) {
+			return 'not_found';
+		}
 		return 'server';
+	}
+
+	/**
+	 * Output token limit stated in an error ("supports at most 4096 completion tokens",
+	 * "range of max_tokens is [1, 8192]").
+	 *
+	 * @param string $body Error text.
+	 * @return int|null
+	 */
+	public static function output_limit( $body ) {
+		$b = strtolower( (string) $body );
+		if ( ! preg_match( '~max_?(?:completion_|output_|new_)?tokens|completion tokens|output tokens|maxoutputtokens~', $b ) ) {
+			return null;
+		}
+		$patterns = array(
+			'~at most (\d{3,7})~',
+			'~range of [a-z_ ]*is \[\s*\d+\s*,\s*(\d{3,7})\s*\]~',
+			'~\[\s*1\s*,\s*(\d{3,7})\s*\]~',
+			'~(?:less than or equal to|<=|not exceed|maximum (?:value )?(?:is|of)|max(?:imum)? allowed(?: value)? (?:is|of)?)\s*(\d{3,7})~',
+		);
+		foreach ( $patterns as $p ) {
+			if ( preg_match( $p, $b, $m ) ) {
+				return (int) $m[1];
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -207,6 +260,10 @@ abstract class AITP_Provider {
 		}
 		if ( ! empty( $caps['thinking'] ) && preg_match( '~thinking|reasoning~', $b ) ) {
 			return 'thinking';
+		}
+		// A value above the model's output limit is not an unknown parameter name.
+		if ( self::output_limit( $b ) !== null ) {
+			return 'max_out';
 		}
 		if ( preg_match( '~max_completion_tokens|max_tokens~', $b ) ) {
 			return 'max_completion_tokens';
@@ -228,10 +285,16 @@ abstract class AITP_Provider {
 			$v = reset( $v );
 		}
 		if ( is_numeric( $v ) ) {
-			return max( 0, (int) ceil( (float) $v ) );
+			return min( 86400, max( 0, (int) ceil( (float) $v ) ) );
 		}
 		if ( is_string( $v ) && preg_match( '~^(\d+(?:\.\d+)?)s$~', trim( $v ), $m ) ) {
-			return (int) ceil( (float) $m[1] );
+			return min( 86400, (int) ceil( (float) $m[1] ) );
+		}
+		if ( is_string( $v ) && trim( $v ) !== '' && preg_match( '~[A-Za-z]{3},? \d~', $v ) ) {
+			$t = strtotime( $v ); // HTTP date.
+			if ( $t ) {
+				return min( 86400, max( 0, $t - time() ) ); // A date far ahead must not stop the engine for weeks.
+			}
 		}
 		return null;
 	}
@@ -263,6 +326,7 @@ abstract class AITP_Provider {
 			'request_id'  => '',
 			'usage'       => array(),
 			'message'     => '',
+			'max_out'     => null,
 		);
 	}
 
@@ -284,6 +348,9 @@ abstract class AITP_Provider {
 		$r['message']     = $this->short( 'HTTP ' . $status . ': ' . ( $message !== '' ? $message : $body ) );
 		if ( in_array( (int) $status, array( 400, 422 ), true ) && $r['error'] === 'bad_request' ) {
 			$r['unsupported'] = self::detect_unsupported( $message . ' ' . $body, $caps );
+			if ( $r['unsupported'] === 'max_out' ) {
+				$r['max_out'] = self::output_limit( $message . ' ' . $body );
+			}
 		}
 		return $r;
 	}

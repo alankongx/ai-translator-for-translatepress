@@ -138,6 +138,11 @@ final class AITP_Admin {
 			echo '<div class="notice notice-error"><p>' . esc_html__( 'AI Translator for TranslatePress needs the TranslatePress plugin to be installed and active.', 'ai-translator-for-translatepress' ) . '</p></div>';
 			return;
 		}
+		if ( ! AITP_Plugin::tp_supported() ) {
+			/* translators: 1: required version, 2: installed version */
+			echo '<div class="notice notice-error"><p>' . esc_html( sprintf( __( 'AI Translator needs TranslatePress %1$s or newer (installed: %2$s). The engine is not offered until TranslatePress is updated.', 'ai-translator-for-translatepress' ), AITP_Plugin::MIN_TP, defined( 'TRP_PLUGIN_VERSION' ) ? (string) TRP_PLUGIN_VERSION : '?' ) ) . '</p></div>';
+			return;
+		}
 		$hhg = defined( 'HHGFOTR_PLUGIN_DIR' ) || class_exists( 'HHGFOTR_TranslatePress' ) || class_exists( 'HHGFOTR_Plugin' ) || class_exists( 'TRP_HHGFOTR_Gemini_Machine_Translator' );
 		$mt  = get_option( 'trp_machine_translation_settings', array() );
 		$eng = is_array( $mt ) && isset( $mt['translation-engine'] ) ? (string) $mt['translation-engine'] : '';
@@ -190,6 +195,7 @@ final class AITP_Admin {
 			'network'          => __( 'Network error while contacting the provider.', 'ai-translator-for-translatepress' ),
 			'invalid_response' => __( 'The provider returned an unreadable response.', 'ai-translator-for-translatepress' ),
 			'bad_output'       => __( 'The model\'s answers were repeatedly cut off, unreadable or misaligned, so they were discarded; requests resume automatically.', 'ai-translator-for-translatepress' ),
+			'content_rejected' => __( 'The provider\'s content review refused the text.', 'ai-translator-for-translatepress' ),
 		);
 		return isset( $map[ $reason ] ) ? $map[ $reason ] : (string) $reason;
 	}
@@ -465,6 +471,15 @@ final class AITP_Admin {
 			}
 		}
 		$this->kv( __( 'State', 'ai-translator-for-translatepress' ), $state );
+		$held = AITP_Plugin::breaker()->held_locales();
+		if ( $held ) {
+			$parts = array();
+			foreach ( $held as $loc => $until ) {
+				/* translators: 1: language code, 2: time */
+				$parts[] = sprintf( __( '%1$s until %2$s', 'ai-translator-for-translatepress' ), $loc, wp_date( 'H:i', (int) $until ) );
+			}
+			$this->kv( __( 'Languages waiting (answers kept failing the checks)', 'ai-translator-for-translatepress' ), implode( ' · ', $parts ) );
+		}
 		if ( $b['message'] !== '' ) {
 			$this->kv( __( 'Last error', 'ai-translator-for-translatepress' ), (string) $b['message'] );
 		}
@@ -472,7 +487,7 @@ final class AITP_Admin {
 		$this->kv( __( 'Characters sent today (TranslatePress limit)', 'ai-translator-for-translatepress' ), sprintf( __( '%1$s of %2$s', 'ai-translator-for-translatepress' ), number_format_i18n( $counter ), number_format_i18n( $limit ) ) );
 		echo '</tbody></table>';
 
-		if ( $b['status'] !== 'closed' ) {
+		if ( $b['status'] !== 'closed' || $held ) {
 			echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="margin-top:10px;"><input type="hidden" name="action" value="aitp_reset_breaker">';
 			wp_nonce_field( 'aitp_reset_breaker' );
 			submit_button( __( 'Resume now', 'ai-translator-for-translatepress' ), 'secondary', 'submit', false );
@@ -516,6 +531,24 @@ final class AITP_Admin {
 			$this->kv( __( 'Reasons', 'ai-translator-for-translatepress' ), implode( ' · ', $parts ) );
 		}
 		echo '</tbody></table>';
+
+		// Tokens per day (estimate; the provider's console is authoritative).
+		$days = AITP_WP_Usage::recent( 7 );
+		$any  = false;
+		foreach ( $days as $u ) {
+			$any = $any || $u['requests'] > 0;
+		}
+		echo '<h2>' . esc_html__( 'Tokens used (last 7 days, UTC)', 'ai-translator-for-translatepress' ) . '</h2>';
+		echo '<p class="description">' . esc_html__( 'Counted from the provider\'s answers, for comparison with its bill. "Thinking" tokens are billed like output by most providers.', 'ai-translator-for-translatepress' ) . '</p>';
+		if ( ! $any ) {
+			echo '<p>' . esc_html__( 'None.', 'ai-translator-for-translatepress' ) . '</p>';
+		} else {
+			echo '<table class="widefat striped"><thead><tr><th>' . esc_html__( 'Day', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'API requests', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Input tokens', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Output tokens', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Thinking tokens', 'ai-translator-for-translatepress' ) . '</th></tr></thead><tbody>';
+			foreach ( $days as $day => $u ) {
+				echo '<tr><td>' . esc_html( $day ) . '</td><td>' . esc_html( number_format_i18n( $u['requests'] ) ) . '</td><td>' . esc_html( number_format_i18n( $u['input'] ) ) . '</td><td>' . esc_html( number_format_i18n( $u['output'] ) ) . '</td><td>' . esc_html( number_format_i18n( $u['thinking'] ) ) . '</td></tr>';
+			}
+			echo '</tbody></table>';
+		}
 
 		// Items in backoff.
 		$ft     = AITP_Schema::table( 'failures' );
@@ -674,6 +707,18 @@ final class AITP_Admin {
 			'no_translate_changed'      => __( 'text marked "do not translate" changed', 'ai-translator-for-translatepress' ),
 			'no_letters'                => __( 'no letters', 'ai-translator-for-translatepress' ),
 			'auto_retried'              => __( 'still wrong after the auto repair (left for a person)', 'ai-translator-for-translatepress' ),
+			'content_rejected'          => __( 'refused by the provider\'s content review', 'ai-translator-for-translatepress' ),
+			'provider_rejected'         => __( 'the provider rejects this text on its own', 'ai-translator-for-translatepress' ),
+			'timeout_item'              => __( 'this text alone timed out', 'ai-translator-for-translatepress' ),
+			'wrong_script'              => __( 'wrong script (Simplified/Traditional, Hangul …)', 'ai-translator-for-translatepress' ),
+			'no_kana'                   => __( 'Japanese without kana (looks like Chinese)', 'ai-translator-for-translatepress' ),
+			'split'                     => __( 'batch split into smaller requests', 'ai-translator-for-translatepress' ),
+			'repeated_output'           => __( 'same translation given to different texts', 'ai-translator-for-translatepress' ),
+			'many_rejected'             => __( 'most of the answer failed the checks', 'ai-translator-for-translatepress' ),
+			'wrong_language'            => __( 'answer in the wrong language', 'ai-translator-for-translatepress' ),
+			'too_large'                 => __( 'request too large for the model', 'ai-translator-for-translatepress' ),
+			'finish_other'              => __( 'model stopped for an unknown reason', 'ai-translator-for-translatepress' ),
+			'fixed'                     => __( 'format code kept as is (not sent)', 'ai-translator-for-translatepress' ),
 		);
 		if ( isset( $map[ $code ] ) ) {
 			return $map[ $code ];
@@ -785,10 +830,13 @@ final class AITP_Admin {
 		} else {
 			$trp    = get_option( 'trp_settings', array() );
 			$source = isset( $trp['default-language'] ) ? (string) $trp['default-language'] : 'en_US';
+			if ( strtolower( substr( $source, 0, 2 ) ) !== 'en' ) {
+				$source = 'en_US'; // The test sentences are English, whatever the site's language.
+			}
 			$target = 'fr_FR';
 			if ( ! empty( $trp['translation-languages'] ) && is_array( $trp['translation-languages'] ) ) {
 				foreach ( $trp['translation-languages'] as $l ) {
-					if ( $l !== $source ) {
+					if ( strtolower( substr( (string) $l, 0, 2 ) ) !== 'en' ) {
 						$target = (string) $l;
 						break;
 					}
@@ -800,6 +848,8 @@ final class AITP_Admin {
 			);
 			$log     = new AITP_Memory_Log();
 			$breaker = new AITP_Circuit_Breaker( new AITP_Memory_State() );
+			AITP_WP_Caps::clear(); // Test detects the endpoint's abilities afresh.
+			$usage   = new AITP_WP_Usage();
 			$t       = new AITP_Translator(
 				$provider,
 				AITP_Settings::rules(),
@@ -808,6 +858,7 @@ final class AITP_Admin {
 					'breaker'   => $breaker,
 					'log'       => $log,
 					'caps'      => new AITP_WP_Caps(),
+					'usage'     => $usage,
 				),
 				array_merge( AITP_Settings::translator_options(), array( 'soft_retry' => false ) )
 			);

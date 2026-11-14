@@ -37,7 +37,16 @@ class AITP_TP_Engine extends TRP_Machine_Translator {
 			return array();
 		}
 
-		$budget   = AITP_Plugin::instance()->time_budget( $this->get_machine_translation_lock_timeout() );
+		// Language codes the plugin's table does not know (e.g. "bel", "fil") but TranslatePress
+		// maps to an ISO code that it does: treat them as that language.
+		foreach ( array( $source_language_code, $target_language_code ) as $code ) {
+			if ( isset( $this->machine_translation_codes[ $code ] ) ) {
+				AITP_Languages::alias( $code, $this->machine_translation_codes[ $code ] );
+			}
+		}
+
+		$lock     = method_exists( $this, 'get_machine_translation_lock_timeout' ) ? (int) $this->get_machine_translation_lock_timeout() : 60;
+		$budget   = AITP_Plugin::instance()->time_budget( $lock );
 		$names    = array(
 			'source' => $this->english_name( $source_language_code ),
 			'target' => $this->english_name( $target_language_code ),

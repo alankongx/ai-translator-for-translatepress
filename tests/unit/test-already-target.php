@@ -90,7 +90,7 @@ test( 'already target: all five real strings mixed with English, every language 
 	ok( empty( $st->state['status'] ) || $st->state['status'] === 'closed', 'breaker closed after all languages' );
 } );
 
-test( 'already target: provider echoing whole batches is distrusted and opens the breaker', function () {
+test( 'already target: provider echoing whole batches is distrusted and holds that language', function () {
 	$st    = new AITP_Memory_State();
 	$tr    = new AITP_Test_Transport( function ( $r ) {
 		list( $items ) = req_items( $r );
@@ -102,9 +102,10 @@ test( 'already target: provider echoing whole batches is distrusted and opens th
 	$r     = $t->translate( $items, 'en_US', 'fr_FR', later() );
 	eq( array(), $r['translations'], 'nothing saved, names included' );
 	$t->translate( array( 'Fast delivery to your warehouse', 'Choose the lens colour you need', 'Frames for every face', 'Talk to our team' ), 'en_US', 'fr_FR', later() );
-	eq( 'open', $st->state['status'] );
-	eq( 'bad_output', $st->state['reason'] );
-	eq( 'misaligned:echoed', $st->state['message'] );
+	$b = new AITP_Circuit_Breaker( $st );
+	ok( ! $b->allow( 'fr_FR' ), 'French held' );
+	ok( $b->allow( 'de_DE' ), 'other languages go on' );
+	eq( 'misaligned:echoed', $st->state['locales']['fr_FR']['message'] );
 } );
 
 test( 'misaligned: "&" and "&amp;" copies of one sentence may get the same translation', function () {

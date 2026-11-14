@@ -22,7 +22,7 @@ class AITP_Provider_OpenAI extends AITP_Provider {
 	 */
 	public static function presets() {
 		return array(
-			'openai'     => array( 'label' => 'OpenAI', 'base_url' => 'https://api.openai.com/v1', 'model' => 'gpt-4.1-mini' ),
+			'openai'     => array( 'label' => 'OpenAI (ChatGPT)', 'base_url' => 'https://api.openai.com/v1', 'model' => 'gpt-4.1-mini' ),
 			'deepseek'   => array( 'label' => 'DeepSeek', 'base_url' => 'https://api.deepseek.com/v1', 'model' => 'deepseek-flash' ),
 			'zhipu'      => array( 'label' => 'Zhipu GLM (智谱)', 'base_url' => 'https://open.bigmodel.cn/api/paas/v4', 'model' => 'glm-4-flash' ),
 			'openrouter' => array( 'label' => 'OpenRouter', 'base_url' => 'https://openrouter.ai/api/v1', 'model' => 'google/gemini-2.5-flash' ),
@@ -60,12 +60,33 @@ class AITP_Provider_OpenAI extends AITP_Provider {
 	 * @return string
 	 */
 	public function fingerprint() {
-		return parent::fingerprint() . ( $this->is_deepseek_host() ? '|ds-thinking' : '' );
+		return parent::fingerprint() . ( $this->is_deepseek_host() ? '|ds-thinking' : '' ) . ( $this->is_zhipu_thinking_model() ? '|zp-thinking' : '' );
+	}
+
+	/** @return bool */
+	private function is_zhipu_host() {
+		$host = strtolower( (string) parse_url( $this->base_url(), PHP_URL_HOST ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url
+		return $host === 'open.bigmodel.cn' || $host === 'api.z.ai';
+	}
+
+	/** @return bool Zhipu models that think by default and take thinking:{type}. */
+	private function is_zhipu_thinking_model() {
+		return $this->is_zhipu_host() && (bool) preg_match( '~glm-(?:4\.[5-9]|[5-9])~', strtolower( $this->model() ) );
 	}
 
 	/** @return bool */
 	private function is_reasoning_model() {
 		return (bool) preg_match( '~(^|/)(o\d|gpt-5|gpt-[6-9])~', strtolower( $this->model() ) );
+	}
+
+	/**
+	 * Models that may spend output tokens on reasoning even when not asked to: the output
+	 * budget gets a reserve so the translation is not cut off.
+	 *
+	 * @return bool
+	 */
+	private function may_think() {
+		return (bool) preg_match( '~reason|r1|think|qwq|(^|[-/])t1|glm-(?:4\.[5-9]|[5-9])|qwen3|kimi-k2|minimax|gemini-(?:2\.5|[3-9])|gemini-(?:flash|pro)-latest|claude-(?:3-7|[4-9])~', strtolower( $this->model() ) );
 	}
 
 	/** @return array<string,bool> */
@@ -75,7 +96,8 @@ class AITP_Provider_OpenAI extends AITP_Provider {
 			// DeepSeek rejects json_schema; with "auto" it goes straight to JSON mode.
 			'schema'                => $structured === 'schema' || ( $structured === 'auto' && ! $this->is_deepseek_host() ),
 			'json'                  => $structured !== 'off',
-			'thinking'              => $this->is_reasoning_model() || $this->is_deepseek_host(),
+			'thinking'              => $this->is_reasoning_model() || $this->is_deepseek_host() || $this->is_zhipu_thinking_model(),
+			'effort_minimal'        => true,
 			'max_completion_tokens' => $this->is_openai_host(),
 			'temperature'           => $this->config['temperature'] !== null && $this->config['temperature'] !== '',
 		);
@@ -95,6 +117,12 @@ class AITP_Provider_OpenAI extends AITP_Provider {
 				return $caps;
 			}
 			return null;
+		}
+		// Reasoning models that refuse "minimal" (o3, o4-mini …) get "low" before reasoning
+		// control is dropped altogether (which would leave them at their default, higher level).
+		if ( $feature === 'thinking' && $this->is_reasoning_model() && ! empty( $caps['effort_minimal'] ) && $this->config['thinking'] === 'off' ) {
+			$caps['effort_minimal'] = false;
+			return $caps;
 		}
 		if ( $feature === 'schema' && ! empty( $caps['schema'] ) ) {
 			$caps['schema'] = false;
@@ -120,10 +148,13 @@ class AITP_Provider_OpenAI extends AITP_Provider {
 		if ( $this->is_reasoning_model() ) {
 			return ! empty( $caps['thinking'] ) ? 4096 : 8192;
 		}
-		if ( $this->is_deepseek_host() ) {
+		if ( $this->is_deepseek_host() || $this->is_zhipu_thinking_model() ) {
+			if ( preg_match( '~reason|r1~', strtolower( $this->model() ) ) ) {
+				return 8192; // deepseek-reasoner thinks whatever the request says.
+			}
 			return ! empty( $caps['thinking'] ) && $this->config['thinking'] === 'off' ? 0 : 8192;
 		}
-		return preg_match( '~reason|r1|think|qwq~', strtolower( $this->model() ) ) ? 8192 : 0;
+		return $this->may_think() ? 8192 : 0;
 	}
 
 	/**
@@ -161,9 +192,9 @@ class AITP_Provider_OpenAI extends AITP_Provider {
 			$body['max_tokens'] = (int) $max_out;
 		}
 		if ( ! empty( $caps['thinking'] ) && $this->is_reasoning_model() ) {
-			$body['reasoning_effort'] = $this->config['thinking'] === 'off' ? 'minimal' : 'low';
-		} elseif ( ! empty( $caps['thinking'] ) && $this->is_deepseek_host() && $this->config['thinking'] !== 'auto' ) {
-			// DeepSeek thinks by default; translation does not need it (3x slower and dearer).
+			$body['reasoning_effort'] = $this->config['thinking'] === 'off' && ( ! isset( $caps['effort_minimal'] ) || $caps['effort_minimal'] ) ? 'minimal' : 'low';
+		} elseif ( ! empty( $caps['thinking'] ) && ( $this->is_deepseek_host() || $this->is_zhipu_thinking_model() ) && $this->config['thinking'] !== 'auto' ) {
+			// DeepSeek and GLM 4.5+ think by default; translation does not need it (slower and dearer).
 			$body['thinking'] = array( 'type' => $this->config['thinking'] === 'off' ? 'disabled' : 'enabled' );
 		}
 		if ( ! empty( $caps['temperature'] ) ) {
@@ -228,11 +259,13 @@ class AITP_Provider_OpenAI extends AITP_Provider {
 			return $r;
 		}
 		if ( isset( $data['usage'] ) && is_array( $data['usage'] ) ) {
-			$u          = $data['usage'];
+			$u        = $data['usage'];
+			$thinking = isset( $u['completion_tokens_details']['reasoning_tokens'] ) ? (int) $u['completion_tokens_details']['reasoning_tokens'] : 0;
+			// "output" is the visible answer, as with Gemini; reasoning is billed as output too.
 			$r['usage'] = array(
 				'input'    => isset( $u['prompt_tokens'] ) ? (int) $u['prompt_tokens'] : 0,
-				'output'   => isset( $u['completion_tokens'] ) ? (int) $u['completion_tokens'] : 0,
-				'thinking' => isset( $u['completion_tokens_details']['reasoning_tokens'] ) ? (int) $u['completion_tokens_details']['reasoning_tokens'] : 0,
+				'output'   => max( 0, ( isset( $u['completion_tokens'] ) ? (int) $u['completion_tokens'] : 0 ) - $thinking ),
+				'thinking' => $thinking,
 			);
 		}
 		$choice  = $data['choices'][0];

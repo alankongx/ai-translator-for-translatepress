@@ -54,7 +54,7 @@ final class AITP_Segmenter {
 				continue;
 			}
 			$text = $t['value'];
-			if ( preg_match_all( '~(?:[.!?](?:["\'”’)\]]*)\s+|[。！？؟।]["」』）]*\s*)~u', $text, $bm, PREG_OFFSET_CAPTURE ) ) {
+			if ( preg_match_all( '~(?:[.!?](?:["\'”’)\]]*)\s+|[。！？؟।\x{06D4}\x{17D4}\x{0F0D}]["」』）]*\s*)~u', $text, $bm, PREG_OFFSET_CAPTURE ) ) {
 				$start = 0;
 				foreach ( $bm[0] as $b ) {
 					$end      = $b[1] + strlen( $b[0] );

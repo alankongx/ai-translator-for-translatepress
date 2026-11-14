@@ -82,7 +82,8 @@ class AITP_Provider_Gemini extends AITP_Provider {
 		$t = $this->thinking_config( $caps );
 		if ( $t === null ) {
 			// Unknown model or thinking control unsupported: the model may think at its default level.
-			return preg_match( '~gemini-(?:2\.5|[3-9]|\d{2})~', strtolower( $this->model_name() ) ) ? 8192 : 1024;
+			// "-latest" aliases point at current (thinking) models.
+			return preg_match( '~gemini-(?:2\.5|[3-9]|\d{2})|gemini-(?:flash|flash-lite|pro)-latest~', strtolower( $this->model_name() ) ) ? 8192 : 1024;
 		}
 		if ( isset( $t['thinkingLevel'] ) ) {
 			return $t['thinkingLevel'] === 'minimal' ? 1024 : 4096;

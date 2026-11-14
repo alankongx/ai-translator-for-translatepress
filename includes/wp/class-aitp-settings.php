@@ -397,6 +397,7 @@ final class AITP_Settings {
 		foreach ( array( 'provider', 'preset', 'base_url', 'model', 'api_key_enc' ) as $k ) {
 			if ( $out[ $k ] !== $old[ $k ] ) {
 				delete_option( 'aitp_breaker' );
+				AITP_WP_Caps::clear(); // Learned limits belong to the old endpoint or model.
 				break;
 			}
 		}

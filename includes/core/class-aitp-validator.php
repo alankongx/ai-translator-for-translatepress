@@ -233,10 +233,22 @@ final class AITP_Validator {
 		$s_an = $this->analysis_text( $s_text, $terms, $needles );
 		$t_an = $this->analysis_text( $t_text, $terms, $needles );
 
-		// 5. Numbers.
-		$s_num = array_values( array_unique( AITP_Text::numbers( $s_an ) ) );
-		$t_num = AITP_Text::numbers( $t_an );
+		// 5. Numbers. 万/千/亿 are written out on the CJK side ("1万" = "10,000"); a time that
+		// only moved from 12- to 24-hour writing ("5pm" → "17 Uhr") is not a lost number.
+		$cjk   = array( 'ja', 'zh', 'ko' );
+		$s_num = array_values( array_unique( AITP_Text::numbers( in_array( $si['base'], $cjk, true ) ? AITP_Text::expand_cjk_units( $s_an ) : $s_an ) ) );
+		$t_num = AITP_Text::numbers( in_array( $ti['base'], $cjk, true ) ? AITP_Text::expand_cjk_units( $t_an ) : $t_an );
 		$lost  = array_values( array_diff( $s_num, $t_num ) );
+		if ( $lost && preg_match( '~\d\s*(?:p\.?\s?m\b|p\.m\.)~i', $s_an ) ) {
+			$lost = array_values(
+				array_filter(
+					$lost,
+					function ( $n ) use ( $t_num ) {
+						return ! ( (int) $n >= 1 && (int) $n <= 12 && in_array( (string) ( (int) $n + 12 ), $t_num, true ) );
+					}
+				)
+			);
+		}
 		if ( $lost ) {
 			if ( in_array( $ti['base'], array( 'ja', 'zh', 'ko' ), true ) && preg_match( '~[万億亿兆千百十萬]~u', $t_an ) ) {
 				$soft[] = 'number_format';
@@ -246,11 +258,18 @@ final class AITP_Validator {
 			$details['missing_numbers'] = array_slice( $lost, 0, 5 );
 		}
 
-		// 6. Writing systems.
+		// 6. Writing systems. Skipped for a language this plugin does not know (its writing
+		// system is unknown). A short name in a third writing system returned as is (a language
+		// switcher's "العربية" on an English site) is not left-over source text.
 		$s_scripts = AITP_Text::script_counts( $s_an );
 		$t_scripts = AITP_Text::script_counts( $t_an );
-		foreach ( $t_scripts as $script => $n ) {
+		$identical = AITP_Text::fold( $s_text ) === AITP_Text::fold( $t_text );
+		$short     = count( preg_split( '~\s+~u', trim( $s_an ), -1, PREG_SPLIT_NO_EMPTY ) ) <= 3;
+		foreach ( empty( $ti['known'] ) ? array() : $t_scripts as $script => $n ) {
 			if ( $script === 'Latin' || in_array( $script, $ti['scripts'], true ) ) {
+				continue;
+			}
+			if ( $identical && $short && ! in_array( $script, $si['scripts'], true ) ) {
 				continue;
 			}
 			if ( empty( $s_scripts[ $script ] ) ) {
@@ -262,6 +281,16 @@ final class AITP_Validator {
 				$hard[]                   = 'source_residue';
 				$details['residue_script'] = $script;
 				break;
+			}
+		}
+
+		// 6b. Traditional / Simplified Chinese written in the other form; Korean without Hangul.
+		$wrong = self::wrong_script( $t_an, $ti, $t_scripts, $identical );
+		if ( $wrong !== '' ) {
+			if ( $wrong === 'no_kana' ) {
+				$soft[] = $wrong;
+			} else {
+				$hard[] = $wrong;
 			}
 		}
 
@@ -326,7 +355,7 @@ final class AITP_Validator {
 
 		// 10. Added claims (soft).
 		if ( $this->rules->claim_checks ) {
-			$t_con = AITP_Claims::concepts_in( $t_an, $ti['base'] );
+			$t_con = AITP_Claims::concepts_in( $t_an, $ti['base'], true );
 			$s_con = AITP_Claims::concepts_in( $s_an, $si['base'] );
 			if ( is_array( $t_con ) && is_array( $s_con ) ) {
 				foreach ( array_diff( $t_con, $s_con ) as $concept ) {
@@ -464,6 +493,38 @@ final class AITP_Validator {
 		return (bool) preg_match( '~[' . $m['letters'] . ']~u', AITP_Text::lower( $s ) );
 	}
 
+	/** Characters used only in Simplified Chinese. */
+	const SIMPLIFIED_ONLY = '们这个为说时会对发经过还进现么样买卖产东车门问间听见边让给关于开实质请应专业订单运费选购级标务图类条确认联网电话简镜销货优颜设计场帮欢';
+
+	/** Their Traditional forms. */
+	const TRADITIONAL_ONLY = '們這個為說時會對發經過還進現麼樣買賣產東車門問間聽見邊讓給關於開實質請應專業訂單運費選購級標務圖類條確認聯網電話簡鏡銷貨優顏設計場幫歡';
+
+	/**
+	 * Writing-system problems within one language: 'wrong_script' (hard), 'no_kana' (soft)
+	 * or ''.
+	 *
+	 * @param string $t_an      Translation (analysis text).
+	 * @param array  $ti        Target info.
+	 * @param array  $t_scripts Script counts of the translation.
+	 * @param bool   $identical Translation equals the source.
+	 * @return string
+	 */
+	private static function wrong_script( $t_an, array $ti, array $t_scripts, $identical ) {
+		if ( $ti['base'] === 'zh' && in_array( $ti['script'], array( 'Hans', 'Hant' ), true ) ) {
+			$other = $ti['script'] === 'Hant' ? self::SIMPLIFIED_ONLY : self::TRADITIONAL_ONLY;
+			$hits  = preg_match_all( '~[' . $other . ']~u', $t_an );
+			return $hits >= 2 ? 'wrong_script' : '';
+		}
+		$han = isset( $t_scripts['Han'] ) ? $t_scripts['Han'] : 0;
+		if ( $ti['base'] === 'ko' && $han >= 2 && empty( $t_scripts['Hangul'] ) ) {
+			return 'wrong_script';
+		}
+		if ( $ti['base'] === 'ja' && ! $identical && $han >= 6 && empty( $t_scripts['Hiragana'] ) && empty( $t_scripts['Katakana'] ) ) {
+			return 'no_kana'; // Long all-kanji Japanese exists, but it may be Chinese: look at it.
+		}
+		return '';
+	}
+
 	/**
 	 * @return string '' when fine, a hard code, CONFIRM_IDENTICAL or ALREADY_TARGET.
 	 */
@@ -482,11 +543,32 @@ final class AITP_Validator {
 			}
 		}
 
-		if ( AITP_Text::squash( $s_text ) === AITP_Text::squash( $t_text ) ) {
+		if ( AITP_Text::fold( $s_text ) === AITP_Text::fold( $t_text ) ) {
 			// File names, slugs and identifiers (no spaces, with _ / \ or a file extension).
 			$st = trim( $s_text );
 			if ( ! preg_match( '~\s~u', $st ) && preg_match( '~[_/\\\\]|\.[A-Za-z0-9]{2,5}$~u', $st ) ) {
 				return '';
+			}
+			// Source languages without capital letters (Chinese, Japanese, Arabic …): text in
+			// the source language's own writing system returned unchanged is untranslated, at
+			// any length. Chinese ↔ Japanese share Han characters: short names may stay.
+			$s_counts = AITP_Text::script_counts( $s_an );
+			$own      = 0;
+			foreach ( $si['scripts'] as $sc ) {
+				if ( $sc !== 'Latin' && isset( $s_counts[ $sc ] ) ) {
+					$own += $s_counts[ $sc ];
+				}
+			}
+			if ( $own > 0 ) {
+				if ( ! array_intersect( $si['scripts'], $ti['scripts'] ) || $ti['base'] === 'ko' ) {
+					return 'untranslated';
+				}
+				return $own >= 6 ? 'untranslated' : self::CONFIRM_IDENTICAL;
+			}
+			// A non-Latin source site with English strings, translated into English: those
+			// strings are already in the target language.
+			if ( $ti['base'] === 'en' && ! in_array( 'Latin', $si['scripts'], true ) && AITP_Text::latin_words( $s_an, 2 ) ) {
+				return self::ALREADY_TARGET;
 			}
 			// Text that is already in the target language (no English function word, clear
 			// signs of the target language): ask once, then keep it for review. Real English
@@ -602,6 +684,10 @@ final class AITP_Validator {
 			case 'foreign_script':
 			case 'source_residue':
 				return 'Write only in ' . $lang . '; remove characters from other writing systems.';
+			case 'wrong_script':
+				return 'Write in ' . $lang . ' with its own characters' . ( $ti['base'] === 'zh' ? ( $ti['script'] === 'Hant' ? ' (Traditional Chinese characters, not Simplified)' : ' (Simplified Chinese characters, not Traditional)' ) : '' ) . '.';
+			case 'no_kana':
+				return 'Write natural Japanese, with hiragana and katakana where Japanese uses them; do not answer in Chinese.';
 			case 'untranslated':
 			case 'english_residue':
 				return 'Translate all of the text into ' . $lang . '; keep only names, brands and codes unchanged.';

@@ -132,6 +132,69 @@ final class AITP_WP_Caps implements AITP_Caps_Store {
 		$all[ $fingerprint ] = $caps;
 		update_option( 'aitp_caps', $all, false );
 	}
+
+	/** Forget what was learned about every endpoint (settings saved, connection test). */
+	public static function clear() {
+		delete_option( 'aitp_caps' );
+	}
+}
+
+/**
+ * Tokens used per day and target language (option aitp_usage, not autoloaded). Shown on the
+ * status tab so the owner can compare with the provider's bill. Concurrent page views may
+ * lose an increment now and then: the figures are an estimate, the provider's console is
+ * authoritative.
+ */
+final class AITP_WP_Usage implements AITP_Usage_Store {
+
+	const OPTION = 'aitp_usage';
+	const DAYS   = 62;
+
+	public function add( $target_locale, array $usage ) {
+		$all = get_option( self::OPTION, array() );
+		$all = is_array( $all ) ? $all : array();
+		$day = gmdate( 'Y-m-d' );
+		$loc = substr( preg_replace( '~[^A-Za-z0-9_@-]~', '', (string) $target_locale ), 0, 32 );
+		$row = isset( $all[ $day ][ $loc ] ) && is_array( $all[ $day ][ $loc ] ) ? $all[ $day ][ $loc ] : array();
+		foreach ( array( 'input', 'output', 'thinking', 'requests' ) as $k ) {
+			$row[ $k ] = ( isset( $row[ $k ] ) ? (int) $row[ $k ] : 0 ) + ( isset( $usage[ $k ] ) ? max( 0, (int) $usage[ $k ] ) : 0 );
+		}
+		$all[ $day ][ $loc ] = $row;
+		ksort( $all );
+		while ( count( $all ) > self::DAYS ) {
+			array_shift( $all );
+		}
+		if ( get_option( self::OPTION, null ) === null ) {
+			add_option( self::OPTION, $all, '', false );
+		} else {
+			update_option( self::OPTION, $all, false );
+		}
+	}
+
+	/**
+	 * Totals per day for the last $days days (UTC), newest first.
+	 *
+	 * @param int $days Days.
+	 * @return array<string,array{input:int,output:int,thinking:int,requests:int}>
+	 */
+	public static function recent( $days = 7 ) {
+		$all = get_option( self::OPTION, array() );
+		$all = is_array( $all ) ? $all : array();
+		$out = array();
+		for ( $i = 0; $i < $days; $i++ ) {
+			$day = gmdate( 'Y-m-d', time() - $i * 86400 );
+			$sum = array( 'input' => 0, 'output' => 0, 'thinking' => 0, 'requests' => 0 );
+			if ( isset( $all[ $day ] ) && is_array( $all[ $day ] ) ) {
+				foreach ( $all[ $day ] as $row ) {
+					foreach ( $sum as $k => $_ ) {
+						$sum[ $k ] += isset( $row[ $k ] ) ? (int) $row[ $k ] : 0;
+					}
+				}
+			}
+			$out[ $day ] = $sum;
+		}
+		return $out;
+	}
 }
 
 /**
