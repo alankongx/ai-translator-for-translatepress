@@ -30,6 +30,9 @@ final class AITP_Audit_Logic {
 	const TIER_B   = 'b';
 	const TIER_REF = 'ref';
 
+	/** Categories of a batch check restored by "roll back only what did not come out well". */
+	const BAD_ROWS = array( 'left', 'refused', 'wrong', 'english' );
+
 	/**
 	 * Codes that prove a stored translation broken: an error with one of these is certainly wrong.
 	 * Checked against 4,220 translations people reviewed on a real site: one false alarm.
@@ -510,6 +513,25 @@ final class AITP_Audit_Logic {
 			return '';
 		}
 		return 'changed';
+	}
+
+	/**
+	 * Backup rows of a batch that did not come out well ("roll back only what did not come
+	 * out well"): still untranslated (refused by the engine, or not reached) and new
+	 * translations failing the checks.
+	 *
+	 * @param array $backups Backup rows (kind, lang, row_id, ...).
+	 * @param array $cats    "kind|lang|row id" => category (see AITP_Audit::batch_check()).
+	 * @return array The backup rows to restore, keys kept.
+	 */
+	public static function only_bad( array $backups, array $cats ) {
+		return array_filter(
+			$backups,
+			function ( $b ) use ( $cats ) {
+				$k = $b['kind'] . '|' . $b['lang'] . '|' . (int) $b['row_id'];
+				return isset( $cats[ $k ] ) && in_array( $cats[ $k ], self::BAD_ROWS, true );
+			}
+		);
 	}
 
 	/**

@@ -166,12 +166,26 @@ final class AITP_CLI {
 	 * : For "repair": only queue these pages (comma-separated addresses, or a file with one
 	 * per line; default-language or translated). Rows shown on none of them are skipped.
 	 *
+	 * [--only-bad]
+	 * : For "rollback <batch>": only restore the rows that did not come out well (still
+	 * untranslated, or new translations failing the checks); the rest of the batch stays and
+	 * can still be rolled back later.
+	 *
+	 * [--since=<time>]
+	 * : For "rollback": roll back every batch made since this time (site time zone, e.g.
+	 * "2026-11-15 09:00"), newest first. With --minutes as the time budget (default 10).
+	 *
+	 * [--auto-only]
+	 * : For "rollback --since": only batches of the auto repair.
+	 *
 	 * ## EXAMPLES
 	 *
 	 *     wp aitp audit scan
 	 *     wp aitp audit list --lang=fr_FR --severity=error
 	 *     wp aitp audit repair --ids=12,13
 	 *     wp aitp audit rollback 1762700000000
+	 *     wp aitp audit rollback 1762700000000 --only-bad
+	 *     wp aitp audit rollback --since="2026-11-15 09:00" --auto-only
  *     wp aitp audit protect reviewed.json --label="Reviewed 2026-11"
 	 *
 	 * @param array $args  Positional.
@@ -212,7 +226,26 @@ final class AITP_CLI {
 				WP_CLI::log( wp_json_encode( AITP_Audit::repair( $ids, array( 'unlinked' => ! empty( $assoc['include-unlinked'] ), 'pages' => $only ) ) ) );
 				break;
 			case 'rollback':
-				WP_CLI::log( wp_json_encode( AITP_Audit::rollback( isset( $args[1] ) ? (int) $args[1] : 0 ) ) );
+				if ( isset( $assoc['since'] ) ) {
+					try {
+						$since = ( new DateTimeImmutable( (string) $assoc['since'], wp_timezone() ) )->getTimestamp();
+					} catch ( Exception $e ) {
+						WP_CLI::error( 'Unreadable --since (example: "2026-11-15 09:00").' );
+					}
+					$end = time() + 60 * ( isset( $assoc['minutes'] ) ? max( 1, (int) $assoc['minutes'] ) : 10 );
+					do {
+						$r = AITP_Audit::rollback_since( $since, ! empty( $assoc['auto-only'] ), max( 10, min( 120, $end - time() ) ) );
+						WP_CLI::log( wp_json_encode( $r ) );
+					} while ( $r['left'] && empty( $r['busy'] ) && time() < $end );
+					if ( $r['left'] ) {
+						WP_CLI::warning( count( $r['left'] ) . ' batches left: run the same command again.' );
+					}
+					break;
+				}
+				if ( empty( $args[1] ) ) {
+					WP_CLI::error( 'Give the batch id, or --since=<time>.' );
+				}
+				WP_CLI::log( wp_json_encode( AITP_Audit::rollback( (int) $args[1], array( 'only_bad' => ! empty( $assoc['only-bad'] ) ) ) ) );
 				break;
 			case 'import':
 				if ( empty( $args[1] ) || ! is_readable( $args[1] ) ) {
@@ -350,6 +383,10 @@ final class AITP_CLI {
 	 * [--languages=<languages>]
 	 * : For "start" and "list": languages, comma separated (default all).
 	 *
+	 * [--sample]
+	 * : For "start": only a sample of one language (--languages): the home page and two
+	 * pages of each kind, at most 24, leaving out pages read in the last 7 days.
+	 *
 	 * [--minutes=<minutes>]
 	 * : For "run": how long to work (default 10).
 	 *
@@ -365,6 +402,7 @@ final class AITP_CLI {
 	 * ## EXAMPLES
 	 *
 	 *     wp aitp map start --urls=https://example.com/,https://example.com/shop/
+	 *     wp aitp map start --sample --languages=fr_FR
 	 *     wp aitp map run --minutes=15
 	 *     wp aitp map list
 	 *     wp aitp map export --pages=1,2,3 --file=candidates.json
@@ -377,12 +415,18 @@ final class AITP_CLI {
 		$langs  = isset( $assoc['languages'] ) ? array_filter( explode( ',', (string) $assoc['languages'] ) ) : array();
 		switch ( $action ) {
 			case 'start':
-				$urls = array();
-				if ( isset( $assoc['urls'] ) ) {
+				$urls  = array();
+				$items = null;
+				if ( ! empty( $assoc['sample'] ) ) {
+					if ( count( $langs ) !== 1 ) {
+						WP_CLI::error( '--sample needs one language: --languages=fr_FR' );
+					}
+					$items = AITP_Pagemap::sample_plan( reset( $langs ) );
+				} elseif ( isset( $assoc['urls'] ) ) {
 					$u    = (string) $assoc['urls'];
 					$urls = is_readable( $u ) ? preg_split( '~\R~', (string) file_get_contents( $u ) ) : explode( ',', $u ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 				}
-				$r = AITP_Pagemap::start( $urls, $langs );
+				$r = AITP_Pagemap::start( $urls, $langs, $items );
 				if ( $r['error'] !== '' ) {
 					WP_CLI::error( 'Cannot start: ' . $r['error'] . ( $r['bad'] ? ' (not usable: ' . implode( ', ', $r['bad'] ) . ')' : '' ) );
 				}

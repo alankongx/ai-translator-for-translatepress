@@ -102,3 +102,29 @@ test( 'C17: a backup still belongs to a plural row whose original now reads as t
 	eq( '', AITP_Audit_Logic::restore_block( array( 'original' => '%d item' ), $row ) );
 	eq( 'changed', AITP_Audit_Logic::restore_block( array( 'original' => 'Other' ), $row ) );
 } );
+
+test( 'C05: roll back only the rows that did not come out well', function () {
+	$backups = array(
+		10 => array( 'kind' => 'dictionary', 'lang' => 'fr_FR', 'row_id' => 1 ),
+		11 => array( 'kind' => 'dictionary', 'lang' => 'fr_FR', 'row_id' => 2 ),
+		12 => array( 'kind' => 'dictionary', 'lang' => 'fr_FR', 'row_id' => 3 ),
+		13 => array( 'kind' => 'dictionary', 'lang' => 'fr_FR', 'row_id' => 4 ),
+		14 => array( 'kind' => 'dictionary', 'lang' => 'fr_FR', 'row_id' => 5 ),
+		15 => array( 'kind' => 'dictionary', 'lang' => 'fr_FR', 'row_id' => 6 ),
+		16 => array( 'kind' => 'dictionary', 'lang' => 'fr_FR', 'row_id' => 7 ),
+		17 => array( 'kind' => 'gettext', 'lang' => 'fr_FR', 'row_id' => 1 ),
+		18 => array( 'kind' => 'dictionary', 'lang' => 'de_DE', 'row_id' => 9 ),
+	);
+	$cats = array(
+		'dictionary|fr_FR|1' => 'ok',
+		'dictionary|fr_FR|2' => 'left',
+		'dictionary|fr_FR|3' => 'refused',
+		'dictionary|fr_FR|4' => 'wrong',
+		'dictionary|fr_FR|5' => 'english',
+		'dictionary|fr_FR|6' => 'duplicate',
+		'dictionary|fr_FR|7' => 'manual',
+		'gettext|fr_FR|1'    => 'gone',
+	);
+	eq( array( 11, 12, 13, 14 ), array_keys( AITP_Audit_Logic::only_bad( $backups, $cats ) ), 'left, refused, wrong and English only; a row not checked is left alone' );
+	eq( array(), AITP_Audit_Logic::only_bad( $backups, array() ), 'nothing checked: nothing restored' );
+} );

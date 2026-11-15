@@ -241,11 +241,12 @@ final class AITP_Pagemap {
 	/**
 	 * Start mapping.
 	 *
-	 * @param string[] $urls  See plan().
-	 * @param string[] $langs See plan().
+	 * @param string[]   $urls  See plan().
+	 * @param string[]   $langs See plan().
+	 * @param array|null $items Pages to map instead of plan()'s (e.g. sample_plan()).
 	 * @return array{error:string,pages:int,bad:string[]}
 	 */
-	public static function start( array $urls, array $langs ) {
+	public static function start( array $urls, array $langs, $items = null ) {
 		$s = self::state();
 		if ( $s['status'] === 'running' ) {
 			return array( 'error' => 'running', 'pages' => 0, 'bad' => array() );
@@ -253,7 +254,7 @@ final class AITP_Pagemap {
 		if ( ! class_exists( 'TRP_Translate_Press' ) ) {
 			return array( 'error' => 'no_translatepress', 'pages' => 0, 'bad' => array() );
 		}
-		$p = self::plan( $urls, $langs );
+		$p = is_array( $items ) ? array( 'items' => array_values( $items ), 'bad' => array() ) : self::plan( $urls, $langs );
 		if ( ! $p['items'] ) {
 			return array( 'error' => 'no_pages', 'pages' => 0, 'bad' => $p['bad'] );
 		}

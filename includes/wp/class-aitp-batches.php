@@ -114,6 +114,27 @@ final class AITP_Batches {
 		return $out;
 	}
 
+	/**
+	 * Batches made since a time and not rolled back, newest first.
+	 *
+	 * @param int  $since     Unix time.
+	 * @param bool $auto_only Only batches of the auto repair.
+	 * @return int[]
+	 */
+	public static function since( $since, $auto_only = false ) {
+		global $wpdb;
+		$out = array();
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$rows = (array) $wpdb->get_results( $wpdb->prepare( 'SELECT id, info FROM ' . AITP_Schema::table( 'batches' ) . ' WHERE created_at >= %s' . ( $auto_only ? ' AND auto = 1' : '' ) . ' ORDER BY id DESC', gmdate( 'Y-m-d H:i:s', (int) $since ) ), ARRAY_A );
+		foreach ( $rows as $r ) {
+			$info = json_decode( (string) $r['info'], true );
+			if ( ! is_array( $info ) || empty( $info['rolled_back'] ) ) {
+				$out[] = (int) $r['id'];
+			}
+		}
+		return $out;
+	}
+
 	/** @param int $id Batch id. */
 	public static function delete( $id ) {
 		global $wpdb;

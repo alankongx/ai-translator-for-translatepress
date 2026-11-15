@@ -1533,25 +1533,71 @@ final class AITP_Audit {
 	/**
 	 * Restore a repair batch from its backup.
 	 *
-	 * @param int $batch Batch id.
+	 * With $opts['only_bad'] only the rows that did not come out well are restored: still
+	 * untranslated (refused by the engine or not reached) and new translations that fail the
+	 * checks. The other backup rows stay as they are, so the whole batch can still be rolled
+	 * back later.
+	 *
+	 * @param int   $batch Batch id.
+	 * @param array $opts  only_bad (bool), site_purge_later (bool: report 'wide' instead of
+	 *                     clearing the whole cache now).
 	 * @return array{restored:int,skipped:array<string,int>,total?:int} restored and skipped: this round; total: rows of the batch restored by all rounds.
 	 */
-	public static function rollback( $batch ) {
+	public static function rollback( $batch, array $opts = array() ) {
 		if ( ! self::write_lock( 'rollback' ) ) {
 			return array( 'restored' => 0, 'skipped' => array(), 'busy' => self::write_lock_holder() );
 		}
 		try {
-			return self::rollback_locked( (int) $batch );
+			return self::rollback_locked( (int) $batch, $opts );
 		} finally {
 			self::write_unlock();
 		}
 	}
 
 	/**
-	 * @param int $batch Batch id.
+	 * Roll back every repair batch made since a time, newest first (a person or the auto
+	 * repair), until the time budget is used; the rest is returned to do next.
+	 *
+	 * @param int  $since     Unix time.
+	 * @param bool $auto_only Only batches of the auto repair.
+	 * @param int  $seconds   Time budget.
+	 * @return array{batches:int[],left:int[],restored:int,skipped:array<string,int>,purge_site?:array}
+	 */
+	public static function rollback_since( $since, $auto_only = false, $seconds = 50 ) {
+		$out  = array( 'batches' => array(), 'left' => array(), 'restored' => 0, 'skipped' => array() );
+		$end  = time() + max( 5, (int) $seconds );
+		$wide = false;
+		foreach ( AITP_Batches::since( (int) $since, (bool) $auto_only ) as $id ) {
+			if ( time() >= $end ) {
+				$out['left'][] = $id;
+				continue;
+			}
+			$r = self::rollback( $id, array( 'site_purge_later' => true ) );
+			if ( ! empty( $r['busy'] ) ) {
+				$out['busy']   = $r['busy'];
+				$out['left'][] = $id;
+				continue;
+			}
+			$out['batches'][] = $id;
+			$out['restored'] += (int) $r['restored'];
+			foreach ( $r['skipped'] as $k => $n ) {
+				$out['skipped'][ $k ] = ( isset( $out['skipped'][ $k ] ) ? $out['skipped'][ $k ] : 0 ) + (int) $n;
+			}
+			$wide = $wide || ! empty( $r['wide'] );
+		}
+		if ( $wide ) {
+			$out['purge_site'] = AITP_Cache_Purge::site( 'rollback' ); // Once for all of them.
+		}
+		( new AITP_WP_Log() )->log( 'notice', 'rollback_since', array( 'since' => (int) $since, 'auto_only' => (bool) $auto_only ) + $out );
+		return $out;
+	}
+
+	/**
+	 * @param int   $batch Batch id.
+	 * @param array $opts  See rollback().
 	 * @return array
 	 */
-	private static function rollback_locked( $batch ) {
+	private static function rollback_locked( $batch, array $opts = array() ) {
 		global $wpdb;
 		$repair = AITP_Schema::table( 'repair' );
 		$audit  = AITP_Schema::table( 'audit' );
@@ -1563,12 +1609,18 @@ final class AITP_Audit {
 		// Rows already handled by an earlier (perhaps cut-off) rollback are skipped: running it again finishes it.
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT * FROM $repair WHERE batch = %d AND restored = ''", (int) $batch ), ARRAY_A );
-		$by   = array();
+		$only = ! empty( $opts['only_bad'] );
+		if ( $only ) {
+			// Which rows did not come out well (checked now, nothing recorded).
+			$rows = AITP_Audit_Logic::only_bad( $rows, self::batch_check( $batch, true, true, false )['rows'] );
+			$out['only_bad'] = true;
+		}
+		$by = array();
 		foreach ( $rows as $b ) {
 			$by[ $b['kind'] . '|' . $b['lang'] ][] = $b;
 		}
-		$all      = self::batches();
-		$mine     = isset( $all[ $batch ] ) ? $all[ $batch ] : array();
+		$mine     = AITP_Batches::get( (int) $batch );
+		$mine     = is_array( $mine ) ? $mine : array();
 		$after    = isset( $mine['journal'] ) ? (int) $mine['journal'] : -1; // -1: batch from before 0.6.5.
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$since    = (string) $wpdb->get_var( $wpdb->prepare( "SELECT MIN(created_at) FROM $repair WHERE batch = %d", (int) $batch ) );
@@ -1635,9 +1687,15 @@ final class AITP_Audit {
 		}
 		$info = self::batches(); // Counts read from the backup rows, this round included.
 		if ( isset( $info[ $batch ] ) ) {
-			$info[ $batch ]['rolled_back'] = time();
-			$out['total']                  = (int) $info[ $batch ]['restored'];
-			unset( $info[ $batch ]['todo'] );
+			if ( $only ) {
+				if ( $out['restored'] ) {
+					$info[ $batch ]['partial_rollback'] = time(); // The rest can still be rolled back.
+				}
+			} else {
+				$info[ $batch ]['rolled_back'] = time();
+				unset( $info[ $batch ]['todo'] );
+			}
+			$out['total'] = (int) $info[ $batch ]['restored'];
 			self::save_batch( $batch, $info[ $batch ] );
 		}
 		if ( $restored ) {
@@ -1653,7 +1711,9 @@ final class AITP_Audit {
 				$wide = $wide || $w;
 			}
 			$out['purge'] = AITP_Cache_Purge::urls( self::all_urls( $pages_of ) );
-			if ( $wide ) {
+			if ( $wide && ! empty( $opts['site_purge_later'] ) ) {
+				$out['wide'] = true; // The caller clears the whole cache once for several batches.
+			} elseif ( $wide ) {
 				// Some rows show on more pages than the list holds (menus, footers): the whole cache, once.
 				$out['purge_site'] = AITP_Cache_Purge::site( 'rollback' );
 			}
@@ -1936,9 +1996,10 @@ final class AITP_Audit {
 	 * @param bool $judge  Check new translations.
 	 * @param bool $detail Also return 'rows': "kind|lang|row id" => ok | wrong | english |
 	 *                     refused | left | duplicate | manual | gone.
+	 * @param bool $record With $judge: record rows still wrong as findings.
 	 * @return array{reset:int,ok:int,wrong:int,english:int,untranslated:int,refused:int,left:int,duplicate:int,manual:int,gone:int}
 	 */
-	public static function batch_check( $batch, $judge, $detail = false ) {
+	public static function batch_check( $batch, $judge, $detail = false, $record = true ) {
 		global $wpdb;
 		$out  = array( 'reset' => 0, 'ok' => 0, 'wrong' => 0, 'english' => 0, 'untranslated' => 0, 'refused' => 0, 'left' => 0, 'duplicate' => 0, 'manual' => 0, 'gone' => 0 );
 		$rows = array();
@@ -1986,8 +2047,10 @@ final class AITP_Audit {
 						$out['english']++;
 						$rows[ $key ] = 'english';
 					}
-					$f['codes'][] = 'auto_retried'; // Not picked by the auto repair again; a person decides.
-					self::record( $t, $r, $f, 'scan', $scan );
+					if ( $record ) {
+						$f['codes'][] = 'auto_retried'; // Not picked by the auto repair again; a person decides.
+						self::record( $t, $r, $f, 'scan', $scan );
+					}
 					continue;
 				}
 				$put( $key, 'ok' );
