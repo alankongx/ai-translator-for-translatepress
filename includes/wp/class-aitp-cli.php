@@ -1,6 +1,6 @@
 <?php
 /**
- * WP-CLI: wp aitp queue <sync|start|pause|status|run|retry|clear>
+ * WP-CLI: wp aitp queue <sync|start|pause|status|run|retry|clear|target|check|selftest>
  *         wp aitp audit <scan|status|list|repair|rollback|import|ai-check|dismiss>
  *         wp aitp autofix <status|settings|start|stop|run>
  *         wp aitp map <start|run|stop|status|list|export|clear>
@@ -24,7 +24,13 @@ final class AITP_CLI {
 	 * ## OPTIONS
 	 *
 	 * <action>
-	 * : sync | start | pause | status | run | retry | clear
+	 * : sync | start | pause | status | run | retry | clear | target | check | selftest
+	 *
+	 * [--urls=<urls>]
+	 * : For "target": default-language addresses, comma-separated. For "check": one address.
+	 *
+	 * [--lang=<lang>]
+	 * : For "target" / "check": one language (default: all published).
 	 *
 	 * [--minutes=<minutes>]
 	 * : For "run": how long to work (default 5).
@@ -79,15 +85,35 @@ final class AITP_CLI {
 				do {
 					$r        = AITP_Queue::run( max( 30, $end - time() ), $pages ? $pages - $visited : 0, true );
 					$visited += $r['visited'];
+					if ( $r['result'] === 'idle' && $r['wait'] > 0 && time() + $r['wait'] < $end ) {
+						sleep( (int) $r['wait'] ); // Pages come back after TranslatePress' 50 s lock.
+						continue;
+					}
 					if ( in_array( $r['result'], array( 'stopped', 'waiting', 'idle', 'busy', 'pages' ), true ) ) {
 						break;
 					}
 				} while ( time() < $end );
 				WP_CLI::log( wp_json_encode( array( 'result' => $r['result'], 'visited' => $visited, 'wait' => $r['wait'] ) ) );
 				break;
+			case 'target':
+				$urls = isset( $assoc['urls'] ) ? array_map( 'trim', explode( ',', (string) $assoc['urls'] ) ) : array();
+				$r    = AITP_Queue::start_target( $urls, isset( $assoc['lang'] ) ? array( (string) $assoc['lang'] ) : array() );
+				WP_CLI::success( sprintf( '%d page/language combinations queued; %d addresses not usable.', $r['queued'], count( $r['bad'] ) ) );
+				break;
+			case 'check':
+				$p = AITP_Pagemap::plan( array( isset( $assoc['urls'] ) ? (string) $assoc['urls'] : '' ), isset( $assoc['lang'] ) ? array( (string) $assoc['lang'] ) : array() );
+				$o = array();
+				foreach ( $p['items'] as $it ) {
+					$o[] = array( 'url' => $it['url'], 'lang' => $it['lang'] ) + AITP_Pagemap::check( $it, 20 );
+				}
+				WP_CLI::log( wp_json_encode( array( 'pages' => $o, 'bad' => $p['bad'] ), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) );
+				break;
+			case 'selftest':
+				WP_CLI::log( wp_json_encode( AITP_Queue::loopback_test() ) );
+				break;
 			case 'status':
 			default:
-				WP_CLI::log( wp_json_encode( array( 'state' => AITP_Queue::state(), 'progress' => AITP_Queue::progress() ), JSON_PRETTY_PRINT ) );
+				WP_CLI::log( wp_json_encode( array( 'state' => AITP_Queue::state(), 'progress' => AITP_Queue::progress(), 'sync' => AITP_Queue::sync_state(), 'estimate' => AITP_Queue::estimate() ), JSON_PRETTY_PRINT ) );
 		}
 	}
 
@@ -374,7 +400,7 @@ final class AITP_CLI {
 					}
 				} while ( in_array( $r['result'], array( 'running', 'busy' ), true ) && time() < $end );
 				$s = $r['state'];
-				WP_CLI::log( wp_json_encode( array( 'result' => $r['result'], 'status' => $s['status'], 'done' => $s['i'], 'pages' => count( $s['items'] ), 'ok' => $s['ok'], 'failed' => $s['failed'] ) ) );
+				WP_CLI::log( wp_json_encode( array( 'result' => $r['result'], 'status' => $s['status'], 'done' => $s['i'], 'pages' => (int) $s['total'], 'ok' => $s['ok'], 'failed' => $s['failed'] ) ) );
 				break;
 			case 'stop':
 				AITP_Pagemap::stop();
@@ -405,7 +431,7 @@ final class AITP_CLI {
 			case 'status':
 			default:
 				$s = AITP_Pagemap::state();
-				WP_CLI::log( wp_json_encode( array( 'status' => $s['status'], 'reason' => $s['reason'], 'done' => $s['i'], 'pages' => count( $s['items'] ), 'ok' => $s['ok'], 'failed' => $s['failed'] ) ) );
+				WP_CLI::log( wp_json_encode( array( 'status' => $s['status'], 'reason' => $s['reason'], 'done' => $s['i'], 'pages' => (int) $s['total'], 'ok' => $s['ok'], 'failed' => $s['failed'] ) ) );
 		}
 	}
 

@@ -92,6 +92,10 @@ const S = {
 			{ mode: 'e429', lang: 'pt_BR', expect: 'none' },
 			{ mode: 'e401', lang: 'es_MX', expect: 'none' },
 		];
+		// These cases check how faults are handled and expect a page done in one view. Since
+		// 0.7.0 a visitor waits at most 10 s by default (the rest follows on the next view, see
+		// unit tests D11/A22), so they run with the earlier 25 s.
+		setOpt( { time_budget: 25 } );
 		for ( const c of cases ) {
 			await reset();
 			const page = c.page || 'okay-home';
@@ -130,6 +134,7 @@ const S = {
 			record( `fault ${ c.mode } (${ c.lang }, ${ page })`, data, checks );
 		}
 		await mock( { mode: 'ok' } );
+		setOpt( { time_budget: 10 } );
 	},
 
 	async timeout() {
@@ -676,7 +681,7 @@ const S = {
 		const FD = 'Another new footer line that appears during the journal test';
 
 		await reset();
-		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings","aitp_autofix_state","aitp_autofix_settings","aitp_autofix_lock","aitp_map_state","aitp_map_lock","aitp_journal_state") as $o) delete_option($o); echo 1;' );
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings","aitp_autofix_state","aitp_autofix_settings","aitp_autofix_lock","aitp_map_state","aitp_map_lock","aitp_journal_state") as $o) delete_option($o); echo 1;' );
 		opt( 'aitp_e2e_footer', [ [ FA, '' ], [ FB, 'okay-home' ] ] );
 		wp( 'eval', `update_option('aitp_queue_settings', array_merge(AITP_Queue::defaults(), array('languages' => array('${ L }'))), false); echo 1;` );
 		q( 'sync' );
@@ -836,7 +841,7 @@ const S = {
 		const SA = 'Flexible kids glasses, on a page with an Arabic address';
 
 		await reset();
-		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_map_state","aitp_map_lock","aitp_journal_state") as $o) delete_option($o); echo 1;' );
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_map_state","aitp_map_lock","aitp_journal_state") as $o) delete_option($o); echo 1;' );
 		opt( 'aitp_e2e_footer', [] );
 		opt( 'aitp_e2e_tamper', '' );
 		opt( 'aitp_e2e_visit_log', 1 );
@@ -967,7 +972,7 @@ const S = {
 		const FB = 'Only on the home page: ask for a free sample today';
 
 		await reset();
-		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_autofix_state","aitp_autofix_lock","aitp_map_state","aitp_map_lock","aitp_journal_state","aitp_purge_list") as $o) delete_option($o); echo 1;' );
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_autofix_state","aitp_autofix_lock","aitp_map_state","aitp_map_lock","aitp_journal_state","aitp_purge_list") as $o) delete_option($o); echo 1;' );
 		opt( 'aitp_e2e_footer', [ [ FA, '' ], [ FB, 'okay-home' ] ] );
 		for ( const o of [ 'aitp_e2e_tamper', 'aitp_e2e_kill_after', 'aitp_e2e_purge_fault' ] ) opt( o, 0 );
 		opt( 'aitp_e2e_fake_litespeed', 1 );
@@ -1166,7 +1171,7 @@ const S = {
 		const cleanup = () => ev( 'global $wpdb; $o = $wpdb->prefix . "trp_original_strings"; $ids = $wpdb->get_col("SELECT id FROM $o WHERE original LIKE \'AITP bulk row %\'"); if ($ids) { $wpdb->query("DELETE FROM {$wpdb->prefix}trp_original_meta WHERE original_id IN (" . implode(",", array_map("intval", $ids)) . ")"); $wpdb->query("DELETE FROM $o WHERE id IN (" . implode(",", array_map("intval", $ids)) . ")"); $wpdb->query("DELETE FROM {$wpdb->prefix}trp_dictionary_en_us_fr_fr WHERE original LIKE \'AITP bulk row %\'"); } echo wp_json_encode(array("removed" => count($ids)));' );
 
 		await reset();
-		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_audit_state","aitp_repair_batches","aitp_autofix_state","aitp_map_state","aitp_journal_state","aitp_purge_list") as $o) delete_option($o); update_option("aitp_e2e_kill_after", 0); echo 1;' );
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_audit_state","aitp_repair_batches","aitp_autofix_state","aitp_map_state","aitp_journal_state","aitp_purge_list") as $o) delete_option($o); update_option("aitp_e2e_kill_after", 0); echo 1;' );
 		cleanup();
 		const made = ev( `global $wpdb; $art = get_page_by_path('okay-article')->ID; $ids = array();
 			for ($i = 1; $i <= (int) $in; $i++) {
@@ -1232,7 +1237,7 @@ const S = {
 		};
 
 		await reset();
-		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_audit_state","aitp_repair_batches","aitp_autofix_state","aitp_map_state","aitp_journal_state","aitp_purge_list","aitp_write_lock") as $o) delete_option($o); echo 1;' );
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_audit_state","aitp_repair_batches","aitp_autofix_state","aitp_map_state","aitp_journal_state","aitp_purge_list","aitp_write_lock") as $o) delete_option($o); echo 1;' );
 		auto( true );
 		await visit( L, 'okay-collection' );
 		const ids = ev( `global $wpdb; echo wp_json_encode(array('ids' => array_map('intval', $wpdb->get_col("SELECT d.id FROM {$wpdb->prefix}trp_dictionary_en_us_fr_fr d JOIN {$wpdb->prefix}trp_original_meta m ON m.original_id = d.original_id AND m.meta_key = 'post_parent_id' JOIN {$wpdb->posts} p ON p.ID = m.meta_value AND p.post_name = 'okay-collection' WHERE d.status = 1 AND d.original LIKE '% %' ORDER BY d.id LIMIT 2"))));` ).ids;
@@ -1308,12 +1313,12 @@ const S = {
 		wp( 'aitp', 'journal', 'stop' );
 
 		// L1: one repair, rollback or undo at a time; a lock left by a dead request is taken over.
-		ev( 'update_option("aitp_write_lock", array("until" => time() + 600, "who" => "repair", "since" => time()), false); echo 1;' );
+		ev( 'update_option("aitp_write_lock", (time() + 600) . "|e2e|repair|" . time(), false); echo 1;' );
 		const busyRepair = a( 'repair', '--source=import', '--yes' );
 		const busyRollback = a( 'rollback', r1.batch );
 		const busyUndo = j( 'undo' );
 		const heldDict = h( 'dict', L, base.max );
-		ev( 'update_option("aitp_write_lock", array("until" => time() - 1, "who" => "repair", "since" => time() - 901), false); echo 1;' );
+		ev( 'update_option("aitp_write_lock", (time() - 1) . "|e2e|repair|" . (time() - 901), false); echo 1;' );
 		const takeover = j( 'undo' );
 		const lockLeft = ev( 'wp_cache_delete("aitp_write_lock", "options"); echo wp_json_encode(array("v" => get_option("aitp_write_lock", null)));' ).v;
 		record( 'journal065: write lock (L1)', { busyRepair, busyRollback, busyUndo: busyUndo.busy, takeover: { busy: takeover.busy, blocked: takeover.blocked }, lockLeft }, {

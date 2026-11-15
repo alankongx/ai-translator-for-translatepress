@@ -16,13 +16,13 @@
 - `dev/`：`build-zip.sh`、`mock-llm/server.js`、`e2e/`（docker 本机 WP+TP 3.3.9）、`tools/`（okay-scan、okay-audit-scan、okay-bad-scan、build-okay-fixtures.py、okay-build-phase4.py）。
 - `docs/`：架构与维护.md、开发计划.md、测试报告-第一/二/三期、CODEMAP.md（本文件）。
 
-## 2. 每个文件一行（`includes/` 下 37 个 PHP 文件全覆盖）
+## 2. 每个文件一行（`includes/` 下 39 个 PHP 文件全覆盖）
 
 ### core（16）
 
 | 文件 | 行数 | 职责 | 关键入口 |
 |---|---|---|---|
-| core/class-aitp-translator.php | 931 | 翻译总流程：退避/缓存→拆段→分批→请求→解析→逐条校验→整批判断→接受或重试→拼回→写失败/待复核/缓存/日志 | `translate()`、`accept_or_retry()`、`suspect_response()`、`echo_counts()`、`payload_extra()` |
+| core/class-aitp-translator.php | 1342 | 翻译总流程：退避/缓存→拆段→分批→请求→解析→逐条校验→整批判断→接受或重试→拼回→写失败/待复核/缓存/日志 | `translate()`、`accept_or_retry()`、`suspect_response()`、`echo_counts()`、`payload_extra()` |
 | core/class-aitp-validator.php | 628 | 单条校验（硬/软） | `check()`、`hint()`；私有 `untranslated()`、`already_in_target()`、`sentence_like()`、`brand_case_hits()` |
 | core/class-aitp-text.php | 373 | 文本工具 | `placeholder_patterns()`、`is_structured_data()`、`numbers()`、`script_counts()`、`sentence_count()`、`term_regex()`、`latin_words()` |
 | core/class-aitp-markup.php | 218 | HTML 标签切分与比对 | `tokenize()`、`signatures()`、`is_balanced()`、`text_only()`、`no_translate_texts()` |
@@ -35,7 +35,7 @@
 | core/class-aitp-claims.php | 198 | 「宣传说法」词表 | `lexicon()`、`concepts_in()` |
 | core/class-aitp-pair-checker.php | 205 | 体检的 AI 复核 | `check()`、`system_prompt()` |
 | core/class-aitp-contracts.php | 165 | 存储/传输接口和内存实现，供单测与 WP 实现 | `AITP_Transport`、`AITP_Quota`、`AITP_Caps_Store` 等 |
-| core/class-aitp-queue-logic.php | 227 | 队列纯规则：访问后状态、签名与校验、路径规范化、预算 | `decide()`、`partial_delay()`、`canonical_path()`、`sign()`、`check()`、`budget_block()` |
+| core/class-aitp-queue-logic.php | 257 | 队列纯规则：访问后状态（`REVISIT = 55` 秒回访、`locked` 不算完成、`LONG_WAIT`）、签名与校验、路径规范化、预算 | `decide()`、`partial_delay()`、`canonical_path()`、`sign()`、`check()`、`budget_block()` |
 | core/class-aitp-audit-logic.php | 549 | 体检纯规则 | `check_row()`、`structured_problem()`、`shared_suspects()`、`similar()`、`neighbor_ranges()`、`shift_like()`、`visit_pages()`、`page_key(s)()`、`native_identical()`、`reset_block()`、`is_accepted()`、`cover_pages()`、`restore_block()`、`verdict()`、`parse_import()` |
 | core/class-aitp-autofix-logic.php | 146 | 自动修复纯规则（`MAX_PASSES = 3`） | `clean_settings()`、`default_cap()`、`after_pass()`、`judge()`、`visit_stop()`、`is_english()` |
 
@@ -47,27 +47,29 @@
 | providers/class-aitp-provider-gemini.php | 251 | Gemini 原生接口 | `build_request()`、`parse_response()`、`downgrade()`、`thinking_config()`、`thinking_reserve()` |
 | providers/class-aitp-provider-openai.php | 268 | OpenAI 兼容接口（预设：OpenAI、DeepSeek、智谱、OpenRouter、Groq、自定义） | `presets()`、`default_caps()`、`build_request()`、`parse_response()`、`downgrade()`、`thinking_reserve()` |
 
-### wp（18）
+### wp（20）
 
 | 文件 | 行数 | 职责 | 关键入口 |
 |---|---|---|---|
-| wp/class-aitp-plugin.php | 251 | 接线：注册 TP 引擎（TP ≥ 3.3.5）、建翻译器、关掉 TP 引号标点改写、记下已注册短代码、每日清理、保留其它引擎设置、注册 WP-CLI | `tp_supported()`、`disable_tp_rewrite()`、`remember_shortcodes()`、`boot()`、`add_engine()`、`add_engine_class()`、`translator()`、`time_budget()`、`activate()`、`deactivate()`、`keep_other_engine_settings()`、`daily_cleanup()` |
+| wp/class-aitp-plugin.php | 285 | 接线：注册 TP 引擎（TP ≥ 3.3.5）、建翻译器、关掉 TP 引号标点改写、记下已注册短代码、每日清理、保留其它引擎设置、注册 WP-CLI | `tp_supported()`、`disable_tp_rewrite()`、`remember_shortcodes()`、`boot()`、`add_engine()`、`add_engine_class()`、`translator()`、`time_budget()`、`activate()`、`deactivate()`、`keep_other_engine_settings()`、`daily_cleanup()`、`heal_cron()` |
 | wp/class-aitp-tp-engine.php | 125 | TP 引擎类（继承 `TRP_Machine_Translator`） | `translate_array()`、`get_chunk_size()`、`get_supported_languages()`、`get_api_key()`、`check_api_key_validity()`、`test_request()`（返回空数组） |
 | wp/class-aitp-settings.php | 407 | 设置默认值/读取/清洗、Key 加解密、地址校验、构建 provider 与 rules | `get()`、`sanitize()`、`provider()`、`rules()`、`is_configured()`、`api_key()` |
 | wp/class-aitp-wp-stores.php | 251 | WP 存储实现：`AITP_WP_Cache`、`AITP_WP_Failures`、`AITP_WP_Review`、`AITP_WP_Log`、`AITP_WP_Option_State`、`AITP_WP_Caps`（选项 `aitp_caps`，设置变更和测试连接时清空）、`AITP_WP_Usage`（选项 `aitp_usage`，按天的 Token 用量）、`AITP_TP_Quota`（TP 日计数器） | 由 `AITP_Plugin::translator()` 注入 |
 | wp/class-aitp-wp-transport.php | 234 | HTTP 发送，按并发数分波 | `send()`、`single()`（`wp_remote_post`）、`multi()`（`Requests::request_multiple`） |
-| wp/class-aitp-schema.php | 245 | 11 张表的 dbDelta 与卸载（`VERSION='6'`） | `maybe_upgrade()`（plugins_loaded@5）、`install()`、`uninstall()`、`table()` |
-| wp/class-aitp-queue.php | 980 | 补翻队列：页面列表、worker、签名访问发送与接收、映射回报 | `sync()`、`run()`、`tick()`、`process()`、`visit()`、`maybe_warm()`（plugins_loaded@1）、`map_strings()`、`requeue*()`、`requeue_urls()`、`next_item()`、`collect()`、`save_report()` |
-| wp/class-aitp-pagemap.php | 535 | 页面映射：只读签名访问，记录「页面↔词典行」 | `plan()`、`start()`、`step()`、`tick()`、`map_one()`、`pages()`、`export()`、`pages_of_rows()` |
-| wp/class-aitp-cache-purge.php | 305 | 按网址清页面缓存（LiteSpeed/W3TC/WP Super Cache/WP Rocket），长列表走 cron | `urls()`、`tick()`、`purge_now()`、`litespeed_all()` |
+| wp/class-aitp-schema.php | 304 | 12 张表的 dbDelta 与卸载（`VERSION='7'`） | `maybe_upgrade()`（plugins_loaded@5）、`upgrade_to_7()`、`install()`、`uninstall()`、`table()`、`map_key()` |
+| wp/class-aitp-lock.php | 112 | 跨请求互斥锁：`INSERT IGNORE` 抢锁、过期用条件 UPDATE 接管、只删自己的值 | `acquire()`、`release()`、`holds()`、`holder()`、`parse()` |
+| wp/class-aitp-tasks.php | 93 | 后台任务的待办列表存表（页面映射计划 `map`、清缓存列表 `purge`） | `add()`、`first()`、`remove()`、`count()`、`clear()` |
+| wp/class-aitp-queue.php | 1405 | 补翻队列：分步页面列表、指定页面优先、内部访问自检、worker、签名访问发送与接收、映射回报 | `sync()`、`sync_start()`/`sync_step()`/`sync_tick()`、`start_target()`/`targets()`/`clear_targets()`、`loopback_test()`、`estimate()`、`published_languages()`、`run()`、`tick()`、`process()`、`visit()`、`maybe_warm()`（plugins_loaded@1）、`map_strings()`、`requeue*()`、`requeue_urls()`、`next_item()`、`collect()`、`save_report()` |
+| wp/class-aitp-pagemap.php | 578 | 页面映射：只读签名访问，记录「页面↔词典行」；查单页还剩哪些没译 | `check()`、`plan()`、`start()`、`step()`、`tick()`、`map_one()`、`pages()`、`export()`、`pages_of_rows()` |
+| wp/class-aitp-cache-purge.php | 404 | 按网址清页面缓存（LiteSpeed/W3TC/WP Super Cache/WP Rocket/SiteGround/Cache Enabler/Nginx Helper/Varnish/WP Fastest Cache/WP-Optimize/Hummingbird），原写法和规范写法都清，长列表存 `aitp_tasks` 走 cron | `urls()`、`tick()`、`purge_now()`、`detected()`、`encoded()`、`litespeed_all()` |
 | wp/class-aitp-audit.php | 1835 | 体检、发现、候选导入、已验收清单、修复、回滚、写入锁、AI 复核 | `start_scan()`/`step()`/`tick()`、`find()`/`ids_for()`/`counts()`、`import()`、`protect()`/`unprotect()`、`repair()`、`rollback()`、`batches()`、`backup_export()`、`autofix_pick()`、`batch_urls()`、`batch_check()`、`ai_check()`、`write_lock()` |
 | wp/class-aitp-autofix.php | 574 | 分批自动修复状态机 | `settings()`、`save_settings()`、`start()`、`stop()`、`tick()`、`step()`、`blocker()` |
 | wp/class-aitp-journal.php | 621 | 测试记录：TP 保存时记「之前」状态，撤销，新增行 | `boot()`、`start()`/`stop()`、`translated()`、`on_save()`、`on_gettext_queue()`、`finish_gettext()`、`rolled_back()`、`undo_blocker()`、`undo()`、`summary()`、`new_rows()` |
 | wp/class-aitp-admin.php | 904 | 后台主类：菜单、页签分发、设置页、状态与日志、待复核、连接测试、全后台提示、TP 页状态卡 | `render()`、`render_settings()`、`render_status()`、`render_review()`、`render_test_result()`、`notices()`、`tp_status_card()`、`reason_text()`、`code_label()`、`handle_test()` 等 |
-| wp/class-aitp-admin-queue.php | 300 | 「补翻队列」页签 | `render()`、`handle()`、`ajax_step()` |
+| wp/class-aitp-admin-queue.php | 526 | 「补翻队列」页签：概况（列表进度、预计、页面缓存、内部访问）、指定页面（查还剩哪些没译、优先补翻） | `render()`、`render_pages_box()`、`handle()`、`sync_message()`、`loopback_hint()`、`ajax_step()` |
 | wp/class-aitp-admin-audit.php | 887 | 「体检与修复」页签 | `render()`（含 `render_autofix/list/purge/batches/import/settings`）、`handle()`、`download_backup()`、`ajax_step()`、`ajax_autofix_step()`、`once_field()`、`form_used()`、`action_record()` |
 | wp/class-aitp-admin-pages.php | 384 | 「页面映射与测试记录」页签 | `render()`、`render_map()`、`render_journal()`、`handle()`、`download()`、`ajax_step()` |
-| wp/class-aitp-cli.php | 479 | `wp aitp` 五组命令 | `queue()`、`audit()`、`autofix()`、`map()`、`journal()` |
+| wp/class-aitp-cli.php | 505 | `wp aitp` 五组命令（队列加 `target`、`check`、`selftest`） | `queue()`、`audit()`、`autofix()`、`map()`、`journal()` |
 | wp/class-aitp-updater.php | 142 | GitHub releases 自动更新 | `check()`、`info()`、`release()` |
 
 
@@ -81,7 +83,9 @@
 
 **一次页面翻译**（A、E）：TP `process_strings`（`class-translation-render.php` 2051-2284）或 gettext 队列（`class-gettext-manager.php` 571-664，shutdown 优先级 100）→ `TRP_Machine_Translator::translate()`（去重、`should_translate_string` 跳过、加锁认领、占位）→ `AITP_TP_Engine::translate_array()`（`time_budget(get_machine_translation_lock_timeout())`，tp-engine.php:40）→ `AITP_Plugin::translator()->translate()`：退避/缓存 → `Segmenter::split` → 每轮 `Batcher::build` → `Protocol::user_payload` + `Provider::build_request` → `Transport::send` → `Provider::parse_response`（不支持则 `downgrade` + `Caps_Store::set`）→ `Protocol::parse` → 每条 `Validator::check` → 整批判断 → `accept_or_retry` → 拼回 → `Failure_Store` / `Review_Store` / `Cache_Store` / `Log` → 返回键值译文（没返回的键 TP 记状态 0）→ 触发 `aitp_translated_batch` → TP 后处理（`restore_translation_quotes`、`restore_punctuation_patterns`、`trp_sanitize_string`）→ `trp_allow_string_saving`（journal `on_save`）→ 写库 → `release_locks`（续期 50 秒）。
 
-**队列一次推进**（B）：cron `aitp_queue_tick` 或 AJAX `aitp_queue_step` 或 CLI → `AITP_Queue::run()` → `next_item()` → `process()` → `visit()`（`wp_remote_get` 签名访问，URL 带 `aitp_nc`）→ 页面端 `maybe_warm()`（plugins_loaded@1）验签 → TP 渲染 → `aitp_translated_batch` → `collect()` → shutdown `save_report()`（transient）→ 发送端读回报 → `Queue_Logic::decide()` → 更新行 → `Cache_Purge::urls()`。
+**页面列表**（B，0.7.0）：保存设置 / 「重新生成」→ `AITP_Queue::sync_start()` → cron `aitp_queue_sync_tick`（锁 `aitp_queue_sync_lock`）→ `sync_step()` 按类型分段（文章按 ID 每次 200 个）→ `insert_pages()` → 最后一步删掉本轮没见到的 `origin='site'` 行和已完成的 `repair` 行。
+
+**队列一次推进**（B）：cron `aitp_queue_tick` 或 AJAX `aitp_queue_step` 或 CLI → `AITP_Queue::run()` → `next_item(scope)`（有指定页面时只取 `origin='target'`） → `process()` → `visit()`（`wp_remote_get` 签名访问，URL 带 `aitp_nc`）→ 页面端 `maybe_warm()`（plugins_loaded@1）验签 → TP 渲染 → `aitp_translated_batch` → `collect()` → shutdown `save_report()`（transient）→ 发送端读回报（含 TP 锁住跳过的条数 `locked`）→ `Queue_Logic::decide()`（`revisit()` = TP 锁时间 + 5 秒）→ 指定页面判完成前 `Pagemap::check()` 再核一遍 → 更新行 → `Cache_Purge::urls()`。
 
 **页面映射一次访问**（B）：后台或 CLI → `Pagemap::start(plan)` → cron `aitp_map_tick` 或 AJAX `aitp_map_step` → `map_one()` → `Queue::visit(map=true)` → `Queue::map_strings()`（挂 `trp_translateable_information`，只读）→ 写 `aitp_pagemap` / `aitp_pagestr`；修复时 `pages_of_rows()` → `Queue::requeue_urls()`。
 
@@ -95,7 +99,7 @@
 
 **测试记录**（C）：引擎 → `Journal::translated($lang)`；TP 保存 → `on_save`（`trp_allow_string_saving`）→ `record` → `insert`；gettext 走 `on_gettext_queue` / `finish_gettext`；撤销 `undo` → `undo_blocker` → `Audit::write_lock` → `mark_legacy_rollbacks` → `undo_one`（UPDATE TP）。
 
-**清缓存**（B）：`Queue::process` 或修复/回滚 → `Cache_Purge::urls()` → ≤5 个立即 `purge_now`，否则存列表（选项 `aitp_purge_list`）后 cron `aitp_purge_tick` 分批；LiteSpeed 有头部大小保护（每请求 ≤30 标签，超过 200 个整站清一次）；其它缓存只触发 `aitp_purge_urls` 动作。后台页打开时 `Cache_Purge::tick(3)`。
+**清缓存**（B）：`Queue::process` 或修复/回滚 → `Cache_Purge::urls()` → ≤5 个立即 `purge_now`，否则存列表（表 `aitp_tasks`，job `purge`）后 cron `aitp_purge_tick` 分批；LiteSpeed 有头部大小保护（每请求 ≤30 标签，超过 200 个整站清一次）；没有能按网址清的缓存时只触发 `aitp_purge_urls` 动作、不存列表。后台页打开时 `Cache_Purge::tick(3)`。
 
 **设置保存**（B、D）：设置表单 `options.php`（组 `aitp`）→ `AITP_Settings::sanitize()`（数值上下限、https 地址校验、Key 加密、保护格式/术语表校验）→ 保存时清熔断器（D16 注：不清 `aitp_caps`）；TP 自己保存自动翻译设置时 → `trp_machine_translation_sanitize_settings` → `AITP_Plugin::keep_other_engine_settings()`（PHP_INT_MAX）保住其它引擎的键；连接测试走 `admin_post_aitp_test` → `handle_test()`，结果存 transient `aitp_test_<uid>`。
 
@@ -130,7 +134,7 @@
 
 ## 5. 数据表与选项键清单
 
-**表**（`$wpdb->prefix . 'aitp_' . 名` ；`AITP_Schema::VERSION = '6'`，对应选项 `aitp_db_version`）
+**表**（`$wpdb->prefix . 'aitp_' . 名` ；`AITP_Schema::VERSION = '7'`，对应选项 `aitp_db_version`）
 
 | 表 | 用途与关键列 |
 |---|---|
@@ -138,23 +142,24 @@
 | `failures` | 逐条失败：`fkey`(PK)、`source_locale`、`target_locale`、`reason`、`excerpt`、`attempts`、`next_retry_at` |
 | `review` | 待复核：`original_hash`+`target_locale`+`translation_hash` 唯一、`flags`、`saved`、`status` |
 | `log` | 请求日志：`level`、`event`、`target_locale`、`data` |
-| `queue` | 补翻队列：`ukey`、`source_url`、`url`、`lang`、`object_type/id`、`priority`、`status`、`next_at`、`visits`、`attempts`、`passes`、`note`、`translated`、`chars`、`seen` |
+| `queue` | 补翻队列：`ukey`、`source_url`、`url`、`lang`、`object_type/id`、`priority`、`status`、`next_at`、`visits`、`attempts`、`passes`、`note`、`translated`、`chars`、`seen`、`origin`（site / repair / target，0.7.0）、`batch`（0.7.0） |
 | `audit` | 体检发现：`kind`+`lang`+`row_id` 唯一、`severity`、`codes`、`details`、`source`、`scan`、`ai`、`state`、`batch` |
 | `repair` | 修复备份：`batch`、`kind`、`lang`、`row_id`、`finding_id`、`original`、`translated`、`status`、`original_id`、`exact`、`restored` |
 | `protect` | 已验收清单：`kind`+`lang`+`row_id`+`translated_hash` 唯一、`label` |
 | `pagemap` | 页面映射：`ukey`、`url`、`source_url`、`lang`、`object_type/id`、`http`、`strings`、`found`、`unknown`、`note`、`mapped_at` |
 | `pagestr` | 页面↔词典行：`page_id`+`row_id`（PK）、`lang` |
+| `tasks` | 后台任务待办（0.7.0）：`job`+`ukey` 唯一、`data`（页面映射计划是 JSON，清缓存是网址） |
 | `journal` | 测试记录：`session`、`kind`、`lang`、`row_id`、`original`、`prev_translated`、`prev_status` 等 |
 
-**选项**（`AITP_Schema::uninstall()` 清单）：`aitp_settings`、`aitp_db_version`、`aitp_breaker`、`aitp_caps`、`aitp_notice`、`aitp_queue_settings`、`aitp_queue_state`、`aitp_queue_lock`、`aitp_audit_state`、`aitp_audit_lock`、`aitp_audit_settings`、`aitp_repair_batches`、`aitp_autofix_settings`、`aitp_autofix_state`、`aitp_autofix_lock`、`aitp_map_state`、`aitp_map_lock`、`aitp_journal_state`、`aitp_purge_list`、`aitp_audit_actions`、`aitp_write_lock`。
+**选项**（`AITP_Schema::uninstall()` 清单）：`aitp_settings`、`aitp_db_version`、`aitp_breaker`、`aitp_caps`、`aitp_notice`、`aitp_queue_settings`、`aitp_queue_state`、`aitp_queue_lock`、`aitp_audit_state`、`aitp_audit_lock`、`aitp_audit_settings`、`aitp_repair_batches`、`aitp_autofix_settings`、`aitp_autofix_state`、`aitp_autofix_lock`、`aitp_map_state`、`aitp_map_lock`、`aitp_journal_state`、`aitp_purge_list`（0.7.0 起只剩 `dropped`、`ls_done`）、`aitp_audit_actions`、`aitp_write_lock`、`aitp_queue_sync`（0.7.0）、`aitp_queue_sync_lock`（0.7.0）。锁选项的值是 `到期|令牌|谁|开始时间`（0.7.0，`AITP_Lock`）。
 
 **transient**：`aitp_flash_<uid>`、`aitp_test_<uid>`、`aitp_used_<nonce>`（一次性表单）、`aitp_warm_*`（队列签名请求/回报，B 路另称 `save_report` 的 transient）、签名 nonce 防重放 transient；site transient `aitp_github_release`。卸载时按 `_transient_aitp_%` 前缀整体清。
 
-**cron**：`aitp_daily`（本插件每日清理）、`aitp_queue_tick`、`aitp_audit_tick`、`aitp_autofix_tick`、`aitp_map_tick`、`aitp_purge_tick`（后四者用 `AITP_Queue::SCHEDULE`）。
+**cron**：`aitp_daily`（本插件每日清理）、`aitp_queue_tick`、`aitp_audit_tick`、`aitp_autofix_tick`、`aitp_map_tick`、`aitp_purge_tick`、`aitp_queue_sync_tick`（0.7.0）（后几个用 `AITP_Queue::SCHEDULE`）。
 
-**插件自有钩子**：动作 `aitp_translated_batch`（tp-engine.php:53）、`aitp_purge_urls`（无识别缓存时）；过滤器 `aitp_queue_request`（queue.php:753）、`aitp_github_updates`。
+**插件自有钩子**：动作 `aitp_translated_batch`（tp-engine.php:53）、`aitp_engine_unavailable`（0.7.0，引擎没配好时）、`aitp_purge_urls`（无识别缓存时）；过滤器 `aitp_queue_request`（queue.php:753）、`aitp_github_updates`。
 
-**常量**：`AITP_FILE`、`AITP_ALLOW_INSECURE_ENDPOINT`（允许非 https 接口地址）。B05 建议的 `AITP_LOOPBACK_AUTH` 是建议，代码里没有。
+**常量**：`AITP_FILE`、`AITP_ALLOW_INSECURE_ENDPOINT`（允许非 https 接口地址）、`AITP_LOOPBACK_AUTH`（0.7.0，`用户:密码`，站点有 HTTP 基本认证时内部访问带上）。
 
 **后台动作**（D）：admin-post `aitp_test`、`aitp_reset_breaker`、`aitp_clear_failures`、`aitp_review`、`aitp_export_review`、`aitp_queue`、`aitp_audit`、`aitp_audit_backup`、`aitp_pages`、`aitp_pages_download`；AJAX `aitp_queue_step`、`aitp_audit_step`、`aitp_autofix_step`、`aitp_map_step`。每个都先查 `manage_options` 再查各自的 nonce。
 
@@ -177,3 +182,19 @@
 - **wp**：`AITP_Plugin::tp_supported()`（`MIN_TP`）、`disable_tp_rewrite()`、`remember_shortcodes()`；`AITP_WP_Usage`（选项 `aitp_usage`）；`AITP_WP_Caps::clear()`（保存设置、测试连接时）；引擎里 `method_exists` 兜底和语言别名；状态页加「暂停中的语言」和 7 天 Token 用量；12 个新原因标签。
 - **新文件**：`tests/unit/test-v070-interfaces.php`、`dev/tools/i18n.php`。
 - **新选项键**：`aitp_usage`（卸载时删除）。
+
+### 第 2 批 队列与长文（2026-11-14）
+
+- **「真的翻完了」**（B03/E02）：`Queue_Logic::decide()` 多一个参数 `$revisit`；TP 因为别的请求锁着字符串而没发引擎（`locked` > 0）不再算完成，55 秒（TP 锁 50 秒 + 5）后再来；有进展也是 55 秒后回访，不再马上访问。`SYSTEMIC` 加 `not_configured`、`tp_limit`，去掉 `refused`（一种语言被拒不停整个队列）。`AITP_TP_Engine` 没配好时触发 `aitp_engine_unavailable`。
+- **指定页面**（B04）：后台「指定页面」框和 `wp aitp queue target|check`。`start_target()` 把行标 `origin='target'`、优先级最高，队列切到只跑这些（`scope`），全部完成后回到原来的状态；判完成前用 `Pagemap::check()` 只读再核一遍，还有没译的退回待处理，最多 5 轮（`TARGET_PASSES`）后标部分完成（note `left`）。「查还剩哪些没译」逐条列出原文和失败原因。
+- **长文按段记进度**（A16）：拆段后每段译好先写缓存（键含前后段），下次只发没译完的段；整篇拼好或彻底失败后删掉段缓存。缓存里的段也照常校验。
+- **访客等待**（D11/A22）：默认 `time_budget` 25 → 10 秒（队列内部访问用「每页秒数」）；剩余时间少时每批变小；被本次调用自己的截止时间截断的超时记 `deferred`，不计熔断、不拆批、不记单条失败。
+- **大站页面列表分步**（B06/B08）：`sync_start()` / `sync_step()` / cron `aitp_queue_sync_tick`，文章按 ID 每次 200；Woo 购物车/结账/我的账户不收；只用已发布的语言（`published_languages()`）；额外页面统一成本站写法，别的站点的地址列出来提示。
+- **更多缓存**（B07/C05、B09）：新增 SiteGround、Cache Enabler、Nginx Helper、Varnish HTTP Purge、WP Fastest Cache、WP-Optimize、Hummingbird 按网址清；Breeze、Cloudflare、Kinsta、WP Engine 只能整站清，只识别提示。原写法和 `%XX` 大写写法都清。
+- **锁**（D14/D21、D15）：新类 `AITP_Lock`，队列、页面映射、体检、自动修复、写入锁全部换用。页面映射计划和清缓存列表从大选项挪进新表 `aitp_tasks`（`AITP_Tasks`）。
+- **内部访问自检**（B05）：`loopback_test()`（开始前、「自检」按钮、`wp aitp queue selftest`），结果存 transient `aitp_loopback`；常量 `AITP_LOOPBACK_AUTH` 或收到的基本认证会带上；重定向记下目标地址并给出原因提示。
+- **其它**：`heal_cron()`（启用、每日、后台打开时补回丢失的定时任务）；概况页「预计还要多久」（`estimate()`）；CLI `run` 空闲时等待而不是退出。
+- **审查后补的**：LiteSpeed 每请求 30 个标签按两种写法合计算；保存设置会从头重建正在生成的页面列表；指定页面跑着时点「开始」= 做完接着跑整站，跑完不续时按暂停处理（清定时任务）；指定页面 5 轮后间隔递增；转发的基本认证只发给本站主机；`upgrade_to_7()` 把旧的序列化写入锁改成新格式；版本号在升级步骤之后写（`install()` 不再写，启用时 `install()` + `maybe_upgrade()`）；分类阶段用 term_id 游标；翻译器按并发数一波一波发，一波里有整个账号被拒（密钥、账单、限流、模型不存在，`ACCOUNT_REFUSED`）就不发后面的波；「指定页面」两个按钮在没填地址时报错（`plan()` 把空列表当整站）；宽表格在窄屏横向滚动。
+- **表结构 7**：`aitp_queue` 加 `origin`、`batch` 列和 `origin` 索引；新表 `aitp_tasks`。`upgrade_to_7()` 把旧选项里的待办搬进新表、`note='repair'` 的行标 `origin='repair'`、`time_budget` 25 改 10。只加不删，TP 的表不动。
+- **新文件**：`includes/wp/class-aitp-lock.php`、`includes/wp/class-aitp-tasks.php`、`tests/unit/test-v070-queue.php`。
+- **新选项键**：`aitp_queue_sync`、`aitp_queue_sync_lock`；transient `aitp_loopback`（卸载时都删除）。

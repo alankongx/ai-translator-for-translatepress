@@ -48,7 +48,7 @@ final class AITP_Pagemap {
 			array(
 				'status'  => 'idle', // idle | running | stopped | done.
 				'reason'  => '',
-				'items'   => array(),
+				'total'   => 0,
 				'i'       => 0,
 				'ok'      => 0,
 				'failed'  => 0,
@@ -60,8 +60,9 @@ final class AITP_Pagemap {
 		);
 	}
 
-	/** @param array $s State. */
+	/** @param array $s State (the plan itself is in AITP_Tasks, job 'map'). */
 	private static function save( array $s ) {
+		unset( $s['items'] );
 		update_option( self::STATE, $s, false );
 	}
 
@@ -75,7 +76,7 @@ final class AITP_Pagemap {
 	 */
 	public static function plan( array $urls, array $langs ) {
 		global $wpdb;
-		$all   = AITP_Queue::tp_languages();
+		$all   = AITP_Queue::published_languages(); // Internal visits are anonymous: unpublished languages answer 404.
 		$langs = $langs ? array_values( array_intersect( $all, $langs ) ) : $all;
 		$out   = array( 'items' => array(), 'bad' => array() );
 		$seen  = array();
@@ -175,11 +176,13 @@ final class AITP_Pagemap {
 		if ( count( $p['items'] ) > self::MAX_ITEMS ) {
 			return array( 'error' => 'too_many', 'pages' => count( $p['items'] ), 'bad' => $p['bad'] );
 		}
+		AITP_Tasks::clear( 'map' );
+		AITP_Tasks::add( 'map', $p['items'], array( 'AITP_Schema', 'map_key' ) );
 		self::save(
 			array(
 				'status'  => 'running',
 				'reason'  => '',
-				'items'   => $p['items'],
+				'total'   => count( $p['items'] ),
 				'i'       => 0,
 				'ok'      => 0,
 				'failed'  => 0,
@@ -204,6 +207,7 @@ final class AITP_Pagemap {
 			$s['ended']  = time();
 			self::save( $s );
 		}
+		AITP_Tasks::clear( 'map' );
 		wp_clear_scheduled_hook( self::CRON );
 	}
 
@@ -242,7 +246,8 @@ final class AITP_Pagemap {
 					$result = $s['status'];
 					break;
 				}
-				if ( (int) $s['i'] >= count( $s['items'] ) ) {
+				$next = AITP_Tasks::first( 'map', 1, true );
+				if ( ! $next ) {
 					$s['status'] = 'done';
 					$s['ended']  = time();
 					self::save( $s );
@@ -265,8 +270,9 @@ final class AITP_Pagemap {
 					break; // Not enough time left for one more page in this request.
 				}
 				$visits++;
-				$item = $s['items'][ (int) $s['i'] ];
-				$ok   = self::map_one( $item );
+				$item = reset( $next );
+				$ok   = is_array( $item ) && self::map_one( $item );
+				AITP_Tasks::remove( array( key( $next ) ) );
 				$s    = self::state();
 				if ( $s['status'] !== 'running' ) {
 					$result = $s['status'];
@@ -334,6 +340,52 @@ final class AITP_Pagemap {
 		}
 		// phpcs:enable
 		return $ok;
+	}
+
+	/**
+	 * Read one page now (read-only visit) and say how much of it is translated.
+	 *
+	 * @param array $item url, source_url, lang, object_type, object_id.
+	 * @param int   $list Untranslated strings to list (0 = none).
+	 * @return array{ok:bool,http:int,note:string,strings:int,found:int,unknown:int,s0:int,s1:int,s2:int,untranslated:array}
+	 *         untranslated: [text, reason] (reason '' when no failure is on record).
+	 */
+	public static function check( array $item, $list = 0 ) {
+		global $wpdb;
+		$out = array( 'ok' => false, 'http' => 0, 'note' => '', 'strings' => 0, 'found' => 0, 'unknown' => 0, 's0' => 0, 's1' => 0, 's2' => 0, 'untranslated' => array() );
+		$ok  = self::map_one( $item );
+		$id  = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT id FROM ' . AITP_Schema::table( 'pagemap' ) . ' WHERE ukey = %s', sha1( $item['lang'] . '|' . $item['url'] ) ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$p   = $id ? self::pages( array( 'ids' => array( $id ) ) )['rows'] : array();
+		if ( ! $p ) {
+			return $out;
+		}
+		$p   = $p[0];
+		$out = array_merge( $out, array_intersect_key( $p, $out ) );
+		foreach ( array( 'http', 'strings', 'found', 'unknown', 's0', 's1', 's2' ) as $k ) {
+			$out[ $k ] = (int) $out[ $k ];
+		}
+		$out['ok'] = $ok;
+		$dict      = self::dict_table( $item['lang'] );
+		if ( $ok && $list > 0 && $dict !== '' && $out['s0'] > 0 ) {
+			$tp  = get_option( 'trp_settings', array() );
+			$src = is_array( $tp ) && isset( $tp['default-language'] ) ? (string) $tp['default-language'] : '';
+			$ps  = AITP_Schema::table( 'pagestr' );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$rows = (array) $wpdb->get_col( $wpdb->prepare( "SELECT d.original FROM $ps p JOIN `$dict` d ON d.id = p.row_id WHERE p.page_id = %d AND d.status NOT IN (1,2) ORDER BY d.id LIMIT %d", $id, (int) $list ) );
+			foreach ( $rows as $text ) {
+				$reason = '';
+				foreach ( array_unique( array( (string) $text, html_entity_decode( (string) $text, ENT_QUOTES, 'UTF-8' ) ) ) as $t ) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					$r = $wpdb->get_var( $wpdb->prepare( 'SELECT reason FROM ' . AITP_Schema::table( 'failures' ) . ' WHERE fkey = %s', AITP_Translator::failure_key( $t, $src, $item['lang'] ) ) );
+					if ( is_string( $r ) && $r !== '' ) {
+						$reason = $r;
+						break;
+					}
+				}
+				$out['untranslated'][] = array( (string) $text, $reason );
+			}
+		}
+		return $out;
 	}
 
 	/* -------------------------------------------------------------------------------------
@@ -516,20 +568,11 @@ final class AITP_Pagemap {
 	 * @return bool
 	 */
 	private static function lock( $ttl ) {
-		if ( add_option( self::LOCK, time() + $ttl, '', 'no' ) ) {
-			return true;
-		}
-		wp_cache_delete( self::LOCK, 'options' );
-		$until = (int) get_option( self::LOCK );
-		if ( $until && $until < time() ) {
-			delete_option( self::LOCK );
-			return add_option( self::LOCK, time() + $ttl, '', 'no' );
-		}
-		return false;
+		return AITP_Lock::acquire( self::LOCK, $ttl );
 	}
 
 	/** Release. */
 	private static function unlock() {
-		delete_option( self::LOCK );
+		AITP_Lock::release( self::LOCK );
 	}
 }

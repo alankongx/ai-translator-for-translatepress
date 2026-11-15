@@ -1447,16 +1447,7 @@ final class AITP_Audit {
 			self::$write_depth++;
 			return true;
 		}
-		$val = array( 'until' => time() + $ttl, 'who' => (string) $who, 'since' => time() );
-		$ok  = add_option( self::WRITE_LOCK, $val, '', 'no' );
-		if ( ! $ok ) {
-			wp_cache_delete( self::WRITE_LOCK, 'options' );
-			$cur = get_option( self::WRITE_LOCK );
-			if ( ! is_array( $cur ) || (int) $cur['until'] < time() ) {
-				delete_option( self::WRITE_LOCK );
-				$ok = add_option( self::WRITE_LOCK, $val, '', 'no' );
-			}
-		}
+		$ok = AITP_Lock::acquire( self::WRITE_LOCK, $ttl, $who );
 		if ( $ok ) {
 			self::$write_depth = 1;
 			static $hooked = false;
@@ -1482,18 +1473,14 @@ final class AITP_Audit {
 	public static function write_release_all() {
 		if ( self::$write_depth > 0 ) {
 			self::$write_depth = 0;
-			delete_option( self::WRITE_LOCK );
+			AITP_Lock::release( self::WRITE_LOCK );
 		}
 	}
 
 	/** @return array{who:string,since:int} What holds the write lock now (who '' = nothing). */
 	public static function write_lock_holder() {
-		wp_cache_delete( self::WRITE_LOCK, 'options' );
-		$cur = get_option( self::WRITE_LOCK );
-		if ( ! is_array( $cur ) || (int) $cur['until'] < time() ) {
-			return array( 'who' => '', 'since' => 0 );
-		}
-		return array( 'who' => (string) $cur['who'], 'since' => (int) $cur['since'] );
+		$h = AITP_Lock::holder( self::WRITE_LOCK );
+		return array( 'who' => $h['who'], 'since' => $h['since'] );
 	}
 
 	/**
@@ -1816,20 +1803,11 @@ final class AITP_Audit {
 	 * @return bool
 	 */
 	private static function lock( $ttl ) {
-		if ( add_option( self::LOCK, time() + $ttl, '', 'no' ) ) {
-			return true;
-		}
-		wp_cache_delete( self::LOCK, 'options' );
-		$until = (int) get_option( self::LOCK );
-		if ( $until && $until < time() ) {
-			delete_option( self::LOCK );
-			return add_option( self::LOCK, time() + $ttl, '', 'no' );
-		}
-		return false;
+		return AITP_Lock::acquire( self::LOCK, $ttl );
 	}
 
 	/** Release. */
 	private static function unlock() {
-		delete_option( self::LOCK );
+		AITP_Lock::release( self::LOCK );
 	}
 }

@@ -22,7 +22,17 @@ final class AITP_Queue_Logic {
 	const TOKEN_TTL = 300;
 
 	/** Provider-level stop reasons: the whole queue waits, the page is not at fault. */
-	const SYSTEMIC = array( 'breaker', 'quota', 'quota_daily', 'rate_limit', 'auth', 'billing', 'not_found', 'bad_request', 'misaligned', 'timeout', 'network', 'server' );
+	const SYSTEMIC = array( 'breaker', 'quota', 'quota_daily', 'rate_limit', 'auth', 'billing', 'not_found', 'bad_request', 'misaligned', 'timeout', 'network', 'server', 'not_configured', 'tp_limit' );
+
+	/** Stop reasons the queue waits out for half an hour (someone has to act). */
+	const LONG_WAIT = array( 'auth', 'billing', 'not_found', 'bad_request', 'not_configured' );
+
+	/**
+	 * Seconds before a page that made progress is visited again. TranslatePress keeps a lock on
+	 * every string it handed to the engine in a call that saved something (also those that were
+	 * not translated) for its lock timeout, 50 s: a visit before then skips them.
+	 */
+	const REVISIT = 55;
 
 	/**
 	 * Decide the next state of a queue item after one visit.
@@ -35,10 +45,13 @@ final class AITP_Queue_Logic {
 	 *                     translated int    strings translated
 	 *                     failed     int    strings not translated (any reason)
 	 *                     stop       string first stop reason reported by the engine ('' if none)
-	 * @param int   $now   Unix time.
+	 *                     locked     int    strings TranslatePress skipped: locked by another request
+	 *                                       or a call of the last 50 s (not sent, still untranslated)
+	 * @param int   $now     Unix time.
+	 * @param int   $revisit Seconds before a page with work left is visited again.
 	 * @return array{status:string,next_at:int,note:string,visits:int,attempts:int,passes:int,queue_wait:int}
 	 */
-	public static function decide( array $item, array $visit, $now ) {
+	public static function decide( array $item, array $visit, $now, $revisit = self::REVISIT ) {
 		$visits   = (int) ( isset( $item['visits'] ) ? $item['visits'] : 0 );
 		$attempts = (int) ( isset( $item['attempts'] ) ? $item['attempts'] : 0 );
 		$passes   = (int) ( isset( $item['passes'] ) ? $item['passes'] : 0 );
@@ -78,12 +91,27 @@ final class AITP_Queue_Logic {
 		$stop       = (string) ( isset( $visit['stop'] ) ? $visit['stop'] : '' );
 		$calls      = (int) ( isset( $visit['calls'] ) ? $visit['calls'] : 0 );
 		$translated = (int) ( isset( $visit['translated'] ) ? $visit['translated'] : 0 );
+		$locked     = (int) ( isset( $visit['locked'] ) ? $visit['locked'] : 0 );
 
 		if ( in_array( $stop, self::SYSTEMIC, true ) ) {
 			// Provider trouble: keep the page as it is and let the whole queue wait.
 			$out['note']       = $stop;
-			$out['queue_wait'] = in_array( $stop, array( 'auth', 'billing', 'not_found', 'bad_request' ), true ) ? 1800 : 300;
+			$out['queue_wait'] = in_array( $stop, self::LONG_WAIT, true ) ? 1800 : 300;
 			$out['next_at']    = $now + $out['queue_wait'];
+			return $out;
+		}
+
+		if ( $calls === 0 && $locked > 0 ) {
+			// Nothing sent because the strings were locked: not finished, look again after the lock.
+			$out['visits']  = $visits + 1;
+			$out['note']    = 'locked';
+			$out['next_at'] = $now + $revisit;
+			if ( $out['visits'] >= self::MAX_VISITS ) {
+				$out['status']  = 'partial';
+				$out['passes']  = $passes + 1;
+				$out['visits']  = 0;
+				$out['next_at'] = $now + self::partial_delay( $out['passes'] );
+			}
 			return $out;
 		}
 
@@ -97,7 +125,9 @@ final class AITP_Queue_Logic {
 
 		$out['visits'] = $visits + 1;
 		if ( $translated > 0 || $stop === 'deferred' ) {
-			// Progress (or time ran out): come back right away, unless this keeps going on.
+			// Progress (or time ran out): come back once TranslatePress' locks have expired,
+			// unless this keeps going on.
+			$out['next_at'] = $now + $revisit;
 			if ( $out['visits'] >= self::MAX_VISITS ) {
 				$out['status']  = 'partial';
 				$out['note']    = 'max_visits';

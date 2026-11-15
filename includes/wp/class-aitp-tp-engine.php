@@ -34,6 +34,13 @@ class AITP_TP_Engine extends TRP_Machine_Translator {
 		}
 		$translator = AITP_Plugin::instance()->translator( $this->machine_translator_logger );
 		if ( ! $translator ) {
+			/**
+			 * The engine was asked to translate but has no usable key or model (for example the
+			 * key cannot be decrypted after a move to another server).
+			 *
+			 * @param string $reason Always 'not_configured'.
+			 */
+			do_action( 'aitp_engine_unavailable', 'not_configured' );
 			return array();
 		}
 

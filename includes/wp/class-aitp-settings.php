@@ -35,7 +35,7 @@ final class AITP_Settings {
 			'size_guard'         => 1,
 			'claim_checks'       => 1,
 			'soft_policy'        => 'save_review',
-			'time_budget'        => 25,
+			'time_budget'        => 10,
 			'chunk_size'         => 150,
 			'batch_items'        => 40,
 			'batch_tokens'       => 2500,

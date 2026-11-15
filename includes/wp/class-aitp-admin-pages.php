@@ -103,9 +103,9 @@ final class AITP_Admin_Pages {
 
 		echo '<table class="widefat striped aitp-kv" style="max-width:860px;"><tbody>';
 		$state = self::status_label( $s['status'] );
-		if ( $s['items'] ) {
+		if ( (int) $s['total'] ) {
 			/* translators: 1: pages done, 2: pages, 3: read, 4: failed */
-			$state .= ' — ' . sprintf( __( '%1$s of %2$s pages (%3$s read, %4$s failed)', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $s['i'] ), number_format_i18n( count( $s['items'] ) ), number_format_i18n( (int) $s['ok'] ), number_format_i18n( (int) $s['failed'] ) );
+			$state .= ' — ' . sprintf( __( '%1$s of %2$s pages (%3$s read, %4$s failed)', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $s['i'] ), number_format_i18n( (int) $s['total'] ), number_format_i18n( (int) $s['ok'] ), number_format_i18n( (int) $s['failed'] ) );
 		}
 		echo '<tr><th>' . esc_html__( 'State', 'ai-translator-for-translatepress' ) . '</th><td>' . esc_html( $state ) . '</td></tr>';
 		echo '</tbody></table>';
@@ -366,7 +366,7 @@ final class AITP_Admin_Pages {
 		$r = AITP_Pagemap::step( 25 );
 		$s = $r['state'];
 		/* translators: 1: pages done, 2: pages, 3: read, 4: failed */
-		$text = sprintf( __( '%1$s of %2$s pages (%3$s read, %4$s failed)', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $s['i'] ), number_format_i18n( count( $s['items'] ) ), number_format_i18n( (int) $s['ok'] ), number_format_i18n( (int) $s['failed'] ) );
+		$text = sprintf( __( '%1$s of %2$s pages (%3$s read, %4$s failed)', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $s['i'] ), number_format_i18n( (int) $s['total'] ), number_format_i18n( (int) $s['ok'] ), number_format_i18n( (int) $s['failed'] ) );
 		if ( $s['status'] === 'done' ) {
 			$text .= ' — ' . __( 'finished', 'ai-translator-for-translatepress' );
 		} elseif ( $r['result'] === 'busy' ) {

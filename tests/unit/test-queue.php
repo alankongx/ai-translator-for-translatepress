@@ -12,10 +12,10 @@ test( 'queue: no engine call -> page done', function () {
 	eq( 0, $d['visits'] );
 } );
 
-test( 'queue: new translations -> visit again right away', function () {
+test( 'queue: new translations -> visit again after the lock', function () {
 	$d = AITP_Queue_Logic::decide( array( 'visits' => 0 ), qv( array( 'calls' => 2, 'translated' => 30 ) ), 1000 );
 	eq( 'pending', $d['status'] );
-	eq( 1000, $d['next_at'] );
+	eq( 1055, $d['next_at'] );
 	eq( 1, $d['visits'] );
 } );
 

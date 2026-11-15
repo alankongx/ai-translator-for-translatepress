@@ -555,20 +555,11 @@ final class AITP_Autofix {
 	 * @return bool
 	 */
 	private static function lock( $ttl ) {
-		if ( add_option( self::LOCK, time() + $ttl, '', 'no' ) ) {
-			return true;
-		}
-		wp_cache_delete( self::LOCK, 'options' );
-		$until = (int) get_option( self::LOCK );
-		if ( $until && $until < time() ) {
-			delete_option( self::LOCK );
-			return add_option( self::LOCK, time() + $ttl, '', 'no' );
-		}
-		return false;
+		return AITP_Lock::acquire( self::LOCK, $ttl );
 	}
 
 	/** Release. */
 	private static function unlock() {
-		delete_option( self::LOCK );
+		AITP_Lock::release( self::LOCK );
 	}
 }

@@ -26,7 +26,15 @@ final class AITP_Queue {
 	const SCHEDULE     = 'aitp_minute';
 	const QUERY_ARG    = 'aitp_nc';
 	const MAP_ARG      = 'aitp_map';
+	const SYNC         = 'aitp_queue_sync';
+	const SYNC_LOCK    = 'aitp_queue_sync_lock';
+	const SYNC_CRON    = 'aitp_queue_sync_tick';
+	const SYNC_CHUNK   = 200;  // Posts or terms per step of building the page list.
+	const TARGET_PASSES = 5;   // Extra visits of a chosen page while the page still shows untranslated rows.
 	const STATUSES     = array( 'pending', 'partial', 'done', 'failed' );
+
+	/** @var string[] Extra addresses left out by the last save_settings() (other site). */
+	public static $dropped_urls = array();
 
 	/** @var AITP_Queue|null */
 	private static $instance = null;
@@ -52,6 +60,7 @@ final class AITP_Queue {
 	public function boot() {
 		add_filter( 'cron_schedules', array( $this, 'schedules' ) ); // phpcs:ignore WordPress.WP.CronInterval.CronSchedulesInterval
 		add_action( self::CRON, array( $this, 'tick' ) );
+		add_action( self::SYNC_CRON, array( __CLASS__, 'sync_tick' ) );
 		add_action( 'plugins_loaded', array( $this, 'maybe_warm' ), 1 );
 		add_action( 'save_post', array( $this, 'on_save_post' ), 20, 2 );
 		add_action( 'edited_term', array( $this, 'on_edited_term' ), 20, 3 );
@@ -107,11 +116,18 @@ final class AITP_Queue {
 				$out['types'][] = (string) $t;
 			}
 		}
-		$urls = array();
+		$urls               = array();
+		self::$dropped_urls = array();
 		foreach ( preg_split( '~\R~', isset( $in['extra_urls'] ) ? (string) $in['extra_urls'] : '' ) as $u ) {
-			$u = esc_url_raw( trim( $u ) );
-			if ( $u !== '' && self::same_site( $u ) ) {
-				$urls[] = $u;
+			$u = trim( $u );
+			if ( $u === '' ) {
+				continue;
+			}
+			$n = self::site_form( esc_url_raw( $u ) );
+			if ( $n === '' ) {
+				self::$dropped_urls[] = $u;
+			} else {
+				$urls[] = $n;
 			}
 		}
 		$out['extra_urls'] = implode( "\n", array_slice( array_unique( $urls ), 0, 500 ) );
@@ -131,6 +147,8 @@ final class AITP_Queue {
 				'day_bytes'   => 0,
 				'last_visit'  => 0,
 				'last_sync'   => 0,
+				'scope'       => 'all',  // all | target (only the pages chosen under "Translate these pages").
+				'scope_resume' => false, // Whether the whole-site queue was running before (resumes after the chosen pages).
 			),
 			is_array( $s ) ? $s : array()
 		);
@@ -164,9 +182,18 @@ final class AITP_Queue {
 		return $s;
 	}
 
-	/** Start (or resume) the queue. */
-	public static function start() {
-		self::update_state( array( 'status' => 'running', 'wait_until' => 0, 'wait_reason' => '' ) );
+	/**
+	 * Start (or resume) the queue.
+	 *
+	 * @param bool $whole Started for the whole site (the Start button, WP-CLI): while chosen pages
+	 *                    are being worked on, the rest of the site follows when they are done.
+	 */
+	public static function start( $whole = true ) {
+		$c = array( 'status' => 'running', 'wait_until' => 0, 'wait_reason' => '' );
+		if ( $whole && self::state()['scope'] === 'target' ) {
+			$c['scope_resume'] = true;
+		}
+		self::update_state( $c );
 		if ( ! wp_next_scheduled( self::CRON ) ) {
 			wp_schedule_event( time() + 5, self::SCHEDULE, self::CRON );
 		}
@@ -204,9 +231,25 @@ final class AITP_Queue {
 		return array_values( array_diff( (array) $s['translation-languages'], array( $default ) ) );
 	}
 
+	/**
+	 * Languages visitors can open. TranslatePress only recognises the language of an address
+	 * for published languages (or for logged-in translators); an internal visit is anonymous,
+	 * so an unpublished language answers with 404 or a redirect and can never be translated.
+	 *
+	 * @return string[]
+	 */
+	public static function published_languages() {
+		$all = self::tp_languages();
+		$s   = get_option( 'trp_settings', array() );
+		if ( ! is_array( $s ) || ! isset( $s['publish-languages'] ) || ! is_array( $s['publish-languages'] ) ) {
+			return $all;
+		}
+		return array_values( array_intersect( $all, $s['publish-languages'] ) );
+	}
+
 	/** @return string[] Languages the queue works on. */
 	public static function languages() {
-		$all = self::tp_languages();
+		$all = self::published_languages();
 		$sel = self::settings()['languages'];
 		return $sel ? array_values( array_intersect( $all, $sel ) ) : $all;
 	}
@@ -232,75 +275,122 @@ final class AITP_Queue {
 	}
 
 	/**
-	 * Source pages (default language): list of [url, type, id, priority].
+	 * Pages of the shop that are not content (cart, checkout, account): empty carts redirect,
+	 * and they only show interface text.
+	 *
+	 * @return int[]
+	 */
+	private static function skipped_ids() {
+		$ids = array();
+		if ( function_exists( 'wc_get_page_id' ) ) {
+			foreach ( array( 'cart', 'checkout', 'myaccount' ) as $p ) {
+				$id = (int) wc_get_page_id( $p );
+				if ( $id > 0 ) {
+					$ids[] = $id;
+				}
+			}
+		}
+		return $ids;
+	}
+
+	/**
+	 * One step of the page list: source pages of one kind after a cursor.
+	 *
+	 * @param string $stage home | extra | pt:<type> | tax:<taxonomy>.
+	 * @param int    $after Cursor (post or term id).
+	 * @return array{pages:array,after:int,finished:bool} pages: [url, type, id, priority].
+	 */
+	private static function stage_pages( $stage, $after ) {
+		global $wpdb;
+		$out = array( 'pages' => array(), 'after' => $after, 'finished' => true );
+		if ( $stage === 'home' ) {
+			$out['pages'][] = array( home_url( '/' ), 'home', 0, 0 );
+		} elseif ( $stage === 'extra' ) {
+			foreach ( preg_split( '~\R~', (string) self::settings()['extra_urls'] ) as $u ) {
+				$u = trim( $u );
+				if ( $u !== '' ) {
+					$out['pages'][] = array( $u, 'url', 0, 1 );
+				}
+			}
+		} elseif ( strpos( $stage, 'pt:' ) === 0 ) {
+			$pt  = substr( $stage, 3 );
+			$pri = $pt === 'page' ? 1 : ( $pt === 'product' ? 2 : 4 );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$ids = array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_type = %s AND post_status = 'publish' AND post_password = '' AND ID > %d ORDER BY ID LIMIT %d", $pt, (int) $after, self::SYNC_CHUNK ) ) );
+			if ( $ids ) {
+				_prime_post_caches( $ids, false, false );
+			}
+			$skip = self::skipped_ids();
+			foreach ( $ids as $id ) {
+				$url = in_array( $id, $skip, true ) ? '' : get_permalink( $id );
+				if ( $url ) {
+					$out['pages'][] = array( $url, 'post', $id, $pri );
+				}
+			}
+			$out['after']    = $ids ? (int) end( $ids ) : (int) $after;
+			$out['finished'] = count( $ids ) < self::SYNC_CHUNK;
+		} elseif ( strpos( $stage, 'tax:' ) === 0 ) {
+			// Cursor on the term id (as for posts): an offset skips terms when others become
+			// empty or not between two steps, and a skipped term's rows would be removed.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$ids   = array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( "SELECT term_id FROM {$wpdb->term_taxonomy} WHERE taxonomy = %s AND term_id > %d ORDER BY term_id LIMIT %d", substr( $stage, 4 ), (int) $after, self::SYNC_CHUNK ) ) );
+			$terms = $ids ? get_terms(
+				array(
+					'taxonomy'   => substr( $stage, 4 ),
+					'hide_empty' => true,
+					'include'    => $ids,
+					'number'     => 0,
+				)
+			) : array();
+			$terms = is_wp_error( $terms ) ? array() : (array) $terms;
+			foreach ( $terms as $t ) {
+				$url = get_term_link( $t );
+				if ( ! is_wp_error( $url ) ) {
+					$out['pages'][] = array( $url, 'term', (int) $t->term_id, 3 );
+				}
+			}
+			$out['after']    = $ids ? (int) end( $ids ) : (int) $after;
+			$out['finished'] = count( $ids ) < self::SYNC_CHUNK;
+		}
+		return $out;
+	}
+
+	/**
+	 * Source pages (default language), all at once: list of [url, type, id, priority]. Small
+	 * sites and tests; the page list itself is built in steps (sync_step()).
 	 *
 	 * @return array
 	 */
 	public static function source_pages() {
-		$s     = self::settings();
-		$known = self::content_types();
-		$pages = array();
-		foreach ( $s['types'] as $type ) {
-			if ( ! isset( $known[ $type ] ) ) {
-				continue;
-			}
-			if ( $type === 'home' ) {
-				$pages[] = array( home_url( '/' ), 'home', 0, 0 );
-			} elseif ( strpos( $type, 'pt:' ) === 0 ) {
-				$pt  = substr( $type, 3 );
-				$pri = $pt === 'page' ? 1 : ( $pt === 'product' ? 2 : 4 );
-				$ids = get_posts(
-					array(
-						'post_type'        => $pt,
-						'post_status'      => 'publish',
-						'posts_per_page'   => -1,
-						'fields'           => 'ids',
-						'orderby'          => 'menu_order date',
-						'order'            => 'ASC',
-						'has_password'     => false,
-						'suppress_filters' => true,
-						'no_found_rows'    => true,
-					)
-				);
-				foreach ( $ids as $id ) {
-					$url = get_permalink( $id );
-					if ( $url ) {
-						$pages[] = array( $url, 'post', (int) $id, $pri );
-					}
-				}
-			} elseif ( strpos( $type, 'tax:' ) === 0 ) {
-				$terms = get_terms(
-					array(
-						'taxonomy'   => substr( $type, 4 ),
-						'hide_empty' => true,
-					)
-				);
-				if ( is_wp_error( $terms ) ) {
-					continue;
-				}
-				foreach ( $terms as $t ) {
-					$url = get_term_link( $t );
-					if ( ! is_wp_error( $url ) ) {
-						$pages[] = array( $url, 'term', (int) $t->term_id, 3 );
-					}
-				}
-			}
-		}
-		foreach ( preg_split( '~\R~', (string) $s['extra_urls'] ) as $u ) {
-			$u = trim( $u );
-			if ( $u !== '' ) {
-				$pages[] = array( $u, 'url', 0, 1 );
-			}
-		}
-		$seen = array();
 		$out  = array();
-		foreach ( $pages as $p ) {
-			if ( ! isset( $seen[ $p[0] ] ) ) {
-				$seen[ $p[0] ] = true;
-				$out[]         = $p;
-			}
+		$seen = array();
+		foreach ( self::stages() as $stage ) {
+			$after = 0;
+			do {
+				$r     = self::stage_pages( $stage, $after );
+				$after = $r['after'];
+				foreach ( $r['pages'] as $p ) {
+					if ( ! isset( $seen[ $p[0] ] ) ) {
+						$seen[ $p[0] ] = true;
+						$out[]         = $p;
+					}
+				}
+			} while ( ! $r['finished'] );
 		}
 		return $out;
+	}
+
+	/** @return string[] Kinds of pages selected, in the order they are listed. */
+	private static function stages() {
+		$known  = self::content_types();
+		$stages = array();
+		foreach ( self::settings()['types'] as $type ) {
+			if ( isset( $known[ $type ] ) ) {
+				$stages[] = $type;
+			}
+		}
+		$stages[] = 'extra';
+		return $stages;
 	}
 
 	/**
@@ -332,17 +422,165 @@ final class AITP_Queue {
 	}
 
 	/**
-	 * Rebuild the page list: add new pages, keep the progress of existing ones, remove pages
-	 * that are no longer selected or published.
+	 * An address of this site written the way the site writes it (scheme and host of the home
+	 * address; "www." or not, http or https as typed). '' for another site.
+	 *
+	 * @param string $url Address.
+	 * @return string
+	 */
+	public static function site_form( $url ) {
+		$home = wp_parse_url( home_url( '/' ) );
+		$p    = wp_parse_url( (string) $url );
+		if ( empty( $home['host'] ) || empty( $p['host'] ) ) {
+			return '';
+		}
+		$bare = function ( $h ) {
+			return preg_replace( '~^www\.~', '', strtolower( (string) $h ) );
+		};
+		if ( $bare( $p['host'] ) !== $bare( $home['host'] ) ) {
+			return '';
+		}
+		$base = $home['scheme'] . '://' . $home['host'] . ( isset( $home['port'] ) ? ':' . $home['port'] : '' );
+		return $base . ( isset( $p['path'] ) ? $p['path'] : '/' ) . ( isset( $p['query'] ) ? '?' . $p['query'] : '' );
+	}
+
+	/**
+	 * Rebuild the page list at once (WP-CLI, tests). See sync_start().
 	 *
 	 * @return array{pages:int,rows:int,removed:int}
 	 */
 	public static function sync() {
+		self::sync_start( false );
+		do {
+			$r = self::sync_step( 300 );
+		} while ( ! $r['done'] && ! $r['busy'] );
+		return array( 'pages' => $r['pages'], 'rows' => $r['rows'], 'removed' => $r['removed'] );
+	}
+
+	/**
+	 * Start rebuilding the page list: new pages are added, existing ones keep their progress,
+	 * pages no longer selected or published are removed at the end. Built in steps of a few
+	 * hundred posts (in this request while time allows, then by WP-Cron), so a shop with tens of
+	 * thousands of products neither times out nor runs out of memory, and every step is saved.
+	 *
+	 * @param bool $background Continue by WP-Cron.
+	 * @return array Sync state.
+	 */
+	public static function sync_start( $background = true ) {
+		$total = 0;
+		foreach ( self::stages() as $stage ) {
+			if ( $stage === 'home' ) {
+				$total++;
+			} elseif ( $stage === 'extra' ) {
+				$total += count( array_filter( array_map( 'trim', preg_split( '~\R~', (string) self::settings()['extra_urls'] ) ), 'strlen' ) );
+			} elseif ( strpos( $stage, 'pt:' ) === 0 ) {
+				$c      = wp_count_posts( substr( $stage, 3 ) );
+				$total += isset( $c->publish ) ? (int) $c->publish : 0;
+			} elseif ( strpos( $stage, 'tax:' ) === 0 ) {
+				$c      = wp_count_terms( array( 'taxonomy' => substr( $stage, 4 ), 'hide_empty' => true ) );
+				$total += is_wp_error( $c ) ? 0 : (int) $c;
+			}
+		}
+		$old = self::sync_state();
+		$st  = array(
+			'run'     => $old ? max( time(), (int) $old['run'] + 1 ) : time(), // A restart is a new run.
+			'stages'  => self::stages(),
+			'stage'   => 0,
+			'after'   => 0,
+			'pages'   => 0,
+			'rows'    => 0,
+			'total'   => $total,
+			'langs'   => self::languages(),
+			'started' => time(),
+		);
+		update_option( self::SYNC, $st, false );
+		if ( $background && ! wp_next_scheduled( self::SYNC_CRON ) ) {
+			wp_schedule_event( time() + 30, self::SCHEDULE, self::SYNC_CRON );
+		}
+		return $st;
+	}
+
+	/** @return array|null Page list being built, or null. */
+	public static function sync_state() {
+		wp_cache_delete( self::SYNC, 'options' );
+		$st = get_option( self::SYNC );
+		return is_array( $st ) && isset( $st['run'] ) ? $st : null;
+	}
+
+	/** WP-Cron: continue building the page list. */
+	public static function sync_tick() {
+		if ( ! self::sync_state() ) {
+			wp_clear_scheduled_hook( self::SYNC_CRON );
+			return;
+		}
+		self::sync_step( 40 );
+	}
+
+	/**
+	 * Build the page list for a while.
+	 *
+	 * @param int $seconds Wall time.
+	 * @return array{done:bool,busy:bool,pages:int,rows:int,total:int,removed:int}
+	 */
+	public static function sync_step( $seconds ) {
+		global $wpdb;
+		$out = array( 'done' => true, 'busy' => false, 'pages' => 0, 'rows' => 0, 'total' => 0, 'removed' => 0 );
+		$st  = self::sync_state();
+		if ( ! $st ) {
+			return $out;
+		}
+		if ( ! AITP_Lock::acquire( self::SYNC_LOCK, (int) $seconds + 120 ) ) {
+			return array_merge( $out, array( 'done' => false, 'busy' => true, 'pages' => (int) $st['pages'], 'total' => (int) $st['total'] ) );
+		}
+		$table = AITP_Schema::table( 'queue' );
+		$end   = microtime( true ) + max( 1, (int) $seconds );
+		try {
+			while ( $st['stage'] < count( $st['stages'] ) && microtime( true ) < $end ) {
+				$r = self::stage_pages( $st['stages'][ $st['stage'] ], (int) $st['after'] );
+				$st['rows']  += self::insert_pages( $r['pages'], (array) $st['langs'], (int) $st['run'] );
+				$st['pages'] += count( $r['pages'] );
+				$st['after']  = $r['after'];
+				if ( $r['finished'] ) {
+					$st['stage']++;
+					$st['after'] = 0;
+				}
+				update_option( self::SYNC, $st, false ); // Every step is kept.
+				if ( function_exists( 'wp_cache_flush_runtime' ) ) {
+					wp_cache_flush_runtime(); // Posts and permalinks of this step are not needed again.
+				}
+			}
+			$out = array_merge( $out, array( 'pages' => (int) $st['pages'], 'total' => (int) $st['total'] ) );
+			if ( $st['stage'] < count( $st['stages'] ) ) {
+				$out['done'] = false;
+				return $out;
+			}
+			// Pages no longer selected or published. Pages queued by a repair or chosen under
+			// "Translate these pages" stay until they are done.
+			// phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$out['removed'] = (int) $wpdb->query( $wpdb->prepare( "DELETE FROM $table WHERE seen <> %d AND ( origin = 'site' OR ( origin = 'repair' AND status IN ('done','failed') ) )", (int) $st['run'] ) );
+			$out['rows']    = (int) $wpdb->get_var( "SELECT COUNT(*) FROM $table" );
+			// phpcs:enable
+			delete_option( self::SYNC );
+			wp_clear_scheduled_hook( self::SYNC_CRON );
+			self::update_state( array( 'last_sync' => (int) $st['run'] ) );
+			( new AITP_WP_Log() )->log( 'notice', 'queue_sync', array( 'pages' => $out['pages'], 'rows' => $out['rows'], 'removed' => $out['removed'] ) );
+		} finally {
+			AITP_Lock::release( self::SYNC_LOCK );
+		}
+		return $out;
+	}
+
+	/**
+	 * Insert or refresh page/language rows.
+	 *
+	 * @param array    $pages [url, type, id, priority].
+	 * @param string[] $langs Languages.
+	 * @param int      $run   Sync run (seen).
+	 * @return int Rows written.
+	 */
+	private static function insert_pages( array $pages, array $langs, $run ) {
 		global $wpdb;
 		$table = AITP_Schema::table( 'queue' );
-		$langs = self::languages();
-		$pages = self::source_pages();
-		$sync  = time();
 		$rows  = array();
 		foreach ( $pages as $p ) {
 			foreach ( $langs as $lang ) {
@@ -350,26 +588,17 @@ final class AITP_Queue {
 				if ( $turl === '' || $turl === $p[0] ) {
 					continue;
 				}
-				$rows[] = $wpdb->prepare( '(%s,%s,%s,%s,%s,%d,%d,%s,%d,%d,%s)', sha1( $p[0] . '|' . $lang ), $p[0], $turl, $lang, $p[1], $p[2], $p[3], 'pending', 0, $sync, current_time( 'mysql', true ) );
+				$rows[] = $wpdb->prepare( '(%s,%s,%s,%s,%s,%d,%d,%s,%d,%d,%s)', sha1( $p[0] . '|' . $lang ), $p[0], $turl, $lang, $p[1], $p[2], $p[3], 'pending', 0, $run, current_time( 'mysql', true ) );
 			}
 		}
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		foreach ( array_chunk( $rows, 200 ) as $chunk ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			$wpdb->query(
 				"INSERT INTO $table (ukey, source_url, url, lang, object_type, object_id, priority, status, next_at, seen, updated_at) VALUES " . implode( ',', $chunk ) .
-				' ON DUPLICATE KEY UPDATE url = VALUES(url), object_type = VALUES(object_type), object_id = VALUES(object_id), priority = VALUES(priority), seen = VALUES(seen)'
+				" ON DUPLICATE KEY UPDATE url = VALUES(url), object_type = VALUES(object_type), object_id = VALUES(object_id), priority = IF(origin = 'target', priority, VALUES(priority)), seen = VALUES(seen)"
 			);
 		}
-		// Pages a repair queued stay until they were visited, even when not selected.
-		$removed = (int) $wpdb->query( $wpdb->prepare( "DELETE FROM $table WHERE seen <> %d AND NOT ( note = 'repair' AND status IN ('pending','partial') )", $sync ) );
-		$total   = (int) $wpdb->get_var( "SELECT COUNT(*) FROM $table" );
-		// phpcs:enable
-		self::update_state( array( 'last_sync' => $sync ) );
-		return array(
-			'pages'   => count( $pages ),
-			'rows'    => $total,
-			'removed' => $removed,
-		);
+		return count( $rows );
 	}
 
 	/**
@@ -419,28 +648,32 @@ final class AITP_Queue {
 	}
 
 	/**
-	 * Put some pages back in the queue (added when missing). Used by repairs: only these
-	 * pages are visited again, not every page of the language.
+	 * Put some pages back in the queue (added when missing). Used by repairs (only these pages
+	 * are visited again, not every page of the language) and by "Translate these pages".
 	 *
-	 * @param array $pages Each url, source_url, lang, object_type, object_id.
+	 * @param array  $pages  Each url, source_url, lang, object_type, object_id.
+	 * @param string $origin repair | target.
+	 * @param int    $batch  Which request queued them (target: time of the request).
 	 * @return int Pages queued.
 	 */
-	public static function requeue_urls( array $pages ) {
+	public static function requeue_urls( array $pages, $origin = 'repair', $batch = 0 ) {
 		global $wpdb;
-		$table = AITP_Schema::table( 'queue' );
-		$rows  = array();
-		$state = self::state();
+		$table  = AITP_Schema::table( 'queue' );
+		$rows   = array();
+		$state  = self::state();
+		$origin = $origin === 'target' ? 'target' : 'repair';
+		$pri    = $origin === 'target' ? 0 : 1;
 		foreach ( $pages as $p ) {
 			if ( empty( $p['url'] ) || empty( $p['source_url'] ) || empty( $p['lang'] ) ) {
 				continue;
 			}
-			$rows[] = $wpdb->prepare( '(%s,%s,%s,%s,%s,%d,%d,%s,%d,%s,%d,%s)', sha1( $p['source_url'] . '|' . $p['lang'] ), $p['source_url'], $p['url'], $p['lang'], (string) $p['object_type'], (int) $p['object_id'], 1, 'pending', 0, 'repair', (int) $state['last_sync'], current_time( 'mysql', true ) );
+			$rows[] = $wpdb->prepare( '(%s,%s,%s,%s,%s,%d,%d,%s,%d,%s,%d,%s,%d,%s)', sha1( $p['source_url'] . '|' . $p['lang'] ), $p['source_url'], $p['url'], $p['lang'], (string) $p['object_type'], (int) $p['object_id'], $pri, 'pending', 0, $origin, (int) $batch, $origin, (int) $state['last_sync'], current_time( 'mysql', true ) );
 		}
 		foreach ( array_chunk( $rows, 200 ) as $chunk ) {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			$wpdb->query(
-				"INSERT INTO $table (ukey, source_url, url, lang, object_type, object_id, priority, status, next_at, note, seen, updated_at) VALUES " . implode( ',', $chunk ) .
-				" ON DUPLICATE KEY UPDATE status = 'pending', visits = 0, attempts = 0, passes = 0, next_at = 0, note = 'repair'"
+				"INSERT INTO $table (ukey, source_url, url, lang, object_type, object_id, priority, status, next_at, origin, batch, note, seen, updated_at) VALUES " . implode( ',', $chunk ) .
+				" ON DUPLICATE KEY UPDATE status = 'pending', visits = 0, attempts = 0, passes = 0, next_at = 0, note = VALUES(note), priority = LEAST(priority, VALUES(priority)), origin = IF(origin = 'target', origin, VALUES(origin)), batch = IF(VALUES(origin) = 'target', VALUES(batch), batch)"
 			);
 		}
 		return count( $rows );
@@ -506,6 +739,144 @@ final class AITP_Queue {
 		return $out;
 	}
 
+	/**
+	 * Translate chosen pages now: only they are visited (the rest of the queue waits) until each
+	 * shows no untranslated rows, or has been tried several times. Then the queue goes back to
+	 * the whole site if it was running, or pauses again.
+	 *
+	 * @param string[] $urls  Default-language addresses of this site.
+	 * @param string[] $langs Languages (empty = all published).
+	 * @return array{queued:int,bad:string[]}
+	 */
+	public static function start_target( array $urls, array $langs ) {
+		if ( ! array_filter( array_map( 'trim', $urls ), 'strlen' ) ) {
+			return array( 'queued' => 0, 'bad' => array() ); // plan() reads "no address" as the whole site.
+		}
+		$p = AITP_Pagemap::plan( $urls, $langs );
+		if ( ! $p['items'] ) {
+			return array( 'queued' => 0, 'bad' => $p['bad'] );
+		}
+		$n = self::requeue_urls( $p['items'], 'target', time() );
+		$s = self::state();
+		self::update_state(
+			array(
+				'scope'        => 'target',
+				'scope_resume' => $s['scope'] === 'target' ? (bool) $s['scope_resume'] : $s['status'] === 'running',
+			)
+		);
+		self::start( false );
+		return array( 'queued' => $n, 'bad' => $p['bad'] );
+	}
+
+	/**
+	 * Chosen pages of the latest request(s).
+	 *
+	 * @param int $limit Rows.
+	 * @return array
+	 */
+	public static function targets( $limit = 50 ) {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		return (array) $wpdb->get_results( $wpdb->prepare( 'SELECT id, url, lang, status, note, passes, translated, next_at, last_visit_at FROM ' . AITP_Schema::table( 'queue' ) . " WHERE origin = 'target' ORDER BY batch DESC, id LIMIT %d", (int) $limit ), ARRAY_A );
+	}
+
+	/**
+	 * Forget the chosen pages: they become ordinary pages of the list (the next rebuild of the
+	 * page list removes those that are not part of the site's selection).
+	 */
+	/**
+	 * Chosen pages done or forgotten: back to the whole site if it was running, else paused.
+	 *
+	 * @param array $s Queue state.
+	 */
+	private static function leave_target( array $s ) {
+		self::update_state( array( 'scope' => 'all', 'scope_resume' => false ) );
+		if ( $s['scope_resume'] ) {
+			self::update_state( array( 'status' => 'running' ) );
+		} else {
+			self::pause();
+		}
+	}
+
+	/** @return int Chosen pages still waiting (shown while only they are worked on). */
+	public static function targets_waiting() {
+		return self::targets_left();
+	}
+
+	public static function clear_targets() {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$wpdb->query( 'UPDATE ' . AITP_Schema::table( 'queue' ) . " SET origin = 'site', priority = 1 WHERE origin = 'target'" );
+		$s = self::state();
+		if ( $s['scope'] === 'target' ) {
+			self::leave_target( $s );
+		}
+	}
+
+	/**
+	 * Can the site open its own translated pages? One read-only signed visit of the home page in
+	 * the first published language (nothing is translated or saved).
+	 *
+	 * @return array{ok:bool,code:string,http:int,location:string,url:string}
+	 *         code: '' | no_language | no_translatepress | unreachable | http_401 | http_403 | http_503 | http_NNN | redirect | signature | no_report.
+	 */
+	public static function loopback_test() {
+		$langs = self::languages();
+		if ( ! class_exists( 'TRP_Translate_Press' ) ) {
+			return array( 'ok' => false, 'code' => 'no_translatepress', 'http' => 0, 'location' => '', 'url' => '' );
+		}
+		if ( ! $langs ) {
+			return array( 'ok' => false, 'code' => 'no_language', 'http' => 0, 'location' => '', 'url' => '' );
+		}
+		$url = self::translated_url( home_url( '/' ), $langs[0] );
+		$v   = self::visit( $url, $langs[0], 10, true );
+		$d   = AITP_Queue_Logic::decide( array(), $v, time() );
+		$ok  = $v['report'] && $v['http'] >= 200 && $v['http'] < 300;
+		$out = array( 'ok' => $ok, 'code' => $ok ? '' : $d['note'], 'http' => (int) $v['http'], 'location' => (string) $v['location'], 'url' => $url );
+		set_transient( 'aitp_loopback', $out + array( 'at' => time() ), DAY_IN_SECONDS );
+		return $out;
+	}
+
+	/**
+	 * How long the rest of the queue will take at the current settings, and what limits it.
+	 *
+	 * @return array{left:int,hours:float,days:float,limit:string,avg:int} limit: rate | queue_cap | tp_limit | '' (unknown yet).
+	 */
+	public static function estimate() {
+		global $wpdb;
+		$t    = AITP_Schema::table( 'queue' );
+		$set  = self::settings();
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$left = (int) $wpdb->get_var( "SELECT COUNT(*) FROM $t WHERE status IN ('pending','partial')" );
+		$avg  = (int) $wpdb->get_var( "SELECT AVG(chars) FROM $t WHERE status = 'done' AND chars > 0" );
+		// phpcs:enable
+		$out  = array( 'left' => $left, 'hours' => 0.0, 'days' => 0.0, 'limit' => '', 'avg' => $avg );
+		if ( ! $left ) {
+			return $out;
+		}
+		$by_rate = $left / max( 1, (int) $set['per_minute'] ) / 60; // Hours, one visit per page.
+		$per_day = array();
+		if ( (int) $set['queue_cap'] > 0 ) {
+			$per_day['queue_cap'] = (int) $set['queue_cap'];
+		}
+		$tp = AITP_TP_Quota::limit();
+		if ( $tp > 0 ) {
+			$per_day['tp_limit'] = (int) floor( $tp * ( 1 - (int) $set['reserve'] / 100 ) );
+		}
+		$out['hours'] = $by_rate;
+		$out['limit'] = 'rate';
+		if ( $avg > 0 && $per_day ) {
+			$cap  = min( $per_day );
+			$days = $left * $avg / max( 1, $cap );
+			if ( $days * 24 > $by_rate ) {
+				$out['hours'] = $days * 24;
+				$out['limit'] = (string) array_search( $cap, $per_day, true );
+			}
+		}
+		$out['days'] = $out['hours'] / 24;
+		return $out;
+	}
+
 	/* -------------------------------------------------------------------------------------
 	 * Worker.
 	 * ----------------------------------------------------------------------------------- */
@@ -553,7 +924,7 @@ final class AITP_Queue {
 				}
 				// Visits make TranslatePress translate with whatever engine it has selected:
 				// never drive another engine (for example HHG) or a switched-off automatic translation.
-				$engine = ! AITP_Plugin::engine_selected() ? 'engine_not_selected' : ( ! AITP_Plugin::automatic_translation_on() ? 'automatic_off' : '' );
+				$engine = ! AITP_Plugin::engine_selected() ? 'engine_not_selected' : ( ! AITP_Plugin::automatic_translation_on() ? 'automatic_off' : ( ! AITP_Settings::provider() ? 'not_configured' : '' ) );
 				if ( $engine !== '' ) {
 					self::update_state( array( 'wait_until' => $now + 300, 'wait_reason' => $engine ) );
 					$result = 'waiting';
@@ -588,10 +959,16 @@ final class AITP_Queue {
 				if ( $visited > 0 && time() + (int) $set['page_seconds'] + 10 > $start + $max_seconds ) {
 					break;
 				}
-				$item = self::next_item();
+				$item = self::next_item( $s['scope'] );
+				if ( ! $item && $s['scope'] === 'target' && ! self::targets_left() ) {
+					// The chosen pages are done: back to the whole site (or paused, as before).
+					self::leave_target( $s );
+					( new AITP_WP_Log() )->log( 'notice', 'target_done', array() );
+					continue;
+				}
 				if ( ! $item ) {
 					$result = 'idle';
-					$wait   = self::seconds_to_next_due();
+					$wait   = self::seconds_to_next_due( $s['scope'] );
 					break;
 				}
 				self::process( $item, $set );
@@ -623,22 +1000,37 @@ final class AITP_Queue {
 		return 0;
 	}
 
-	/** @return array|null Next due item. */
-	private static function next_item() {
+	/**
+	 * @param string $scope all | target.
+	 * @return array|null Next due item.
+	 */
+	private static function next_item( $scope = 'all' ) {
 		global $wpdb;
-		$t = AITP_Schema::table( 'queue' );
+		$t    = AITP_Schema::table( 'queue' );
+		$only = $scope === 'target' ? " AND origin = 'target'" : '';
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $t WHERE status IN ('pending','partial') AND next_at <= %d ORDER BY next_at = 0 DESC, priority ASC, id ASC LIMIT 1", time() ), ARRAY_A );
+		$row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $t WHERE status IN ('pending','partial') AND next_at <= %d$only ORDER BY next_at = 0 DESC, priority ASC, id ASC LIMIT 1", time() ), ARRAY_A );
 		return $row ? $row : null;
 	}
 
-	/** @return int Seconds until the next page is due (0 if none is scheduled). */
-	private static function seconds_to_next_due() {
+	/**
+	 * @param string $scope all | target.
+	 * @return int Seconds until the next page is due (0 if none is scheduled).
+	 */
+	private static function seconds_to_next_due( $scope = 'all' ) {
 		global $wpdb;
-		$t = AITP_Schema::table( 'queue' );
+		$t    = AITP_Schema::table( 'queue' );
+		$only = $scope === 'target' ? " AND origin = 'target'" : '';
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$next = (int) $wpdb->get_var( "SELECT MIN(next_at) FROM $t WHERE status IN ('pending','partial')" );
+		$next = (int) $wpdb->get_var( "SELECT MIN(next_at) FROM $t WHERE status IN ('pending','partial')$only" );
 		return $next ? max( 0, $next - time() ) : 0;
+	}
+
+	/** @return int Chosen pages still waiting for a visit (not set aside for later). */
+	private static function targets_left() {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		return (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . AITP_Schema::table( 'queue' ) . " WHERE origin = 'target' AND status = 'pending'" );
 	}
 
 	/**
@@ -652,7 +1044,27 @@ final class AITP_Queue {
 		self::update_state( array( 'last_visit' => time() ) );
 		$visit = self::visit( $item['url'], $item['lang'], (int) $set['page_seconds'] );
 		$now   = time();
-		$d     = AITP_Queue_Logic::decide( $item, $visit, $now );
+		if ( $visit['report'] && (int) $visit['calls'] === 0 && $visit['stop'] === '' && AITP_TP_Quota::limit() > 0 && self::tp_counter() >= AITP_TP_Quota::limit() ) {
+			$visit['stop'] = 'tp_limit'; // TranslatePress stopped sending strings: its daily limit is used up.
+		}
+		$d = AITP_Queue_Logic::decide( $item, $visit, $now, self::revisit() );
+		if ( $d['status'] === 'done' && isset( $item['origin'] ) && $item['origin'] === 'target' ) {
+			// A chosen page counts as done only when it shows no untranslated rows any more.
+			$left = self::untranslated_left( $item );
+			if ( $left > 0 ) {
+				$d['passes'] = (int) $item['passes'] + 1;
+				$d['note']   = 'left';
+				if ( $d['passes'] <= self::TARGET_PASSES ) {
+					$d['status']  = 'pending';
+					$d['next_at'] = $now + self::revisit() + 5;
+				} else {
+					// Text TranslatePress never sends (excluded, skipped) keeps the page "not done":
+					// growing waits instead of a visit every hour for ever.
+					$d['status']  = 'partial';
+					$d['next_at'] = $now + AITP_Queue_Logic::partial_delay( $d['passes'] - self::TARGET_PASSES );
+				}
+			}
+		}
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		$wpdb->update(
@@ -704,9 +1116,34 @@ final class AITP_Queue {
 				'failed'     => $visit['failed'],
 				'sent_bytes' => $visit['sent'],
 				'stop'       => $visit['stop'],
+				'locked'     => $visit['locked'],
+				'location'   => $visit['location'],
 				'ms'         => $visit['ms'],
 			)
 		);
+	}
+
+	/** @return int Seconds before a page with work left is visited again (TranslatePress lock + 5). */
+	public static function revisit() {
+		$lock = 50;
+		if ( class_exists( 'TRP_Translate_Press' ) ) {
+			$mt = TRP_Translate_Press::get_trp_instance()->get_component( 'machine_translator' );
+			if ( $mt && method_exists( $mt, 'get_machine_translation_lock_timeout' ) ) {
+				$lock = (int) $mt->get_machine_translation_lock_timeout();
+			}
+		}
+		return max( 10, min( 600, $lock + 5 ) );
+	}
+
+	/**
+	 * Untranslated page-text rows a page still shows (read-only visit).
+	 *
+	 * @param array $item Queue row.
+	 * @return int
+	 */
+	private static function untranslated_left( array $item ) {
+		$c = AITP_Pagemap::check( $item );
+		return $c['ok'] ? (int) $c['s0'] : 0;
 	}
 
 	/**
@@ -729,6 +1166,15 @@ final class AITP_Queue {
 		$path  = (string) wp_parse_url( $url, PHP_URL_PATH );
 		$query = (string) wp_parse_url( $url, PHP_URL_QUERY );
 		$path  = ( $path === '' ? '/' : $path ) . ( $query !== '' ? '?' . $query : '' );
+		$auth      = '';
+		$forwarded = false;
+		if ( defined( 'AITP_LOOPBACK_AUTH' ) && is_string( AITP_LOOPBACK_AUTH ) && AITP_LOOPBACK_AUTH !== '' ) {
+			$auth = 'Basic ' . base64_encode( AITP_LOOPBACK_AUTH ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- HTTP Basic credentials, set by the site owner.
+		} elseif ( isset( $_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW'] ) ) {
+			// As WordPress' own loopback check: a site behind a password asks the same password.
+			$auth      = 'Basic ' . base64_encode( wp_unslash( $_SERVER['PHP_AUTH_USER'] ) . ':' . wp_unslash( $_SERVER['PHP_AUTH_PW'] ) ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+			$forwarded = true;
+		}
 		$req   = array(
 			'url'  => $url,
 			'args' => array(
@@ -743,6 +1189,9 @@ final class AITP_Queue {
 				),
 			),
 		);
+		if ( $auth !== '' ) {
+			$req['args']['headers']['Authorization'] = $auth;
+		}
 		/**
 		 * Adjust the internal page request, e.g. when the site cannot reach its own public
 		 * address from the server (containers, proxies). The signed path must not change.
@@ -751,6 +1200,10 @@ final class AITP_Queue {
 		 * @param string $lang Language.
 		 */
 		$req = apply_filters( 'aitp_queue_request', $req, $lang );
+		if ( $forwarded && strtolower( (string) wp_parse_url( $req['url'], PHP_URL_HOST ) ) !== strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) ) ) {
+			// The password this request came with is only passed on to this site's own address.
+			unset( $req['args']['headers']['Authorization'] );
+		}
 
 		$t0   = microtime( true );
 		$resp = wp_remote_get( $req['url'], $req['args'] );
@@ -767,8 +1220,13 @@ final class AITP_Queue {
 			'rows'       => array(),
 			'strings'    => 0,
 			'unknown'    => 0,
+			'locked'     => 0,
 			'sig'        => '',
+			'location'   => '',
 		);
+		if ( $out['http'] >= 300 && $out['http'] < 400 ) {
+			$out['location'] = substr( (string) wp_remote_retrieve_header( $resp, 'location' ), 0, 300 );
+		}
 		// The page says when it did not accept the signature (format, expired, signature, replay).
 		$said = is_wp_error( $resp ) ? '' : (string) wp_remote_retrieve_header( $resp, self::HEADER );
 		if ( preg_match( '~^invalid:([a-z]{1,20})$~', $said, $m ) ) {
@@ -806,21 +1264,12 @@ final class AITP_Queue {
 	 * @return bool
 	 */
 	private static function lock( $ttl ) {
-		if ( add_option( self::LOCK, time() + $ttl, '', 'no' ) ) {
-			return true;
-		}
-		wp_cache_delete( self::LOCK, 'options' );
-		$until = (int) get_option( self::LOCK );
-		if ( $until && $until < time() ) {
-			delete_option( self::LOCK );
-			return add_option( self::LOCK, time() + $ttl, '', 'no' );
-		}
-		return false;
+		return AITP_Lock::acquire( self::LOCK, $ttl );
 	}
 
 	/** Release the mutex. */
 	private static function unlock() {
-		delete_option( self::LOCK );
+		AITP_Lock::release( self::LOCK );
 	}
 
 	/* -------------------------------------------------------------------------------------
@@ -881,6 +1330,7 @@ final class AITP_Queue {
 			'rows'       => array(),
 			'strings'    => 0,
 			'unknown'    => 0,
+			'locked'     => 0,
 		);
 		if ( $this->map ) {
 			// Read only: whatever engine is selected (also another plugin's), nothing is machine
@@ -908,6 +1358,7 @@ final class AITP_Queue {
 			}
 		);
 		add_action( 'aitp_translated_batch', array( $this, 'collect' ), 10, 2 );
+		add_action( 'aitp_engine_unavailable', array( $this, 'unavailable' ) );
 		add_action( 'shutdown', array( $this, 'save_report' ), PHP_INT_MAX - 1 );
 	}
 
@@ -924,6 +1375,14 @@ final class AITP_Queue {
 		$stop             = isset( $result['stats']['stop_reason'] ) ? (string) $result['stats']['stop_reason'] : '';
 		if ( $r['stop'] === '' && $stop !== '' ) {
 			$r['stop'] = $stop;
+		}
+	}
+
+	/** @param string $reason Why the engine could not translate. */
+	public function unavailable( $reason ) {
+		$this->report['calls']++;
+		if ( $this->report['stop'] === '' ) {
+			$this->report['stop'] = (string) $reason;
 		}
 	}
 
@@ -974,6 +1433,14 @@ final class AITP_Queue {
 	/** Store the report for the worker that requested this page. */
 	public function save_report() {
 		if ( $this->warm !== '' ) {
+			// Strings TranslatePress did not send because another request (or a call of the last
+			// 50 s) holds them: the page is not finished even if the engine was never called.
+			if ( class_exists( 'TRP_Translate_Press' ) ) {
+				$mt = TRP_Translate_Press::get_trp_instance()->get_component( 'machine_translator' );
+				if ( $mt && method_exists( $mt, 'get_lock_skipped_strings' ) ) {
+					$this->report['locked'] = count( (array) $mt->get_lock_skipped_strings() );
+				}
+			}
 			set_transient( 'aitp_warm_' . $this->warm, $this->report, 600 );
 		}
 	}

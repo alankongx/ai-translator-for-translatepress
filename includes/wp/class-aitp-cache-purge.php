@@ -57,42 +57,40 @@ final class AITP_Cache_Purge {
 		if ( ! $urls ) {
 			return $out;
 		}
-		if ( count( $urls ) <= self::SYNC_MAX && self::room() >= count( $urls ) ) {
+		if ( ! self::litespeed() && ! self::others() ) {
+			// No cache that takes addresses: nothing to keep a list for (hooks still hear about it).
+			do_action( 'aitp_purge_urls', $urls ); // phpcs:ignore WordPress.NamingConventions.ValidHookName -- documented in purge_now().
+			$out['now'] = count( $urls );
+			return $out;
+		}
+		if ( count( $urls ) <= self::SYNC_MAX && self::room() >= count( self::spellings( $urls ) ) ) {
 			self::purge_now( $urls );
 			$out['now'] = count( $urls );
 			return $out;
 		}
-		$s = self::state();
-		if ( self::litespeed() && ! self::cli() && count( $urls ) + count( $s['urls'] ) > self::ALL_OVER ) {
+		$s       = self::state();
+		$waiting = AITP_Tasks::count( 'purge' );
+		if ( self::litespeed() && ! self::cli() && count( $urls ) + $waiting > self::ALL_OVER ) {
 			// Many pages: one "clear everything" for LiteSpeed covers the list and what is waiting.
 			self::litespeed_all( count( $urls ) );
 			$out['all'] = true;
 			if ( ! self::others() ) {
 				$out['now'] = count( $urls );
-				self::save( array( 'urls' => array(), 'dropped' => 0, 'ls_done' => false ) );
-				$out['waiting'] = 0;
+				AITP_Tasks::clear( 'purge' );
+				self::save( array( 'dropped' => 0, 'ls_done' => false ) );
 				return $out;
 			}
 			$s['ls_done'] = true; // The list is left for the other caches only.
-		} else {
+		} elseif ( ! $waiting ) {
 			$s['ls_done'] = false;
 		}
-		$have = array_fill_keys( $s['urls'], true );
-		foreach ( $urls as $u ) {
-			if ( isset( $have[ $u ] ) ) {
-				continue;
-			}
-			if ( count( $s['urls'] ) >= self::MAX ) {
-				$out['dropped']++;
-				continue;
-			}
-			$s['urls'][] = $u;
-			$have[ $u ]  = true;
-			$out['later']++;
-		}
-		$s['dropped'] += $out['dropped'];
+		$room = max( 0, self::MAX - $waiting );
+		$take = array_slice( $urls, 0, $room );
+		$out['dropped'] = count( $urls ) - count( $take );
+		$out['later']   = AITP_Tasks::add( 'purge', $take );
+		$s['dropped']  += $out['dropped'];
 		self::save( $s );
-		$out['waiting'] = count( $s['urls'] );
+		$out['waiting'] = AITP_Tasks::count( 'purge' );
 		if ( ! wp_next_scheduled( self::CRON ) ) {
 			wp_schedule_single_event( time() + 5, self::CRON );
 		}
@@ -108,35 +106,52 @@ final class AITP_Cache_Purge {
 	public static function tick( $seconds = 10 ) {
 		$end = microtime( true ) + max( 1, (int) $seconds );
 		$s   = self::state();
+		$n   = AITP_Tasks::count( 'purge' );
 		// A long list (for example left by WP-CLI): one "clear everything" for LiteSpeed. So is any
 		// list in WP-Cron run by WP-CLI (a server cron job): there LiteSpeed stores one header for
 		// the next visitor, which stays a few bytes for "everything" but grows with every address.
-		$whole = self::cli() ? wp_doing_cron() : count( $s['urls'] ) > self::ALL_OVER;
-		if ( $s['urls'] && empty( $s['ls_done'] ) && self::litespeed() && $whole ) {
-			self::litespeed_all( count( $s['urls'] ) );
+		$whole = self::cli() ? wp_doing_cron() : $n > self::ALL_OVER;
+		if ( $n && empty( $s['ls_done'] ) && self::litespeed() && $whole ) {
+			self::litespeed_all( $n );
 			if ( ! self::others() ) {
-				self::save( array( 'urls' => array(), 'dropped' => 0, 'ls_done' => false ) );
+				AITP_Tasks::clear( 'purge' );
+				self::save( array( 'dropped' => 0, 'ls_done' => false ) );
 				return 0;
 			}
 			$s['ls_done'] = true;
 			self::save( $s );
 		}
 		do {
-			$s = self::state();
-			if ( ! $s['urls'] ) {
-				self::save( $s ); // Clears a stale count of left-out addresses.
-				break;
-			}
-			$n = empty( $s['ls_done'] ) ? min( self::STEP, self::room() ) : self::STEP;
-			if ( $n < 1 ) {
+			$s    = self::state();
+			$take = empty( $s['ls_done'] ) ? min( self::STEP, self::room() ) : self::STEP;
+			if ( $take < 1 ) {
 				break; // This request has cleared as many as LiteSpeed takes; the next run goes on.
 			}
-			$chunk     = array_slice( $s['urls'], 0, $n );
-			$s['urls'] = array_slice( $s['urls'], $n );
-			self::save( $s ); // Taken off first: a failing cache plugin cannot stop the list.
-			self::purge_now( $chunk, ! empty( $s['ls_done'] ) );
+			$chunk = AITP_Tasks::first( 'purge', $take );
+			if ( $chunk && empty( $s['ls_done'] ) && self::litespeed() ) {
+				// Each spelling of an address is one LiteSpeed tag: keep the chunk within room().
+				$fit = array();
+				$w   = 0;
+				foreach ( $chunk as $id => $u ) {
+					$w += count( self::spellings( array( $u ) ) );
+					if ( $w > $take ) {
+						break;
+					}
+					$fit[ $id ] = $u;
+				}
+				if ( ! $fit ) {
+					break; // Not enough room for one address in both spellings; the next run goes on.
+				}
+				$chunk = $fit;
+			}
+			if ( ! $chunk ) {
+				self::save( array( 'dropped' => 0, 'ls_done' => false ) ); // Clears a stale count of left-out addresses.
+				break;
+			}
+			AITP_Tasks::remove( array_keys( $chunk ) ); // Taken off first: a failing cache plugin cannot stop the list.
+			self::purge_now( array_values( $chunk ), ! empty( $s['ls_done'] ) );
 		} while ( microtime( true ) < $end );
-		$left = count( self::state()['urls'] );
+		$left = AITP_Tasks::count( 'purge' );
 		if ( $left && ! wp_next_scheduled( self::CRON ) ) {
 			wp_schedule_single_event( time() + 30, self::CRON );
 		}
@@ -146,11 +161,12 @@ final class AITP_Cache_Purge {
 	/** @return array{waiting:int,dropped:int} */
 	public static function status() {
 		$s = self::state();
-		return array( 'waiting' => count( $s['urls'] ), 'dropped' => (int) $s['dropped'] );
+		return array( 'waiting' => AITP_Tasks::count( 'purge' ), 'dropped' => (int) $s['dropped'] );
 	}
 
 	/** Forget the list (the whole cache was cleared some other way). */
 	public static function clear() {
+		AITP_Tasks::clear( 'purge' );
 		delete_option( self::OPTION );
 		wp_clear_scheduled_hook( self::CRON );
 	}
@@ -161,6 +177,9 @@ final class AITP_Cache_Purge {
 	 */
 	private static function purge_now( array $urls, $skip_ls = false ) {
 		$ls = ! $skip_ls && self::litespeed();
+		// Caches store the address in the spelling the browser sent (percent-encoded, upper case);
+		// TranslatePress may give non-ASCII paths raw. Both spellings are cleared.
+		$urls = self::spellings( $urls );
 		foreach ( $urls as $url ) {
 			try {
 				if ( $ls ) {
@@ -180,6 +199,7 @@ final class AITP_Cache_Purge {
 				if ( function_exists( 'wpsc_delete_url_cache' ) ) {
 					wpsc_delete_url_cache( $url ); // WP Super Cache.
 				}
+				self::purge_others( $url );
 			} catch ( \Throwable $e ) {
 				self::failed( $e );
 			}
@@ -198,6 +218,111 @@ final class AITP_Cache_Purge {
 		} catch ( \Throwable $e ) {
 			self::failed( $e );
 		}
+	}
+
+	/**
+	 * Other caches with a per-address purge (calls checked against each plugin's source, 2026-11).
+	 *
+	 * @param string $url Page address.
+	 */
+	private static function purge_others( $url ) {
+		if ( function_exists( 'sg_cachepress_purge_cache' ) ) {
+			sg_cachepress_purge_cache( $url ); // SiteGround Speed Optimizer.
+		}
+		if ( class_exists( 'Cache_Enabler' ) ) {
+			do_action( 'cache_enabler_clear_page_cache_by_url', $url ); // Cache Enabler.
+		}
+		if ( isset( $GLOBALS['nginx_purger'] ) && is_object( $GLOBALS['nginx_purger'] ) && method_exists( $GLOBALS['nginx_purger'], 'purge_url' ) ) {
+			$GLOBALS['nginx_purger']->purge_url( $url ); // Nginx Helper.
+		}
+		if ( class_exists( 'VarnishPurger' ) && is_callable( array( 'VarnishPurger', 'purge_url' ) ) ) {
+			VarnishPurger::purge_url( $url ); // Proxy Cache Purge (Varnish).
+		}
+		if ( class_exists( 'WpFastestCache' ) ) {
+			do_action( 'wpfc_clear_cache_by_url', $url ); // WP Fastest Cache.
+		}
+		if ( class_exists( 'WPO_Page_Cache' ) && is_callable( array( 'WPO_Page_Cache', 'delete_cache_by_url' ) ) ) {
+			WPO_Page_Cache::delete_cache_by_url( $url ); // WP-Optimize.
+		}
+		if ( class_exists( '\Hummingbird\Core\Utils' ) && is_callable( array( '\Hummingbird\Core\Utils', 'get_module' ) ) ) {
+			$path = (string) wp_parse_url( $url, PHP_URL_PATH );
+			$hb   = \Hummingbird\Core\Utils::get_module( 'page_cache' );
+			if ( $path !== '' && is_object( $hb ) && method_exists( $hb, 'clear_cache' ) ) {
+				$hb->clear_cache( trailingslashit( $path ) ); // Hummingbird (an empty path would clear everything).
+			}
+		}
+	}
+
+	/**
+	 * Page caches found on this site.
+	 *
+	 * @return array{per_url:string[],whole_only:string[]} per_url: cleared page by page by this
+	 *         plugin; whole_only: found, but they only clear by post or as a whole (clear by hand).
+	 */
+	public static function detected() {
+		$per = array();
+		$all = array();
+		$map = array(
+			'LiteSpeed Cache'        => self::litespeed(),
+			'W3 Total Cache'         => function_exists( 'w3tc_flush_url' ),
+			'WP Super Cache'         => function_exists( 'wpsc_delete_url_cache' ),
+			'WP Rocket'              => function_exists( 'rocket_clean_files' ),
+			'SiteGround Optimizer'   => function_exists( 'sg_cachepress_purge_cache' ),
+			'Cache Enabler'          => class_exists( 'Cache_Enabler' ),
+			'Nginx Helper'           => isset( $GLOBALS['nginx_purger'] ) && is_object( $GLOBALS['nginx_purger'] ),
+			'Proxy Cache Purge'      => class_exists( 'VarnishPurger' ),
+			'WP Fastest Cache'       => class_exists( 'WpFastestCache' ),
+			'WP-Optimize'            => class_exists( 'WPO_Page_Cache' ),
+			'Hummingbird'            => class_exists( '\Hummingbird\Core\Utils' ),
+		);
+		foreach ( $map as $name => $on ) {
+			if ( $on ) {
+				$per[] = $name;
+			}
+		}
+		$whole = array(
+			'Breeze'     => defined( 'BREEZE_VERSION' ),
+			'Cloudflare' => defined( 'CLOUDFLARE_PLUGIN_DIR' ),
+			'Kinsta'     => defined( 'KINSTA_CACHE_ZONE' ) || class_exists( 'Kinsta\Cache' ),
+			'WP Engine'  => class_exists( 'WpeCommon' ),
+		);
+		foreach ( $whole as $name => $on ) {
+			if ( $on ) {
+				$all[] = $name;
+			}
+		}
+		return array( 'per_url' => $per, 'whole_only' => $all );
+	}
+
+	/**
+	 * @param string $url Address.
+	 * @return string The same address with its path in the browser's spelling (%XX upper case).
+	 */
+	public static function encoded( $url ) {
+		$p = wp_parse_url( $url );
+		if ( empty( $p['path'] ) ) {
+			return $url;
+		}
+		$path = AITP_Queue_Logic::canonical_path( $p['path'] );
+		return str_replace( $p['path'], $path, $url );
+	}
+
+	/**
+	 * Addresses in every spelling a cache may have stored them under (raw and %XX upper case).
+	 *
+	 * @param string[] $urls Addresses.
+	 * @return string[]
+	 */
+	private static function spellings( array $urls ) {
+		$all = array();
+		foreach ( $urls as $url ) {
+			$all[] = $url;
+			$alt   = self::encoded( $url );
+			if ( $alt !== $url ) {
+				$all[] = $alt;
+			}
+		}
+		return array_values( array_unique( $all ) );
 	}
 
 	/** @return int Addresses this request may still clear (LiteSpeed: PER_REQUEST in all; others: no limit). */
@@ -256,7 +381,8 @@ final class AITP_Cache_Purge {
 
 	/** @return bool A cache other than LiteSpeed takes addresses. */
 	private static function others() {
-		return function_exists( 'w3tc_flush_url' ) || function_exists( 'wpsc_delete_url_cache' ) || function_exists( 'rocket_clean_files' ) || has_action( 'aitp_purge_urls' );
+		$d = self::detected();
+		return count( $d['per_url'] ) > ( self::litespeed() ? 1 : 0 ) || has_action( 'aitp_purge_urls' );
 	}
 
 	/**
@@ -283,12 +409,11 @@ final class AITP_Cache_Purge {
 		( new AITP_WP_Log() )->log( 'warning', 'cache_purge', array( 'error' => substr( get_class( $e ) . ': ' . $e->getMessage(), 0, 300 ) ) );
 	}
 
-	/** @return array{urls:string[],dropped:int,ls_done:bool} */
+	/** @return array{dropped:int,ls_done:bool} The list itself is in AITP_Tasks ('purge'). */
 	private static function state() {
 		$s = get_option( self::OPTION, array() );
 		$s = is_array( $s ) ? $s : array();
 		return array(
-			'urls'    => isset( $s['urls'] ) && is_array( $s['urls'] ) ? array_values( $s['urls'] ) : array(),
 			'dropped' => isset( $s['dropped'] ) ? (int) $s['dropped'] : 0,
 			'ls_done' => ! empty( $s['ls_done'] ),
 		);
@@ -296,10 +421,10 @@ final class AITP_Cache_Purge {
 
 	/** @param array $s State. */
 	private static function save( array $s ) {
-		if ( ! $s['urls'] ) {
-			delete_option( self::OPTION ); // Done: the count of addresses left out goes with it.
+		if ( empty( $s['dropped'] ) && empty( $s['ls_done'] ) ) {
+			delete_option( self::OPTION );
 			return;
 		}
-		update_option( self::OPTION, $s, false );
+		update_option( self::OPTION, array( 'dropped' => (int) $s['dropped'], 'ls_done' => ! empty( $s['ls_done'] ) ), false );
 	}
 }

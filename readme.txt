@@ -129,6 +129,15 @@ Updates come from the GitHub releases of this plugin. To turn update checks off:
 * PHP date formats and text direction strings are answered locally instead of being translated.
 * TranslatePress' quote and punctuation rewrite of machine translations is switched off while this engine is selected.
 * Status tab: languages currently paused and tokens used per day (last 7 days).
+* Queue: a page is only "done" when TranslatePress had nothing left to send. Strings locked by another request no longer count as done; pages with progress are revisited after TranslatePress' lock (55 s) instead of at once.
+* Queue: "Chosen pages" box — check which texts of a page are still untranslated (with the reason), or translate chosen pages first; they are checked again before being marked done. Also `wp aitp queue check|target|selftest`.
+* Long texts split into segments keep finished segments, so the next attempt only sends what is missing.
+* Visitors wait less: default time per page visit 10 s (was 25; a setting left at 25 is changed to 10 by the update — set it again if 25 was chosen on purpose); smaller batches when little time is left; a request cut off by the visit's own deadline is no longer counted against the provider.
+* Large sites: the page list is built step by step in the background (200 posts per step); only published languages; WooCommerce cart/checkout/account pages skipped; extra pages of other sites are reported.
+* Cache purging per URL for SiteGround, Cache Enabler, Nginx Helper, Varnish HTTP Purge, WP Fastest Cache, WP-Optimize and Hummingbird; both the raw and the normalised spelling of an address are purged.
+* Locks that two requests cannot both take (also with Redis or Memcached); long work lists moved from options to a table.
+* Smaller requests no longer multiply what a refused key or a rate limit costs: requests go out in waves, and after a wave the provider refuses for the whole account (key, billing, rate limit, missing model) the rest wait.
+* Internal access self-test before the queue starts (redirects, HTTP authentication: `AITP_LOOPBACK_AUTH`); lost scheduled tasks are put back.
 
 = 0.6.6 =
 * Fix: text that is already in the target language (TranslatePress keeps, for example, the language switcher labels of each language as originals) and comes back unchanged was rejected as "untranslated"; with two such strings in a batch the whole answer was thrown away as misaligned and after three such answers the engine paused for every language. Text with clear signs of the target language and no English function word is now asked about once and then kept and listed for review ("already in this language"). Entries handed back unchanged no longer make a batch look misaligned: they fail on their own and the rest of the batch is used. Only when half a batch or more comes back unchanged (strings already rejected for that before not counted) is the whole answer distrusted and counted against the provider. Real English left unchanged (titles, sentences, phrases with English function words) is still rejected and never saved.

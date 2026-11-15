@@ -60,6 +60,14 @@ final class AITP_Plugin {
 
 		if ( is_admin() ) {
 			AITP_Admin::instance()->boot();
+			add_action(
+				'admin_init',
+				function () {
+					if ( current_user_can( 'manage_options' ) && get_option( 'aitp_db_version' ) === AITP_Schema::VERSION ) {
+						self::heal_cron();
+					}
+				}
+			);
 		}
 		AITP_Updater::instance()->boot();
 		AITP_Queue::instance()->boot();
@@ -151,9 +159,9 @@ final class AITP_Plugin {
 	 */
 	public function time_budget( $lock_timeout ) {
 		$s      = AITP_Settings::get();
-		$budget = (int) $s['time_budget'];
+		$budget = (int) $s['time_budget']; // A visitor is waiting: short (default 10 s).
 		if ( AITP_Queue::is_warm() ) {
-			$budget = max( $budget, AITP_Queue::page_seconds() ); // Background visit: nobody is waiting.
+			$budget = AITP_Queue::page_seconds(); // Background visit: nobody is waiting.
 		}
 		return (int) max( 10, min( $budget, (int) $lock_timeout - 15 ) );
 	}
@@ -202,6 +210,7 @@ final class AITP_Plugin {
 		$wpdb->query( $wpdb->prepare( 'DELETE FROM ' . AITP_Schema::table( 'cache' ) . ' WHERE created_at < %s', gmdate( 'Y-m-d H:i:s', time() - 60 * DAY_IN_SECONDS ) ) );
 		$wpdb->query( $wpdb->prepare( 'DELETE FROM ' . AITP_Schema::table( 'failures' ) . ' WHERE updated_at < %s', gmdate( 'Y-m-d H:i:s', time() - 30 * DAY_IN_SECONDS ) ) );
 		// phpcs:enable
+		self::heal_cron();
 	}
 
 	/**
@@ -233,9 +242,34 @@ final class AITP_Plugin {
 
 	/** Activation. */
 	public static function activate() {
-		AITP_Schema::install();
+		AITP_Schema::install();       // Tables checked on every activation.
+		AITP_Schema::maybe_upgrade(); // Data steps and the version number when it changed.
+		self::heal_cron();
+	}
+
+	/**
+	 * Background jobs that are marked as running get their WP-Cron event back. Deactivation
+	 * clears every event but leaves the jobs' state, so after a deactivate / activate (common
+	 * when troubleshooting) they showed "running" with nothing scheduled.
+	 */
+	public static function heal_cron() {
 		if ( ! wp_next_scheduled( 'aitp_daily' ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'aitp_daily' );
+		}
+		$jobs = array(
+			AITP_Queue::CRON      => AITP_Queue::state()['status'] === 'running',
+			AITP_Queue::SYNC_CRON => AITP_Queue::sync_state() !== null,
+			AITP_Pagemap::CRON    => AITP_Pagemap::state()['status'] === 'running',
+			AITP_Audit::CRON      => AITP_Audit::state()['status'] === 'running',
+			AITP_Autofix::CRON    => AITP_Autofix::state()['status'] === 'running',
+		);
+		foreach ( $jobs as $hook => $running ) {
+			if ( $running && ! wp_next_scheduled( $hook ) ) {
+				wp_schedule_event( time() + 10, AITP_Queue::SCHEDULE, $hook );
+			}
+		}
+		if ( AITP_Tasks::count( 'purge' ) && ! wp_next_scheduled( AITP_Cache_Purge::CRON ) ) {
+			wp_schedule_single_event( time() + 10, AITP_Cache_Purge::CRON );
 		}
 	}
 
@@ -247,5 +281,6 @@ final class AITP_Plugin {
 		wp_clear_scheduled_hook( AITP_Autofix::CRON );
 		wp_clear_scheduled_hook( AITP_Pagemap::CRON );
 		wp_clear_scheduled_hook( AITP_Cache_Purge::CRON );
+		wp_clear_scheduled_hook( AITP_Queue::SYNC_CRON );
 	}
 }

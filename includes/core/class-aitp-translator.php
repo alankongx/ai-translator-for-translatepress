@@ -20,6 +20,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class AITP_Translator {
 
 	/** Failure reasons that say nothing about the item itself (no per-item backoff). */
+	/** Errors that refuse every request of the account, not one batch. */
+	const ACCOUNT_REFUSED = array( 'auth', 'billing', 'rate_limit', 'quota_daily', 'not_found' );
+
 	const SYSTEMIC = array( 'structured_data', 'deferred', 'breaker', 'quota', 'rate_limit', 'quota_daily', 'auth', 'billing', 'not_found', 'bad_request', 'network', 'timeout', 'server', 'unsupported', 'held', 'invalid_response', 'split', 'repeated_output', 'refused' );
 
 	/**
@@ -174,6 +177,7 @@ final class AITP_Translator {
 				'cached'      => 0,
 				'held'        => 0,
 				'fixed'       => 0,
+				'segments'    => 0,
 				'requests'    => 0,
 				'rounds'      => 0,
 				'sent_bytes'  => 0,
@@ -238,6 +242,7 @@ final class AITP_Translator {
 		foreach ( $pending as $key => $text ) {
 			$split          = AITP_Segmenter::split( $text, (int) $this->opt['split_bytes'] );
 			$splits[ $key ] = $split;
+			$count          = count( $split['parts'] );
 			foreach ( $split['parts'] as $i => $part ) {
 				$uid                  = 'u' . ( ++$n );
 				$units[ $uid ]        = array(
@@ -257,8 +262,30 @@ final class AITP_Translator {
 					'soft_flags'     => array(),
 					'confirm_asked'  => false,
 					'solo'           => false,
+					'pkey'           => '',
+					'from_cache'     => false,
 				);
 				$item_units[ $key ][] = $uid;
+				if ( $count > 1 ) {
+					// A long text takes several page views when time runs out: finished segments
+					// are kept, so the next view only sends the ones still missing.
+					$prev                  = $i > 0 ? $split['parts'][ $i - 1 ]['text'] : '';
+					$next                  = $i + 1 < $count ? $split['parts'][ $i + 1 ]['text'] : '';
+					$pkey                  = $this->cache_key( 'segment|' . $part['text'], $src, $tgt, md5( $prev ) . md5( $next ), $prompt_v );
+					$units[ $uid ]['pkey'] = $pkey;
+					$hit                   = $this->cache->get( $pkey );
+					if ( is_string( $hit ) ) {
+						$v = $this->validator->check( $part['text'], $hit, $si, $ti );
+						if ( ! $v['hard'] && ! ( array_diff( $v['soft'], array( AITP_Validator::CONFIRM_IDENTICAL ) ) && $this->opt['soft_policy'] === 'strict' ) ) {
+							$units[ $uid ]['done']       = true;
+							$units[ $uid ]['result']     = $hit;
+							$units[ $uid ]['from_cache'] = true;
+							$out['stats']['segments']++;
+						} else {
+							$this->cache->delete( $pkey );
+						}
+					}
+				}
 			}
 		}
 
@@ -269,7 +296,12 @@ final class AITP_Translator {
 		// in the next pass, without counting an attempt against the entries: one bad text must
 		// not keep its neighbours untranslated. Only a single entry that still fails is charged.
 		// Splitting may run past max_rounds (MAX_SPLIT_PASSES), sending only the halves.
-		$queue       = array_keys( $units );
+		$queue = array();
+		foreach ( $units as $uid => $u ) {
+			if ( ! $u['done'] ) {
+				$queue[] = $uid;
+			}
+		}
 		$forced      = array(); // Groups of uids that must be sent together in the next pass.
 		$stop_reason = '';
 		$round       = 0;
@@ -317,6 +349,11 @@ final class AITP_Translator {
 			$forced = array();
 			if ( ! $extra ) {
 				$max_items = max( 1, (int) floor( $this->opt['batch_items'] / pow( 2, min( $round, (int) $this->opt['max_rounds'] ) - 1 ) ) );
+				// Little time left (a visitor is waiting): smaller requests, which come back in
+				// time instead of being cut off by the deadline after they were paid for.
+				$scale     = max( 0.25, min( 1.0, ( $deadline - $this->now() ) / max( 1.0, (float) $this->opt['http_timeout'] ) ) );
+				$max_items = max( 1, (int) floor( $max_items * $scale ) );
+				$max_tok   = max( 300, (int) floor( (int) $this->opt['batch_tokens'] * $scale ) );
 				$queue_txt = array();
 				foreach ( $queue as $uid ) {
 					if ( isset( $grouped[ $uid ] ) ) {
@@ -328,7 +365,7 @@ final class AITP_Translator {
 					}
 					$queue_txt[ $uid ] = $units[ $uid ]['text'];
 				}
-				foreach ( AITP_Batcher::build( $queue_txt, (int) $this->opt['batch_tokens'], $max_items ) as $b ) {
+				foreach ( AITP_Batcher::build( $queue_txt, $max_tok, $max_items ) as $b ) {
 					$batches[] = $b;
 				}
 			}
@@ -365,22 +402,47 @@ final class AITP_Translator {
 				$max_out   = AITP_Batcher::max_output_tokens( $payload, $ti, $reserve, $cap );
 				$remaining = $deadline - $this->now();
 				// Long answers take longer: 5 s more per 1000 expected output tokens (at most double).
-				$timeout   = max( 5.0, min( (float) $this->opt['http_timeout'] + min( (float) $this->opt['http_timeout'], 5.0 * floor( $visible / 1000 ) ), $remaining ) );
+				$natural   = (float) $this->opt['http_timeout'] + min( (float) $this->opt['http_timeout'], 5.0 * floor( $visible / 1000 ) );
+				$timeout   = max( 5.0, min( $natural, $remaining ) );
 				$user      = AITP_Protocol::user_payload( $payload, $si, $ti, $this->payload_extra( $uids, $units, $order, $pos, $texts, $ti, $notes ) );
 				$req       = $this->provider->build_request( $system, $user, $max_out, $this->caps );
 				$req['timeout']   = $timeout;
 				$req['not_after'] = $deadline - (float) $this->opt['min_request_seconds'];
 				$req['deadline']  = $deadline;
 				$requests[ $bi ] = $req;
-				$meta[ $bi ]     = array( 'ids' => $ids, 'bytes' => $bytes, 'caps' => $this->caps, 'max_out' => $max_out );
+				$meta[ $bi ]     = array( 'ids' => $ids, 'bytes' => $bytes, 'caps' => $this->caps, 'max_out' => $max_out, 'cut' => $timeout < $natural - 0.5 );
 			}
 
 			if ( ! $requests ) {
 				break;
 			}
 
-			$results = $this->transport->send( $requests, (int) $this->opt['concurrency'] );
-			$out['stats']['requests'] += count( $requests );
+			// Wave by wave: once the provider refuses the account (key, billing, rate limit), the
+			// remaining requests would be refused too and only add to the limit; they wait.
+			$results = array();
+			$halt    = false;
+			$conc    = max( 1, (int) $this->opt['concurrency'] );
+			foreach ( array_chunk( $requests, $conc, true ) as $wave ) {
+				if ( $halt ) {
+					foreach ( array_keys( $wave ) as $bi ) {
+						$results[ $bi ] = array( 'status' => 0, 'headers' => array(), 'body' => '', 'error' => 'Not sent: the provider refused the previous requests', 'error_type' => 'skipped', 'duration_ms' => 0 );
+					}
+					continue;
+				}
+				$got = $this->transport->send( $wave, $conc );
+				foreach ( $wave as $bi => $unused ) {
+					$res            = isset( $got[ $bi ] ) ? $got[ $bi ] : array( 'status' => 0, 'headers' => array(), 'body' => '', 'error' => 'No response', 'error_type' => 'network', 'duration_ms' => 0 );
+					$results[ $bi ] = $res;
+					if ( empty( $res['error'] ) && (int) $res['status'] >= 400 && in_array( AITP_Provider::classify_error( (int) $res['status'], (string) $res['body'] ), self::ACCOUNT_REFUSED, true ) ) {
+						$halt = true;
+					}
+				}
+			}
+			foreach ( $results as $res ) {
+				if ( empty( $res['error'] ) || $res['error_type'] !== 'skipped' ) {
+					$out['stats']['requests']++;
+				}
+			}
 
 			$requeue           = array();
 			$fatal             = '';
@@ -388,6 +450,7 @@ final class AITP_Translator {
 			$round_split       = 0;
 			$round_isolated    = 0;
 			$skipped           = 0;
+			$cut               = 0;
 			$round_suspect     = 0;
 			$round_clean       = 0;
 			$bad_requests      = array();
@@ -414,6 +477,16 @@ final class AITP_Translator {
 					continue;
 				}
 				$usage['requests']++;
+				if ( ! empty( $res['error'] ) && $res['error_type'] === 'timeout' && $meta[ $bi ]['cut'] ) {
+					// Cut off by this call's own deadline, not slow by the provider's standard:
+					// no failure for the provider or the entries; they are sent again next time.
+					$this->quota->commit( $bytes ); // May have been processed and billed.
+					$out['stats']['sent_bytes'] += $bytes;
+					$this->log->log( 'notice', 'request', $logd + array( 'error' => 'deadline' ) );
+					$this->mark( $units, $ids, 'deferred', false, $requeue );
+					$cut++;
+					continue;
+				}
 				if ( ! empty( $res['error'] ) ) {
 					$code = $res['error_type'] === 'timeout' ? 'timeout' : 'network';
 					if ( $code === 'timeout' ) {
@@ -724,7 +797,7 @@ final class AITP_Translator {
 			if ( $stop_reason === 'quota' ) {
 				break;
 			}
-			if ( $skipped ) {
+			if ( $skipped || $cut ) {
 				$out['stats']['requests'] -= $skipped;
 				$stop_reason = 'deferred';
 				break;
@@ -764,6 +837,13 @@ final class AITP_Translator {
 			$this->usage->add( $tgt, $usage );
 		}
 
+		// Segments of long texts finished by the model this time: kept for the next call.
+		foreach ( $units as $u ) {
+			if ( $u['pkey'] !== '' && $u['done'] && ! $u['from_cache'] && ! $u['flags'] ) {
+				$this->cache->set( $u['pkey'], $tgt, (string) $u['result'] );
+			}
+		}
+
 		// Units that never finished: fall back to a soft-flagged candidate if one exists.
 		foreach ( $units as $uid => &$u ) {
 			if ( $u['done'] ) {
@@ -797,6 +877,7 @@ final class AITP_Translator {
 			}
 
 			$fkey = self::failure_key( $text, $src, $tgt );
+			$done = $reason === '';
 			if ( $reason === '' ) {
 				$joined = count( $parts ) === 1 ? $splits[ $key ]['lead'] . $parts[0] . $splits[ $key ]['parts'][0]['sep'] : AITP_Segmenter::join( $parts, $splits[ $key ], $ti['script'] );
 				if ( count( $parts ) > 1 ) {
@@ -805,6 +886,16 @@ final class AITP_Translator {
 						$reason = 'assembled_' . $v['hard'][0];
 					} else {
 						$flags = array_merge( $flags, array_diff( $v['soft'], array( AITP_Validator::CONFIRM_IDENTICAL ) ) );
+					}
+				}
+			}
+
+			if ( $done || $reason !== 'deferred' ) {
+				// Assembled (whole text cached below) or failed for good: the next attempt
+				// starts from scratch. Only a text still under way keeps its segments.
+				foreach ( $uids as $uid ) {
+					if ( $units[ $uid ]['pkey'] !== '' ) {
+						$this->cache->delete( $units[ $uid ]['pkey'] );
 					}
 				}
 			}
@@ -863,6 +954,7 @@ final class AITP_Translator {
 				'failed'      => count( $out['failed'] ),
 				'flagged'     => count( $out['flagged'] ),
 				'cached'      => $out['stats']['cached'],
+				'segments'    => $out['stats']['segments'],
 				'held'        => $out['stats']['held'],
 				'requests'    => $out['stats']['requests'],
 				'rounds'      => $out['stats']['rounds'],

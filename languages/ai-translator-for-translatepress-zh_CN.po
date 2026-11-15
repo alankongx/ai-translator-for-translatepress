@@ -2185,3 +2185,201 @@ msgstr "模型因未知原因中途停止"
 
 msgid "format code kept as is (not sent)"
 msgstr "格式代码保持原样（不发送）"
+
+msgid "strings locked by another translation in progress; looked at again in a minute"
+msgstr "文字正被另一次翻译占用，一分钟后再看"
+
+msgid "page still shows untranslated text"
+msgstr "页面上还有没翻译的文字"
+
+msgid "the API key or model cannot be used (enter the key again under Settings)"
+msgstr "API Key 或模型用不了（请到「设置」里重新填写 Key）"
+
+msgid "The site can open its own translated pages."
+msgstr "站点能正常打开自己的译文页面。"
+
+msgid "The site is behind a password (HTTP 401). Add define( 'AITP_LOOPBACK_AUTH', 'user:password' ); to wp-config.php, or remove the protection."
+msgstr "站点设了访问密码（HTTP 401）。请在 wp-config.php 里加上 define( 'AITP_LOOPBACK_AUTH', '用户名:密码' );，或者去掉密码保护。"
+
+msgid "A firewall, CDN (for example Cloudflare bot protection) or maintenance mode blocked the request. Allow the server's own IP address, or switch maintenance mode off."
+msgstr "防火墙、CDN（比如 Cloudflare 的机器人防护）或维护模式挡住了请求。请把服务器自己的 IP 加进白名单，或者关掉维护模式。"
+
+msgid "The translated home page was not found. Check that the language is published in TranslatePress and that permalinks work."
+msgstr "找不到首页的译文版。请确认这种语言已在 TranslatePress 里发布，固定链接正常。"
+
+msgid "The page redirects to %s. Check the site address in Settings → General (http or https, with or without www), or SEO settings that remove unknown URL parameters."
+msgstr "页面跳转到了 %s。请检查「设置 → 常规」里的站点地址（http 还是 https、带不带 www），或者会删掉网址参数的 SEO 设置。"
+
+msgid "The server cannot reach its own domain. Ask the host to allow loopback requests, or route them with the aitp_queue_request filter."
+msgstr "服务器访问不到自己的域名。请让主机商开放本机回环访问，或者用 aitp_queue_request 过滤器改走内网地址。"
+
+msgid "A proxy or CDN changed the request path or parameters, so the signed request was refused. Exclude the aitp_nc and aitp_map parameters from rewriting."
+msgstr "代理或 CDN 改写了请求路径或参数，签名不通过。请让它们不要改写 aitp_nc 和 aitp_map 这两个参数。"
+
+msgid "A page cache answered instead of WordPress. Exclude the aitp_nc parameter (or requests with the X-AITP-Warm header) from the page cache."
+msgstr "是页面缓存直接应答的，WordPress 没有处理。请把 aitp_nc 参数（或带 X-AITP-Warm 头的请求）排除在页面缓存之外。"
+
+msgid "No published TranslatePress language to translate into."
+msgstr "TranslatePress 里没有已发布的目标语言。"
+
+msgid "TranslatePress is not active."
+msgstr "TranslatePress 没有启用。"
+
+msgid "The test request failed (%s)."
+msgstr "测试访问没有成功（%s）。"
+
+msgid "Page list"
+msgstr "页面列表"
+
+msgid "being built in the background: %1$s of about %2$s pages"
+msgstr "正在后台建立：已列入 %1$s 页，共约 %2$s 页"
+
+msgid "pages per minute"
+msgstr "每分钟页数"
+
+msgid "daily character limit of the queue"
+msgstr "补翻队列每日字符上限"
+
+msgid "TranslatePress daily limit"
+msgstr "TranslatePress 每日上限"
+
+msgid "about %s hours"
+msgstr "约 %s 小时"
+
+msgid "about %s days"
+msgstr "约 %s 天"
+
+msgid "%1$s pages left, %2$s (limited by: %3$s)"
+msgstr "还剩 %1$s 页，%2$s（受限于：%3$s）"
+
+msgid "counting page visits only; characters per page are known after the first pages"
+msgstr "目前只按访问次数估算，翻过几页后才知道每页多少字符"
+
+msgid "Estimated time to finish"
+msgstr "预计完成时间"
+
+msgid "cleared page by page after translating: %s"
+msgstr "翻完后按页清除：%s"
+
+msgid "no page cache found that can be cleared page by page; if the site has a cache (host, CDN), clear it after translating"
+msgstr "没有找到能按页清除的页面缓存；如果站点有缓存（主机或 CDN），翻完后请手动清一次"
+
+msgid "clear by hand after translating: %s"
+msgstr "翻完后需要手动清除：%s"
+
+msgid "Page cache"
+msgstr "页面缓存"
+
+msgid "Internal access"
+msgstr "内部访问"
+
+msgid "not tested yet"
+msgstr "还没测试"
+
+msgid "Test internal access"
+msgstr "测试内部访问"
+
+msgid "Check or translate chosen pages"
+msgstr "查看或翻译指定页面"
+
+msgid "A long page is not translated in one go: what is left is translated on the next visit (a visit answered from a page cache does not count). Check how much of a page is still untranslated and why, or have the plugin visit chosen pages now until they are done, without waiting for visitors."
+msgstr "长页面一次翻不完，剩下的在下一次访问时接着翻（命中页面缓存的访问不算）。在这里可以查一个页面还有多少没翻、为什么没翻，也可以让插件现在就去访问指定页面，直到翻完，不用等访客。"
+
+msgid "Page addresses (default language, one per line)"
+msgstr "页面地址（默认语言版，每行一个）"
+
+msgid "All published languages"
+msgstr "所有已发布语言"
+
+msgid "Check the first page"
+msgstr "查看第一个页面"
+
+msgid "Translate these pages now"
+msgstr "现在就翻这些页面"
+
+msgid "Page check"
+msgstr "页面查看结果"
+
+msgid "Texts on the page"
+msgstr "页面文字"
+
+msgid "Machine translated"
+msgstr "机器翻译"
+
+msgid "Manually translated"
+msgstr "人工翻译"
+
+msgid "Not translated"
+msgstr "未翻译"
+
+msgid "Not in TranslatePress yet"
+msgstr "TranslatePress 里还没有"
+
+msgid "Could not read the page: %s"
+msgstr "读不到这个页面：%s"
+
+msgid "Untranslated texts and the reason on record"
+msgstr "未翻译的文字和记录的原因"
+
+msgid "no failure on record (not tried yet, or waiting for a page view)"
+msgstr "没有失败记录（还没试过，或在等下一次访问）"
+
+msgid "Checked %s. Reading a page does not translate or save anything."
+msgstr "查看时间 %s。查看页面不会翻译或保存任何内容。"
+
+msgid "Chosen pages"
+msgstr "指定页面"
+
+msgid "Strings translated"
+msgstr "已翻条数"
+
+msgid "Note"
+msgstr "说明"
+
+msgid "Forget these pages"
+msgstr "不再单独处理这些页面"
+
+msgid "not published"
+msgstr "未发布"
+
+msgid "Languages configured in TranslatePress. Unpublished languages cannot be opened by visitors, so the background visits cannot translate them either; publish the language in TranslatePress first."
+msgstr "TranslatePress 里设置的语言。未发布的语言访客打不开，后台访问也翻不了；请先在 TranslatePress 里发布这种语言。"
+
+msgid "Left out (not an address of this site): %s"
+msgstr "已略过（不是本站地址）：%s"
+
+msgid "TranslatePress is not using the AI Translator engine yet. Select it under TranslatePress → Automatic Translation first; the queue never drives another engine."
+msgstr "TranslatePress 还没有用 AI Translator 引擎。请先到「TranslatePress → 自动翻译」里选它；补翻队列不会替其它引擎跑。"
+
+msgid "Not started: the site cannot open its own translated pages. %s"
+msgstr "没有开始：站点打不开自己的译文页面。%s"
+
+msgid "Enter an address of this site (in the default language)."
+msgstr "请填写本站的页面地址（默认语言版）。"
+
+msgid "Select the AI Translator engine in TranslatePress and enter the API key first."
+msgstr "请先在 TranslatePress 里选 AI Translator 引擎，并填好 API Key。"
+
+msgid "%s page/language combinations are visited now, before the rest of the queue, until they show no untranslated text. Keep this page open to follow, or let it run in the background."
+msgstr "现在先访问这 %s 个「页面 × 语言」，排在队列其它页面前面，直到页面上没有未翻译的文字。可以开着本页看进度，也可以让它在后台跑。"
+
+msgid "Left out: %s"
+msgstr "已略过：%s"
+
+msgid "The chosen pages are ordinary queue pages again."
+msgstr "这些页面已回到普通队列。"
+
+msgid "Page list built: %1$s pages, %2$s page/language combinations."
+msgstr "页面列表已建好：%1$s 页，%2$s 个「页面 × 语言」。"
+
+msgid "The page list is being built in the background (%1$s of about %2$s pages so far). Pages already listed are translated meanwhile."
+msgstr "页面列表正在后台建立（已列入 %1$s 页，共约 %2$s 页）。已列入的页面会同时开始翻译。"
+
+msgid "only the chosen pages for now (%s left); the rest of the site waits"
+msgstr "目前只处理指定页面（还剩 %s 个），其余页面在等"
+
+msgid "The list keeps the pages until you forget them. Done pages are part of the normal queue again after that."
+msgstr "这些页面会一直列在这里，直到点「不再单独处理这些页面」；之后它们回到普通队列。"
+
+msgid "Time ran out: %s languages were not checked. Choose one language to check it on its own."
+msgstr "时间不够：还有 %s 种语言没查。请选一种语言单独查。"

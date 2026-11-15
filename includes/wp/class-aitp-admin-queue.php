@@ -41,6 +41,11 @@ final class AITP_Admin_Queue {
 			'engine_not_selected' => __( 'TranslatePress is not using the AI Translator engine (TranslatePress → Automatic Translation); the queue does not visit pages for another engine', 'ai-translator-for-translatepress' ),
 			'automatic_off'   => __( 'automatic translation is switched off in TranslatePress', 'ai-translator-for-translatepress' ),
 			'tp_limit'        => __( 'TranslatePress daily limit almost used up (reserve kept for visitors)', 'ai-translator-for-translatepress' ),
+			'locked'          => __( 'strings locked by another translation in progress; looked at again in a minute', 'ai-translator-for-translatepress' ),
+			'left'            => __( 'page still shows untranslated text', 'ai-translator-for-translatepress' ),
+			'not_configured'  => __( 'the API key or model cannot be used (enter the key again under Settings)', 'ai-translator-for-translatepress' ),
+			'target'          => '',
+			'repair'          => '',
 		);
 		if ( isset( $map[ $code ] ) ) {
 			return $map[ $code ];
@@ -50,6 +55,43 @@ final class AITP_Admin_Queue {
 			return sprintf( __( 'page returned HTTP %s', 'ai-translator-for-translatepress' ), substr( $code, 5 ) );
 		}
 		return AITP_Admin::code_label( $code );
+	}
+
+	/**
+	 * What to do when the site cannot open its own translated pages.
+	 *
+	 * @param string $code     Result code of AITP_Queue::loopback_test().
+	 * @param string $location Redirect target.
+	 * @return string
+	 */
+	public static function loopback_hint( $code, $location = '' ) {
+		switch ( $code ) {
+			case '':
+				return __( 'The site can open its own translated pages.', 'ai-translator-for-translatepress' );
+			case 'http_401':
+				return __( 'The site is behind a password (HTTP 401). Add define( \'AITP_LOOPBACK_AUTH\', \'user:password\' ); to wp-config.php, or remove the protection.', 'ai-translator-for-translatepress' );
+			case 'http_403':
+			case 'http_503':
+			case 'http_429':
+				return __( 'A firewall, CDN (for example Cloudflare bot protection) or maintenance mode blocked the request. Allow the server\'s own IP address, or switch maintenance mode off.', 'ai-translator-for-translatepress' );
+			case 'http_404':
+				return __( 'The translated home page was not found. Check that the language is published in TranslatePress and that permalinks work.', 'ai-translator-for-translatepress' );
+			case 'redirect':
+				/* translators: %s: address the page redirects to */
+				return sprintf( __( 'The page redirects to %s. Check the site address in Settings → General (http or https, with or without www), or SEO settings that remove unknown URL parameters.', 'ai-translator-for-translatepress' ), $location !== '' ? $location : '?' );
+			case 'unreachable':
+				return __( 'The server cannot reach its own domain. Ask the host to allow loopback requests, or route them with the aitp_queue_request filter.', 'ai-translator-for-translatepress' );
+			case 'signature':
+				return __( 'A proxy or CDN changed the request path or parameters, so the signed request was refused. Exclude the aitp_nc and aitp_map parameters from rewriting.', 'ai-translator-for-translatepress' );
+			case 'no_report':
+				return __( 'A page cache answered instead of WordPress. Exclude the aitp_nc parameter (or requests with the X-AITP-Warm header) from the page cache.', 'ai-translator-for-translatepress' );
+			case 'no_language':
+				return __( 'No published TranslatePress language to translate into.', 'ai-translator-for-translatepress' );
+			case 'no_translatepress':
+				return __( 'TranslatePress is not active.', 'ai-translator-for-translatepress' );
+		}
+		/* translators: %s: problem code */
+		return sprintf( __( 'The test request failed (%s).', 'ai-translator-for-translatepress' ), self::note_label( $code ) );
 	}
 
 	/** Render the tab. */
@@ -75,6 +117,13 @@ final class AITP_Admin_Queue {
 				/* translators: 1: reason, 2: time */
 				$state = sprintf( __( 'waiting: %1$s (until %2$s)', 'ai-translator-for-translatepress' ), self::note_label( $s['wait_reason'] ), wp_date( 'Y-m-d H:i', (int) $s['wait_until'] ) );
 			}
+			if ( $s['scope'] === 'target' ) {
+				$state .= ' — ' . sprintf(
+					/* translators: %s: number of page/language combinations */
+					__( 'only the chosen pages for now (%s left); the rest of the site waits', 'ai-translator-for-translatepress' ),
+					number_format_i18n( AITP_Queue::targets_waiting() )
+				);
+			}
 		} else {
 			$state = __( 'paused', 'ai-translator-for-translatepress' );
 		}
@@ -84,7 +133,46 @@ final class AITP_Admin_Queue {
 		self::kv( __( 'Pages done', 'ai-translator-for-translatepress' ), sprintf( __( '%1$s of %2$s', 'ai-translator-for-translatepress' ), number_format_i18n( $total['done'] ), number_format_i18n( $all ) ) );
 		$cap = (int) $set['queue_cap'];
 		self::kv( __( 'Characters used by the queue today', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $s['day_bytes'] ) . ( $cap ? ' / ' . number_format_i18n( $cap ) : '' ) );
-		self::kv( __( 'Page list built', 'ai-translator-for-translatepress' ), $s['last_sync'] ? wp_date( 'Y-m-d H:i', (int) $s['last_sync'] ) : __( 'not yet', 'ai-translator-for-translatepress' ) );
+		$sync = AITP_Queue::sync_state();
+		if ( $sync ) {
+			/* translators: 1: pages listed so far, 2: pages in all */
+			self::kv( __( 'Page list', 'ai-translator-for-translatepress' ), sprintf( __( 'being built in the background: %1$s of about %2$s pages', 'ai-translator-for-translatepress' ), number_format_i18n( (int) $sync['pages'] ), number_format_i18n( (int) $sync['total'] ) ) );
+		} else {
+			self::kv( __( 'Page list built', 'ai-translator-for-translatepress' ), $s['last_sync'] ? wp_date( 'Y-m-d H:i', (int) $s['last_sync'] ) : __( 'not yet', 'ai-translator-for-translatepress' ) );
+		}
+		$est = AITP_Queue::estimate();
+		if ( $est['left'] ) {
+			$limits = array(
+				'rate'      => __( 'pages per minute', 'ai-translator-for-translatepress' ),
+				'queue_cap' => __( 'daily character limit of the queue', 'ai-translator-for-translatepress' ),
+				'tp_limit'  => __( 'TranslatePress daily limit', 'ai-translator-for-translatepress' ),
+			);
+			$time = $est['hours'] < 48
+				/* translators: %s: hours */
+				? sprintf( __( 'about %s hours', 'ai-translator-for-translatepress' ), number_format_i18n( max( 1, (int) ceil( $est['hours'] ) ) ) )
+				/* translators: %s: days */
+				: sprintf( __( 'about %s days', 'ai-translator-for-translatepress' ), number_format_i18n( (int) ceil( $est['days'] ) ) );
+			/* translators: 1: pages left, 2: time, 3: what limits the speed */
+			$text = sprintf( __( '%1$s pages left, %2$s (limited by: %3$s)', 'ai-translator-for-translatepress' ), number_format_i18n( $est['left'] ), $time, $limits[ $est['limit'] ] );
+			if ( ! $est['avg'] ) {
+				$text .= ' — ' . __( 'counting page visits only; characters per page are known after the first pages', 'ai-translator-for-translatepress' );
+			}
+			self::kv( __( 'Estimated time to finish', 'ai-translator-for-translatepress' ), $text );
+		}
+		$caches = AITP_Cache_Purge::detected();
+		if ( $caches['per_url'] ) {
+			/* translators: %s: cache plugin names */
+			$ctext = sprintf( __( 'cleared page by page after translating: %s', 'ai-translator-for-translatepress' ), implode( ', ', $caches['per_url'] ) );
+		} else {
+			$ctext = __( 'no page cache found that can be cleared page by page; if the site has a cache (host, CDN), clear it after translating', 'ai-translator-for-translatepress' );
+		}
+		if ( $caches['whole_only'] ) {
+			/* translators: %s: cache names */
+			$ctext .= ' — ' . sprintf( __( 'clear by hand after translating: %s', 'ai-translator-for-translatepress' ), implode( ', ', $caches['whole_only'] ) );
+		}
+		self::kv( __( 'Page cache', 'ai-translator-for-translatepress' ), $ctext );
+		$lb = get_transient( 'aitp_loopback' );
+		self::kv( __( 'Internal access', 'ai-translator-for-translatepress' ), is_array( $lb ) ? self::loopback_hint( (string) $lb['code'], (string) $lb['location'] ) . ' (' . wp_date( 'Y-m-d H:i', (int) $lb['at'] ) . ')' : __( 'not tested yet', 'ai-translator-for-translatepress' ) );
 		$next = wp_next_scheduled( AITP_Queue::CRON );
 		self::kv( __( 'Background run (WP-Cron)', 'ai-translator-for-translatepress' ), $next ? __( 'scheduled every minute', 'ai-translator-for-translatepress' ) . ( defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON ? ' — ' . __( 'WP-Cron is disabled on this site; a server cron job must call wp-cron.php, or keep this page open, or use "wp aitp queue run".', 'ai-translator-for-translatepress' ) : '' ) . AITP_Admin::cron_late( $next ) : __( 'not scheduled', 'ai-translator-for-translatepress' ) );
 		echo '</tbody></table>';
@@ -97,6 +185,7 @@ final class AITP_Admin_Queue {
 			self::button( 'start', $all ? __( 'Start', 'ai-translator-for-translatepress' ) : __( 'Build page list and start', 'ai-translator-for-translatepress' ), 'primary' );
 		}
 		self::button( 'sync', __( 'Rebuild page list', 'ai-translator-for-translatepress' ), 'secondary' );
+		self::button( 'selftest', __( 'Test internal access', 'ai-translator-for-translatepress' ), 'secondary' );
 		if ( $total['failed'] || $total['partial'] ) {
 			self::button( 'retry', __( 'Queue unfinished pages again', 'ai-translator-for-translatepress' ), 'secondary' );
 		}
@@ -108,6 +197,8 @@ final class AITP_Admin_Queue {
 		if ( $s['status'] === 'running' ) {
 			echo '<p><button type="button" class="button" id="aitp-queue-live" data-label-stop="' . esc_attr__( 'Stop advancing from this page', 'ai-translator-for-translatepress' ) . '">' . esc_html__( 'Advance from this page now', 'ai-translator-for-translatepress' ) . '</button> <span id="aitp-queue-live-status" class="description"></span></p>';
 		}
+
+		self::render_pages_box();
 
 		// Progress.
 		echo '<h2>' . esc_html__( 'Progress', 'ai-translator-for-translatepress' ) . '</h2>';
@@ -140,19 +231,82 @@ final class AITP_Admin_Queue {
 		$t    = AITP_Schema::table( 'queue' );
 		$rows = $wpdb->get_results( "SELECT url, lang, status, note, next_at, last_visit_at FROM $t WHERE status IN ('failed','partial') ORDER BY status = 'failed' DESC, last_visit_at DESC LIMIT 50", ARRAY_A ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		if ( $rows ) {
-			echo '<h2>' . esc_html__( 'Pages needing attention', 'ai-translator-for-translatepress' ) . '</h2><table class="widefat striped"><thead><tr><th>' . esc_html__( 'Page', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Language', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'State', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Reason', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Next attempt', 'ai-translator-for-translatepress' ) . '</th></tr></thead><tbody>';
+			echo '<h2>' . esc_html__( 'Pages needing attention', 'ai-translator-for-translatepress' ) . '</h2><div style="overflow-x:auto;"><table class="widefat striped"><thead><tr><th>' . esc_html__( 'Page', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Language', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'State', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Reason', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Next attempt', 'ai-translator-for-translatepress' ) . '</th></tr></thead><tbody>';
 			foreach ( $rows as $r ) {
 				echo '<tr><td><a href="' . esc_url( $r['url'] ) . '" target="_blank" rel="noopener">' . esc_html( $r['url'] ) . '</a></td><td>' . esc_html( $r['lang'] ) . '</td><td>' . esc_html( $r['status'] === 'failed' ? __( 'Failed', 'ai-translator-for-translatepress' ) : __( 'Partly done', 'ai-translator-for-translatepress' ) ) . '</td><td>' . esc_html( self::note_label( $r['note'] ) ) . '</td><td>' . esc_html( (int) $r['next_at'] ? wp_date( 'Y-m-d H:i', (int) $r['next_at'] ) : '' ) . '</td></tr>';
 			}
-			echo '</tbody></table><p class="description">' . esc_html__( 'Strings that fail are listed under Status & log with their reasons.', 'ai-translator-for-translatepress' ) . '</p>';
+			echo '</tbody></table></div><p class="description">' . esc_html__( 'Strings that fail are listed under Status & log with their reasons.', 'ai-translator-for-translatepress' ) . '</p>';
 		}
 
 		self::render_settings( $set );
 	}
 
+	/** "Check or translate chosen pages": one page's state, and translating a few pages now. */
+	private static function render_pages_box() {
+		$pub = AITP_Queue::published_languages();
+		echo '<h2 id="aitp-pages">' . esc_html__( 'Check or translate chosen pages', 'ai-translator-for-translatepress' ) . '</h2>';
+		echo '<p class="description" style="max-width:820px;">' . esc_html__( 'A long page is not translated in one go: what is left is translated on the next visit (a visit answered from a page cache does not count). Check how much of a page is still untranslated and why, or have the plugin visit chosen pages now until they are done, without waiting for visitors.', 'ai-translator-for-translatepress' ) . '</p>';
+		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="aitp_queue">';
+		wp_nonce_field( 'aitp_queue' );
+		echo '<p><label for="aitp-pages-urls">' . esc_html__( 'Page addresses (default language, one per line)', 'ai-translator-for-translatepress' ) . '</label><br><textarea id="aitp-pages-urls" class="large-text code" rows="3" name="urls"></textarea></p>';
+		echo '<p><label for="aitp-pages-lang">' . esc_html__( 'Language', 'ai-translator-for-translatepress' ) . '</label> <select id="aitp-pages-lang" name="lang"><option value="">' . esc_html__( 'All published languages', 'ai-translator-for-translatepress' ) . '</option>';
+		foreach ( $pub as $l ) {
+			echo '<option value="' . esc_attr( $l ) . '">' . esc_html( $l ) . '</option>';
+		}
+		echo '</select></p><p>';
+		echo '<button type="submit" class="button" name="do" value="check">' . esc_html__( 'Check the first page', 'ai-translator-for-translatepress' ) . '</button> ';
+		echo '<button type="submit" class="button button-primary" name="do" value="target">' . esc_html__( 'Translate these pages now', 'ai-translator-for-translatepress' ) . '</button>';
+		echo '</p></form>';
+
+		$res = get_transient( 'aitp_check_' . get_current_user_id() );
+		if ( is_array( $res ) && ! empty( $res['pages'] ) ) {
+			echo '<h3>' . esc_html__( 'Page check', 'ai-translator-for-translatepress' ) . '</h3><div style="overflow-x:auto;"><table class="widefat striped" style="max-width:980px;"><thead><tr><th>' . esc_html__( 'Page', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Language', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Texts on the page', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Machine translated', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Manually translated', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Not translated', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Not in TranslatePress yet', 'ai-translator-for-translatepress' ) . '</th></tr></thead><tbody>';
+			foreach ( $res['pages'] as $p ) {
+				echo '<tr><td><a href="' . esc_url( $p['url'] ) . '" target="_blank" rel="noopener">' . esc_html( $p['url'] ) . '</a></td><td>' . esc_html( $p['lang'] ) . '</td>';
+				if ( ! $p['ok'] ) {
+					/* translators: %s: problem */
+					echo '<td colspan="5">' . esc_html( sprintf( __( 'Could not read the page: %s', 'ai-translator-for-translatepress' ), self::loopback_hint( $p['code'], '' ) ) ) . '</td></tr>';
+					continue;
+				}
+				foreach ( array( 'strings', 's1', 's2', 's0', 'unknown' ) as $k ) {
+					echo '<td>' . esc_html( number_format_i18n( (int) $p[ $k ] ) ) . '</td>';
+				}
+				echo '</tr>';
+				if ( ! empty( $p['untranslated'] ) ) {
+					echo '<tr><td colspan="7"><details><summary>' . esc_html__( 'Untranslated texts and the reason on record', 'ai-translator-for-translatepress' ) . '</summary><ul style="margin-left:1.5em;list-style:disc;">';
+					foreach ( $p['untranslated'] as $u ) {
+						echo '<li><code>' . esc_html( AITP_Translator::excerpt( $u[0], 160 ) ) . '</code> — ' . esc_html( $u[1] !== '' ? AITP_Admin::code_label( $u[1] ) : __( 'no failure on record (not tried yet, or waiting for a page view)', 'ai-translator-for-translatepress' ) ) . '</li>';
+					}
+					echo '</ul></details></td></tr>';
+				}
+			}
+			echo '</tbody></table></div>';
+			/* translators: %s: time */
+			echo '<p class="description">' . esc_html( sprintf( __( 'Checked %s. Reading a page does not translate or save anything.', 'ai-translator-for-translatepress' ), wp_date( 'Y-m-d H:i', (int) $res['at'] ) ) ) . '</p>';
+		}
+
+		$targets = AITP_Queue::targets();
+		if ( $targets ) {
+			$labels = array(
+				'pending' => __( 'Waiting', 'ai-translator-for-translatepress' ),
+				'done'    => __( 'Done', 'ai-translator-for-translatepress' ),
+				'partial' => __( 'Partly done', 'ai-translator-for-translatepress' ),
+				'failed'  => __( 'Failed', 'ai-translator-for-translatepress' ),
+			);
+			echo '<h3>' . esc_html__( 'Chosen pages', 'ai-translator-for-translatepress' ) . '</h3><div style="overflow-x:auto;"><table class="widefat striped" style="max-width:980px;"><thead><tr><th>' . esc_html__( 'Page', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Language', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'State', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Strings translated', 'ai-translator-for-translatepress' ) . '</th><th>' . esc_html__( 'Note', 'ai-translator-for-translatepress' ) . '</th></tr></thead><tbody>';
+			foreach ( $targets as $r ) {
+				echo '<tr><td><a href="' . esc_url( $r['url'] ) . '" target="_blank" rel="noopener">' . esc_html( $r['url'] ) . '</a></td><td>' . esc_html( $r['lang'] ) . '</td><td>' . esc_html( isset( $labels[ $r['status'] ] ) ? $labels[ $r['status'] ] : $r['status'] ) . '</td><td>' . esc_html( number_format_i18n( (int) $r['translated'] ) ) . '</td><td>' . esc_html( self::note_label( (string) $r['note'] ) ) . '</td></tr>';
+			}
+			echo '</tbody></table></div><p class="description">' . esc_html__( 'The list keeps the pages until you forget them. Done pages are part of the normal queue again after that.', 'ai-translator-for-translatepress' ) . '</p><p>';
+			self::button( 'clear_targets', __( 'Forget these pages', 'ai-translator-for-translatepress' ), 'secondary' );
+			echo '</p>';
+		}
+	}
+
 	/** @param array $set Settings. */
 	private static function render_settings( array $set ) {
 		$langs = AITP_Queue::tp_languages();
+		$pub   = AITP_Queue::published_languages();
 		echo '<h2>' . esc_html__( 'What to translate', 'ai-translator-for-translatepress' ) . '</h2>';
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="aitp_queue"><input type="hidden" name="do" value="save">';
 		wp_nonce_field( 'aitp_queue' );
@@ -160,9 +314,10 @@ final class AITP_Admin_Queue {
 
 		echo '<tr><th scope="row">' . esc_html__( 'Languages', 'ai-translator-for-translatepress' ) . '</th><td>';
 		foreach ( $langs as $l ) {
-			echo '<label style="margin-right:14px;"><input type="checkbox" name="q[languages][]" value="' . esc_attr( $l ) . '"' . checked( ! $set['languages'] || in_array( $l, $set['languages'], true ), true, false ) . '> ' . esc_html( $l ) . '</label>';
+			$off = ! in_array( $l, $pub, true );
+			echo '<label style="margin-right:14px;' . ( $off ? 'color:#646970;' : '' ) . '"><input type="checkbox" name="q[languages][]" value="' . esc_attr( $l ) . '"' . checked( ! $off && ( ! $set['languages'] || in_array( $l, $set['languages'], true ) ), true, false ) . disabled( $off, true, false ) . '> ' . esc_html( $l ) . ( $off ? ' (' . esc_html__( 'not published', 'ai-translator-for-translatepress' ) . ')' : '' ) . '</label>';
 		}
-		echo '<p class="description">' . esc_html__( 'Languages configured in TranslatePress.', 'ai-translator-for-translatepress' ) . '</p></td></tr>';
+		echo '<p class="description">' . esc_html__( 'Languages configured in TranslatePress. Unpublished languages cannot be opened by visitors, so the background visits cannot translate them either; publish the language in TranslatePress first.', 'ai-translator-for-translatepress' ) . '</p></td></tr>';
 
 		echo '<tr><th scope="row">' . esc_html__( 'Content', 'ai-translator-for-translatepress' ) . '</th><td>';
 		foreach ( AITP_Queue::content_types() as $k => $label ) {
@@ -212,31 +367,121 @@ final class AITP_Admin_Queue {
 			wp_die( esc_html__( 'You are not allowed to do this.', 'ai-translator-for-translatepress' ), 403 );
 		}
 		check_admin_referer( 'aitp_queue' );
-		$do  = isset( $_POST['do'] ) ? sanitize_key( wp_unslash( $_POST['do'] ) ) : '';
-		$msg = '';
+		$do   = isset( $_POST['do'] ) ? sanitize_key( wp_unslash( $_POST['do'] ) ) : '';
+		$msg  = '';
+		$type = 'success';
+		$urls = isset( $_POST['urls'] ) ? array_slice( array_values( array_filter( array_map( 'trim', preg_split( '~\R~', sanitize_textarea_field( wp_unslash( $_POST['urls'] ) ) ) ), 'strlen' ) ), 0, 50 ) : array();
+		$lang = isset( $_POST['lang'] ) ? sanitize_text_field( wp_unslash( $_POST['lang'] ) ) : '';
+		$lang = in_array( $lang, AITP_Queue::published_languages(), true ) ? array( $lang ) : array();
 		switch ( $do ) {
 			case 'save':
-				$in = isset( $_POST['q'] ) && is_array( $_POST['q'] ) ? wp_unslash( $_POST['q'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized field by field in save_settings().
-				AITP_Queue::save_settings( $in );
-				$r   = AITP_Queue::sync();
-				/* translators: 1: pages, 2: queue entries */
-				$msg = sprintf( __( 'Saved. %1$s pages, %2$s page/language combinations in the queue.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['pages'] ), number_format_i18n( $r['rows'] ) );
-				break;
 			case 'sync':
-				$r   = AITP_Queue::sync();
-				/* translators: 1: pages, 2: queue entries */
-				$msg = sprintf( __( 'Page list rebuilt: %1$s pages, %2$s page/language combinations.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['pages'] ), number_format_i18n( $r['rows'] ) );
+				if ( $do === 'save' ) {
+					$in = isset( $_POST['q'] ) && is_array( $_POST['q'] ) ? wp_unslash( $_POST['q'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized field by field in save_settings().
+					AITP_Queue::save_settings( $in );
+				}
+				$msg = self::sync_message( $do === 'save' );
+				if ( AITP_Queue::$dropped_urls ) {
+					$type = 'warning';
+					/* translators: %s: addresses */
+					$msg .= ' ' . sprintf( __( 'Left out (not an address of this site): %s', 'ai-translator-for-translatepress' ), implode( ', ', array_slice( AITP_Queue::$dropped_urls, 0, 10 ) ) );
+				}
 				break;
 			case 'start':
-				if ( ! AITP_Settings::is_configured() ) {
-					$msg = __( 'Enter the API key and model first.', 'ai-translator-for-translatepress' );
+				if ( ! AITP_Plugin::engine_selected() ) {
+					$type = 'warning';
+					$msg  = __( 'TranslatePress is not using the AI Translator engine yet. Select it under TranslatePress → Automatic Translation first; the queue never drives another engine.', 'ai-translator-for-translatepress' );
 					break;
 				}
-				if ( ! AITP_Queue::progress() ) {
-					AITP_Queue::sync();
+				if ( ! AITP_Settings::provider() ) {
+					$type = 'error';
+					$msg  = __( 'Enter the API key and model first.', 'ai-translator-for-translatepress' );
+					break;
+				}
+				$t = AITP_Queue::loopback_test();
+				if ( ! $t['ok'] ) {
+					$type = 'error';
+					/* translators: %s: what to do */
+					$msg  = sprintf( __( 'Not started: the site cannot open its own translated pages. %s', 'ai-translator-for-translatepress' ), self::loopback_hint( $t['code'], $t['location'] ) );
+					break;
+				}
+				if ( ! AITP_Queue::progress() && ! AITP_Queue::sync_state() ) {
+					self::sync_message();
 				}
 				AITP_Queue::start();
 				$msg = __( 'The queue is running.', 'ai-translator-for-translatepress' );
+				break;
+			case 'selftest':
+				$t    = AITP_Queue::loopback_test();
+				$type = $t['ok'] ? 'success' : 'error';
+				$msg  = self::loopback_hint( $t['code'], $t['location'] );
+				break;
+			case 'check':
+				if ( ! $urls ) {
+					$type = 'error';
+					$msg  = __( 'Enter an address of this site (in the default language).', 'ai-translator-for-translatepress' );
+					break;
+				}
+				$p     = AITP_Pagemap::plan( array_slice( $urls, 0, 1 ), $lang );
+				$out   = array();
+				$until = time() + 25; // Pages are read one after another: stop before the request times out.
+				$items = array_slice( $p['items'], 0, 10 );
+				foreach ( $items as $it ) {
+					if ( $out && time() > $until ) {
+						break;
+					}
+					$c     = AITP_Pagemap::check( $it, 20 );
+					$code  = '';
+					if ( ! $c['ok'] ) {
+						$code = $c['note'] === 'http' ? ( (int) $c['http'] === 0 ? 'unreachable' : 'http_' . $c['http'] ) : $c['note'];
+					}
+					$out[] = array(
+						'url'  => $it['url'],
+						'lang' => $it['lang'],
+						'code' => $code,
+					) + $c;
+				}
+				if ( $out && count( $out ) < count( $items ) ) {
+					$type = 'warning';
+					/* translators: %s: number of languages not checked */
+					$msg = sprintf( __( 'Time ran out: %s languages were not checked. Choose one language to check it on its own.', 'ai-translator-for-translatepress' ), number_format_i18n( count( $items ) - count( $out ) ) );
+				}
+				set_transient( 'aitp_check_' . get_current_user_id(), array( 'pages' => $out, 'at' => time() ), HOUR_IN_SECONDS );
+				if ( ! $out ) {
+					$type = 'error';
+					$msg  = __( 'Enter an address of this site (in the default language).', 'ai-translator-for-translatepress' );
+				}
+				break;
+			case 'target':
+				if ( ! AITP_Plugin::engine_selected() || ! AITP_Settings::provider() ) {
+					$type = 'warning';
+					$msg  = __( 'Select the AI Translator engine in TranslatePress and enter the API key first.', 'ai-translator-for-translatepress' );
+					break;
+				}
+				$t = AITP_Queue::loopback_test();
+				if ( ! $t['ok'] ) {
+					$type = 'error';
+					/* translators: %s: what to do */
+					$msg  = sprintf( __( 'Not started: the site cannot open its own translated pages. %s', 'ai-translator-for-translatepress' ), self::loopback_hint( $t['code'], $t['location'] ) );
+					break;
+				}
+				$r = AITP_Queue::start_target( $urls, $lang );
+				if ( ! $r['queued'] ) {
+					$type = 'error';
+					$msg  = __( 'Enter an address of this site (in the default language).', 'ai-translator-for-translatepress' );
+					break;
+				}
+				/* translators: %s: number of page/language combinations */
+				$msg = sprintf( __( '%s page/language combinations are visited now, before the rest of the queue, until they show no untranslated text. Keep this page open to follow, or let it run in the background.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['queued'] ) );
+				if ( $r['bad'] ) {
+					$type = 'warning';
+					/* translators: %s: addresses */
+					$msg .= ' ' . sprintf( __( 'Left out: %s', 'ai-translator-for-translatepress' ), implode( ', ', array_slice( $r['bad'], 0, 10 ) ) );
+				}
+				break;
+			case 'clear_targets':
+				AITP_Queue::clear_targets();
+				$msg = __( 'The chosen pages are ordinary queue pages again.', 'ai-translator-for-translatepress' );
 				break;
 			case 'pause':
 				AITP_Queue::pause();
@@ -257,10 +502,29 @@ final class AITP_Admin_Queue {
 				break;
 		}
 		if ( $msg !== '' ) {
-			set_transient( 'aitp_flash_' . get_current_user_id(), array( 'type' => 'success', 'message' => $msg ), 120 );
+			set_transient( 'aitp_flash_' . get_current_user_id(), array( 'type' => $type, 'message' => $msg ), 120 );
 		}
 		wp_safe_redirect( self::url() );
 		exit;
+	}
+
+	/**
+	 * Start (or continue) building the page list, a while in this request.
+	 *
+	 * @param bool $restart Settings changed: a list being built starts over with them.
+	 * @return string
+	 */
+	private static function sync_message( $restart = false ) {
+		if ( $restart || ! AITP_Queue::sync_state() ) {
+			AITP_Queue::sync_start();
+		}
+		$r = AITP_Queue::sync_step( 20 );
+		if ( $r['done'] ) {
+			/* translators: 1: pages, 2: queue entries */
+			return sprintf( __( 'Page list built: %1$s pages, %2$s page/language combinations.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['pages'] ), number_format_i18n( $r['rows'] ) );
+		}
+		/* translators: 1: pages listed so far, 2: pages in all */
+		return sprintf( __( 'The page list is being built in the background (%1$s of about %2$s pages so far). Pages already listed are translated meanwhile.', 'ai-translator-for-translatepress' ), number_format_i18n( $r['pages'] ), number_format_i18n( $r['total'] ) );
 	}
 
 	/** One step from the open admin page (AJAX). */
