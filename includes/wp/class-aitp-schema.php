@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 final class AITP_Schema {
 
-	const VERSION = '7';
+	const VERSION = '8';
 
 	/**
 	 * @param string $name Short name: cache, failures, review, log, queue, audit, repair.
@@ -29,6 +29,9 @@ final class AITP_Schema {
 			self::install();
 			if ( $from !== '' && version_compare( $from, '7', '<' ) ) {
 				self::upgrade_to_7();
+			}
+			if ( $from !== '' && version_compare( $from, '8', '<' ) ) {
+				self::upgrade_to_8();
 			}
 			// Written last: a request that dies half way runs the (repeatable) steps again.
 			update_option( 'aitp_db_version', self::VERSION, false );
@@ -72,6 +75,26 @@ final class AITP_Schema {
 		if ( is_array( $s ) && isset( $s['time_budget'] ) && (int) $s['time_budget'] === 25 ) {
 			$s['time_budget'] = 10;
 			update_option( 'aitp_settings', $s );
+		}
+	}
+
+	/**
+	 * 0.7.0 (third part): findings get their tier, filled from the codes already stored (the
+	 * same rule as AITP_Audit_Logic::tier()); repair batch records move from an option holding
+	 * at most 200 of them to a table. The option is copied, not deleted, so an older version
+	 * of the plugin still finds the batches it knew.
+	 */
+	private static function upgrade_to_8() {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+		$wpdb->query( 'UPDATE ' . self::table( 'audit' ) . ' SET tier = ' . AITP_Audit_Logic::tier_sql() . " WHERE tier = ''" );
+		$old = get_option( 'aitp_repair_batches' );
+		if ( is_array( $old ) ) {
+			foreach ( $old as $id => $info ) {
+				if ( is_array( $info ) && (int) $id > 0 ) {
+					AITP_Batches::insert_missing( (int) $id, $info );
+				}
+			}
 		}
 	}
 
@@ -191,10 +214,12 @@ final class AITP_Schema {
   ai varchar(10) NOT NULL DEFAULT '',
   state varchar(10) NOT NULL DEFAULT 'open',
   batch bigint unsigned NOT NULL DEFAULT 0,
+  tier varchar(4) NOT NULL DEFAULT '',
   updated_at datetime NOT NULL,
   PRIMARY KEY  (id),
   UNIQUE KEY item (kind,lang,row_id),
   KEY state (state,severity),
+  KEY state_tier (state,tier),
   KEY lang (lang)
 ) $c;"
 		);
@@ -292,12 +317,24 @@ final class AITP_Schema {
   UNIQUE KEY job_ukey (job,ukey)
 ) $c;"
 		);
+		dbDelta(
+			'CREATE TABLE ' . self::table( 'batches' ) . " (
+  id bigint unsigned NOT NULL,
+  state varchar(10) NOT NULL DEFAULT '',
+  auto tinyint NOT NULL DEFAULT 0,
+  info longtext NOT NULL,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  KEY auto_state (auto,state)
+) $c;"
+		);
 	}
 
 	/** Remove everything (uninstall). */
 	public static function uninstall() {
 		global $wpdb;
-		foreach ( array( 'cache', 'failures', 'review', 'log', 'queue', 'audit', 'repair', 'protect', 'pagemap', 'pagestr', 'journal', 'tasks' ) as $t ) {
+		foreach ( array( 'cache', 'failures', 'review', 'log', 'queue', 'audit', 'repair', 'protect', 'pagemap', 'pagestr', 'journal', 'tasks', 'batches' ) as $t ) {
 			$wpdb->query( 'DROP TABLE IF EXISTS ' . self::table( $t ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
 		}
 		foreach ( array( 'aitp_settings', 'aitp_db_version', 'aitp_breaker', 'aitp_caps', 'aitp_notice', 'aitp_queue_settings', 'aitp_queue_state', 'aitp_queue_lock', 'aitp_audit_state', 'aitp_audit_lock', 'aitp_audit_settings', 'aitp_repair_batches', 'aitp_autofix_settings', 'aitp_autofix_state', 'aitp_autofix_lock', 'aitp_map_state', 'aitp_map_lock', 'aitp_journal_state', 'aitp_purge_list', 'aitp_audit_actions', 'aitp_write_lock', 'aitp_usage', 'aitp_queue_sync', 'aitp_queue_sync_lock' ) as $o ) {

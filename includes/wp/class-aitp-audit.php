@@ -290,7 +290,8 @@ final class AITP_Audit {
 				}
 				$n = self::scan_chunk( $t, $v, $s );
 				if ( $n < self::CHUNK ) {
-					self::scan_neighbors( $t, (int) $s['scan'] );
+					$key = $t['kind'] . ':' . $t['lang'];
+					self::scan_neighbors( $t, (int) $s['scan'], isset( $s['rows'][ $key ] ) ? (int) $s['rows'][ $key ] : 0 );
 					$s = self::next_table( $s );
 				}
 				self::set_state( $s );
@@ -427,12 +428,13 @@ final class AITP_Audit {
 	}
 
 	/**
-	 * Rows around runs of misplaced-looking rows become suspects.
+	 * Rows around runs of misplaced-looking rows become suspects (for reference only).
 	 *
-	 * @param array $t    Table entry.
-	 * @param int   $scan Scan id.
+	 * @param array $t       Table entry.
+	 * @param int   $scan    Scan id.
+	 * @param int   $scanned Rows of the table checked in this scan.
 	 */
-	private static function scan_neighbors( array $t, $scan ) {
+	private static function scan_neighbors( array $t, $scan, $scanned ) {
 		global $wpdb;
 		$audit = AITP_Schema::table( 'audit' );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
@@ -443,7 +445,9 @@ final class AITP_Audit {
 				$ids[] = (int) $r['row_id'];
 			}
 		}
-		foreach ( AITP_Audit_Logic::neighbor_ranges( $ids ) as $range ) {
+		// A run must be at least four times as dense as such rows are in the whole table.
+		$density = $scanned > 0 ? 4 * count( $ids ) / $scanned : 0.0;
+		foreach ( AITP_Audit_Logic::neighbor_ranges( $ids, 5, 3, 2, $density ) as $range ) {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
 			$near = (array) $wpdb->get_results( $wpdb->prepare( self::select_rows( $t ) . ' WHERE tt.status = 1 AND tt.id BETWEEN %d AND %d LIMIT 200', $range[0], $range[1] ), ARRAY_A );
 			foreach ( $near as $r ) {
@@ -497,6 +501,7 @@ final class AITP_Audit {
 			'translated_hash' => $th,
 			'severity'        => $sev,
 			'codes'           => substr( implode( ',', $cod ), 0, 255 ),
+			'tier'            => AITP_Audit_Logic::tier( $sev, $cod ),
 			'details'         => (string) wp_json_encode( $det ),
 			'source'          => $old && $same && $old['source'] === 'import' ? 'import' : $source,
 			'scan'            => (int) $scan,
@@ -563,27 +568,36 @@ final class AITP_Audit {
 	 * ----------------------------------------------------------------------------------- */
 
 	/**
-	 * @return array{open:int,by:array} by[lang][severity] for open findings.
+	 * @return array{open:int,by:array,tiers:array,ref:int,accepted:int} by[lang][severity] and tiers[lang][tier]
+	 *         for open findings; open leaves out the reference tier (rows next to errors, nothing to do).
 	 */
 	public static function counts() {
 		global $wpdb;
 		$table = AITP_Schema::table( 'audit' );
 		$by    = array();
+		$tiers = array();
 		$open  = 0;
+		$ref   = 0;
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		foreach ( (array) $wpdb->get_results( "SELECT lang, severity, COUNT(*) n FROM $table WHERE state = 'open' GROUP BY lang, severity", ARRAY_A ) as $r ) {
-			$by[ $r['lang'] ][ $r['severity'] ] = (int) $r['n'];
-			$open                              += (int) $r['n'];
+		foreach ( (array) $wpdb->get_results( "SELECT lang, severity, tier, COUNT(*) n FROM $table WHERE state = 'open' GROUP BY lang, severity, tier", ARRAY_A ) as $r ) {
+			$tier = $r['tier'] !== '' ? (string) $r['tier'] : AITP_Audit_Logic::TIER_B;
+			$by[ $r['lang'] ][ $r['severity'] ]  = ( isset( $by[ $r['lang'] ][ $r['severity'] ] ) ? $by[ $r['lang'] ][ $r['severity'] ] : 0 ) + (int) $r['n'];
+			$tiers[ $r['lang'] ][ $tier ]        = ( isset( $tiers[ $r['lang'] ][ $tier ] ) ? $tiers[ $r['lang'] ][ $tier ] : 0 ) + (int) $r['n'];
+			if ( $tier === AITP_Audit_Logic::TIER_REF ) {
+				$ref += (int) $r['n'];
+			} else {
+				$open += (int) $r['n'];
+			}
 		}
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$accepted = (int) $wpdb->get_var( "SELECT COUNT(*) FROM $table WHERE state = 'accepted'" );
-		return array( 'open' => $open, 'by' => $by, 'accepted' => $accepted );
+		return array( 'open' => $open, 'by' => $by, 'tiers' => $tiers, 'ref' => $ref, 'accepted' => $accepted );
 	}
 
 	/**
 	 * Build a WHERE clause from list filters.
 	 *
-	 * @param array $f lang, severity, code, state, ai, source.
+	 * @param array $f lang, severity, tier, code, state, ai, source.
 	 * @return string
 	 */
 	private static function where( array $f ) {
@@ -593,7 +607,7 @@ final class AITP_Audit {
 		if ( $state !== 'all' ) {
 			$w[] = $wpdb->prepare( 'state = %s', $state );
 		}
-		foreach ( array( 'lang', 'severity', 'ai', 'source', 'kind' ) as $k ) {
+		foreach ( array( 'lang', 'severity', 'ai', 'source', 'kind', 'tier' ) as $k ) {
 			if ( isset( $f[ $k ] ) && $f[ $k ] !== '' ) {
 				$w[] = $wpdb->prepare( "$k = %s", $f[ $k ] ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			}
@@ -912,8 +926,7 @@ final class AITP_Audit {
 	 */
 	public static function batches() {
 		global $wpdb;
-		$b = get_option( self::BATCHES, array() );
-		$b = is_array( $b ) ? $b : array();
+		$b = AITP_Batches::all();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$rows = (array) $wpdb->get_results( 'SELECT batch, COUNT(*) AS n, MIN(created_at) AS t, SUM(restored = \'yes\') AS yes, SUM(restored = \'\') AS todo, GROUP_CONCAT(DISTINCT lang ORDER BY lang) AS langs FROM ' . AITP_Schema::table( 'repair' ) . ' GROUP BY batch', ARRAY_A );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
@@ -928,10 +941,11 @@ final class AITP_Audit {
 				$info = $b[ $id ];
 			} else {
 				$info               = isset( $b[ $id ] ) ? $b[ $id ] : array(
-					'time'    => (int) strtotime( $r['t'] . ' UTC' ),
-					'user'    => 0,
-					'skipped' => array(),
-					'pages'   => 0,
+					'time'      => (int) strtotime( $r['t'] . ' UTC' ),
+					'user'      => 0,
+					'skipped'   => array(),
+					'pages'     => 0,
+					'no_record' => true, // Backup rows without any record (lost before 0.7.0): not a cut-off repair.
 				);
 				$info['incomplete'] = true;
 				$info['reset']      = (int) $r['n'];
@@ -943,7 +957,7 @@ final class AITP_Audit {
 			// Rollback counts always come from the backup rows: every round marks the rows it handled
 			// there, so rounds cut off, repeated or without a record are never counted twice or lost.
 			$info['todo'] = (int) $r['todo'];
-			if ( ! empty( $info['rolled_back'] ) || (int) $r['yes'] || isset( $skip_of[ $id ] ) ) {
+			if ( ! empty( $info['rolled_back'] ) || ! empty( $info['partial_rollback'] ) || (int) $r['yes'] || isset( $skip_of[ $id ] ) ) {
 				$info['restored']        = (int) $r['yes'];
 				$info['restore_skipped'] = isset( $skip_of[ $id ] ) ? $skip_of[ $id ] : array();
 			}
@@ -958,14 +972,7 @@ final class AITP_Audit {
 	 * @param array $info Batch info.
 	 */
 	private static function save_batch( $id, array $info ) {
-		$b        = get_option( self::BATCHES, array() );
-		$b        = is_array( $b ) ? $b : array();
-		$b[ $id ] = $info;
-		if ( count( $b ) > 200 ) {
-			ksort( $b );
-			$b = array_slice( $b, -200, null, true );
-		}
-		update_option( self::BATCHES, $b, false );
+		AITP_Batches::save( $id, $info );
 	}
 
 	/**
@@ -1140,8 +1147,8 @@ final class AITP_Audit {
 			}
 		}
 		if ( $out['reset'] ) {
-			$prev_info    = get_option( self::BATCHES, array() );
-			$prev_info    = is_array( $prev_info ) && isset( $prev_info[ $batch ] ) ? $prev_info[ $batch ] : array();
+			$prev_info    = AITP_Batches::get( $batch );
+			$prev_info    = is_array( $prev_info ) ? $prev_info : array();
 			$visit        = AITP_Audit_Logic::cover_pages( $pages_of );
 			$out['urls']  = array_values( array_map( function ( $p ) { return array( 'url' => $p['url'], 'lang' => $p['lang'] ); }, $visit ) );
 			$out['pages'] = AITP_Queue::requeue_urls( array_values( $visit ) );
@@ -1166,6 +1173,8 @@ final class AITP_Audit {
 			);
 			// Cached copies of every page showing the rows: cleared in the background, in small steps.
 			$out['purge'] = AITP_Cache_Purge::urls( self::all_urls( $purge_of ) );
+		} elseif ( $started ) {
+			AITP_Batches::delete( $batch ); // Nothing was reset after all: no empty "running" batch is left behind.
 		}
 		( new AITP_WP_Log() )->log( 'notice', 'repair', $out );
 		return $out;
@@ -1556,7 +1565,7 @@ final class AITP_Audit {
 		$out   = array( 'lang' => '', 'ids' => array(), 'structured' => 0, 'no_page' => 0 );
 		if ( ! $langs ) {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$langs = (array) $wpdb->get_col( "SELECT DISTINCT lang FROM $audit WHERE state = 'open' AND severity = 'error' AND kind = 'dictionary' AND NOT FIND_IN_SET('auto_retried', codes) ORDER BY lang" );
+			$langs = (array) $wpdb->get_col( "SELECT DISTINCT lang FROM $audit WHERE state = 'open' AND tier = 'a' AND kind = 'dictionary' AND NOT FIND_IN_SET('auto_retried', codes) ORDER BY lang" );
 		}
 		foreach ( $langs as $lang ) {
 			$t = self::table_for( 'dictionary', $lang );
@@ -1567,7 +1576,7 @@ final class AITP_Audit {
 			$skip = array( 'structured' => 0, 'no_page' => 0 );
 			while ( count( $out['ids'] ) < $limit ) {
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				$list = (array) $wpdb->get_results( $wpdb->prepare( "SELECT id, row_id FROM $audit WHERE state = 'open' AND severity = 'error' AND kind = 'dictionary' AND lang = %s AND id > %d AND NOT FIND_IN_SET('auto_retried', codes) ORDER BY id LIMIT 1000", $t['lang'], $last ), ARRAY_A );
+				$list = (array) $wpdb->get_results( $wpdb->prepare( "SELECT id, row_id FROM $audit WHERE state = 'open' AND tier = 'a' AND kind = 'dictionary' AND lang = %s AND id > %d AND NOT FIND_IN_SET('auto_retried', codes) ORDER BY id LIMIT 1000", $t['lang'], $last ), ARRAY_A );
 				if ( ! $list ) {
 					break;
 				}
@@ -1777,7 +1786,9 @@ final class AITP_Audit {
 					$data = array( 'ai' => $verdict );
 					if ( $verdict === 'mismatch' ) {
 						$data['severity'] = AITP_Audit_Logic::ERROR;
-						$data['codes']    = substr( implode( ',', array_unique( array_merge( array_filter( explode( ',', $f['codes'] ) ), array( 'ai_mismatch' ) ) ) ), 0, 255 );
+						$codes            = array_values( array_unique( array_merge( array_filter( explode( ',', $f['codes'] ) ), array( 'ai_mismatch' ) ) ) );
+						$data['codes']    = substr( implode( ',', $codes ), 0, 255 );
+						$data['tier']     = AITP_Audit_Logic::tier( AITP_Audit_Logic::ERROR, $codes );
 					}
 					$wpdb->update( $audit, $data, array( 'id' => (int) $fid ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 					$out[ $verdict ]++;

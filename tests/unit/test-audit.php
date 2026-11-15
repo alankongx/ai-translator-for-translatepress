@@ -139,7 +139,8 @@ test( 'ai check: quota refused -> nothing sent', function () {
 test( 'audit: neighbours of several misplaced rows become suspects', function () {
 	eq( array( array( 40, 50 ) ), AITP_Audit_Logic::neighbor_ranges( array( 42, 46, 48 ) ) );
 	eq( array(), AITP_Audit_Logic::neighbor_ranges( array( 10, 40 ) ), 'isolated errors' );
-	eq( array( array( 1, 5 ), array( 98, 103 ) ), AITP_Audit_Logic::neighbor_ranges( array( 101, 2, 3, 100 ) ) );
+	eq( array( array( 1, 5 ), array( 98, 103 ) ), AITP_Audit_Logic::neighbor_ranges( array( 101, 2, 3, 100 ), 5, 2 ) );
+	eq( array(), AITP_Audit_Logic::neighbor_ranges( array( 101, 2, 3, 100 ) ), 'two rows are not a run (0.7.0)' );
 	ok( AITP_Audit_Logic::shift_like( array( 'too_short' ) ) );
 	ok( ! AITP_Audit_Logic::shift_like( array( 'added_claim:certified' ) ) );
 } );

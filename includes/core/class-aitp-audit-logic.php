@@ -25,6 +25,63 @@ final class AITP_Audit_Logic {
 	/** Most rows one repair or AI-check action may touch. */
 	const MAX_ACTION_ROWS = 1000;
 
+	/** Tiers: certainly wrong (repaired automatically), a person should look, for reference only. */
+	const TIER_A   = 'a';
+	const TIER_B   = 'b';
+	const TIER_REF = 'ref';
+
+	/**
+	 * Codes that prove a stored translation broken: an error with one of these is certainly wrong.
+	 * Checked against 4,220 translations people reviewed on a real site: one false alarm.
+	 * Any other code (and any code added later) leaves the row for a person: better to repair
+	 * too little than to throw away a good translation.
+	 */
+	const TIER_A_CODES = array( 'empty', 'untranslated', 'english_residue', 'too_short', 'sentences_missing', 'no_letters', 'protected_term_missing', 'placeholder_mismatch', 'link_changed', 'markup_mismatch', 'markup_unbalanced', 'no_translate_changed', 'foreign_script', 'source_residue', 'wrong_script', 'format_leak', 'control_chars', 'ai_mismatch' );
+
+	/** Codes a page visit cannot repair: always for a person. */
+	const TIER_B_FORCE = array( 'structured_broken' );
+
+	/** Codes that alone are only a hint (rows next to errors). */
+	const TIER_REF_CODES = array( 'near_misaligned' );
+
+	/**
+	 * Tier of a finding.
+	 *
+	 * @param string   $severity error | suspect | review.
+	 * @param string[] $codes    Codes.
+	 * @return string a | b | ref
+	 */
+	public static function tier( $severity, array $codes ) {
+		$codes = array_values( array_filter( array_map( 'strval', $codes ), 'strlen' ) );
+		if ( $severity === self::ERROR ) {
+			if ( array_intersect( $codes, self::TIER_B_FORCE ) ) {
+				return self::TIER_B;
+			}
+			return array_intersect( $codes, self::TIER_A_CODES ) ? self::TIER_A : self::TIER_B;
+		}
+		if ( $codes && ! array_diff( $codes, self::TIER_REF_CODES ) ) {
+			return self::TIER_REF;
+		}
+		return self::TIER_B;
+	}
+
+	/**
+	 * The same rule as tier() as an SQL expression over the columns severity and codes
+	 * (used to fill the tier of findings stored before it existed).
+	 *
+	 * @return string
+	 */
+	public static function tier_sql() {
+		$set = function ( array $codes ) {
+			return '(' . implode( ' OR ', array_map( function ( $c ) { return "FIND_IN_SET('" . $c . "', codes)"; }, $codes ) ) . ')';
+		};
+		$ref = "codes IN ('" . implode( "','", self::TIER_REF_CODES ) . "')";
+		return "CASE WHEN severity = 'error' AND " . $set( self::TIER_B_FORCE ) . " THEN 'b'"
+			. " WHEN severity = 'error' AND " . $set( self::TIER_A_CODES ) . " THEN 'a'"
+			. " WHEN severity = 'error' THEN 'b'"
+			. " WHEN $ref THEN 'ref' ELSE 'b' END";
+	}
+
 	/**
 	 * Judge one stored machine translation.
 	 *
@@ -188,35 +245,49 @@ final class AITP_Audit_Logic {
 		return $pct >= 75;
 	}
 
-	/** Problem codes typical of a translation saved on the wrong string. */
-	const SHIFT_CODES = array( 'too_short', 'too_long', 'sentences_missing', 'number_mismatch', 'untranslated', 'english_residue', 'protected_term_missing', 'protected_pattern_missing', 'markup_mismatch', 'link_changed', 'placeholder_mismatch', 'size_changed' );
+	/**
+	 * Problem codes typical of a translation saved on the wrong string. Codes any bad
+	 * translation may have (numbers, markup, patterns) are left out: with them, runs appeared
+	 * wherever errors were frequent, misplaced or not.
+	 */
+	const SHIFT_CODES = array( 'too_short', 'sentences_missing', 'untranslated', 'protected_term_missing' );
 
 	/**
 	 * Runs of misplaced-looking rows. TranslatePress stores the strings of one page view
 	 * with neighbouring ids, so when several nearby rows look misplaced, the rows between
 	 * and around them were probably shifted too (short ones just pass the checks).
 	 *
-	 * @param int[] $ids Row ids with misplacement-type errors.
-	 * @param int   $gap Largest id distance inside one run.
-	 * @param int   $min Rows needed for a run.
-	 * @param int   $pad Rows added before and after a run.
+	 * A run counts only when it is much denser than such rows are in the table as a whole
+	 * ($min_density): errors scattered at random also come close together now and then.
+	 *
+	 * @param int[] $ids         Row ids with misplacement-type errors.
+	 * @param int   $gap         Largest id distance inside one run.
+	 * @param int   $min         Rows needed for a run.
+	 * @param int   $pad         Rows added before and after a run.
+	 * @param float $min_density Share of misplaced-looking rows the run must reach (0 = none).
 	 * @return array<int,array{0:int,1:int}> Id ranges [from, to] to look at.
 	 */
-	public static function neighbor_ranges( array $ids, $gap = 5, $min = 2, $pad = 2 ) {
-		$ids = array_values( array_unique( array_map( 'intval', $ids ) ) );
+	public static function neighbor_ranges( array $ids, $gap = 5, $min = 3, $pad = 2, $min_density = 0.0 ) {
+		$ids  = array_values( array_unique( array_map( 'intval', $ids ) ) );
 		sort( $ids );
-		$out = array();
-		$run = array();
+		$out  = array();
+		$run  = array();
+		$keep = function ( array $run ) use ( $min, $min_density ) {
+			if ( count( $run ) < $min ) {
+				return false;
+			}
+			return count( $run ) / ( end( $run ) - $run[0] + 1 ) >= $min_density;
+		};
 		foreach ( $ids as $id ) {
 			if ( $run && $id - end( $run ) > $gap ) {
-				if ( count( $run ) >= $min ) {
+				if ( $keep( $run ) ) {
 					$out[] = array( max( 1, $run[0] - $pad ), end( $run ) + $pad );
 				}
 				$run = array();
 			}
 			$run[] = $id;
 		}
-		if ( count( $run ) >= $min ) {
+		if ( $run && $keep( $run ) ) {
 			$out[] = array( max( 1, $run[0] - $pad ), end( $run ) + $pad );
 		}
 		return $out;

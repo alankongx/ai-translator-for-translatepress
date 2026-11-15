@@ -54,6 +54,7 @@ foreach ( array(
 	'wp/class-aitp-schema.php',
 	'wp/class-aitp-lock.php',
 	'wp/class-aitp-tasks.php',
+	'wp/class-aitp-batches.php',
 	'wp/class-aitp-settings.php',
 	'wp/class-aitp-wp-transport.php',
 	'wp/class-aitp-wp-stores.php',

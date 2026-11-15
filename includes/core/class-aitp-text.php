@@ -324,9 +324,9 @@ final class AITP_Text {
 	/**
 	 * Count letters/digits by Unicode script.
 	 *
-	 * Only letters and digits are counted: newer PCRE versions match \p{Script} by script
-	 * extension, so shared punctuation such as the ideographic comma "、" would otherwise be
-	 * counted as Hangul in Japanese text.
+	 * Only letters and digits are counted, each by its own script (see script_class()): shared
+	 * characters such as the ideographic comma "、" or the Arabic tatweel "ـ" would otherwise be
+	 * counted as Hangul in Japanese text, or as Syriac in Arabic text.
 	 *
 	 * @param string $s Input (already stripped of markup).
 	 * @return array<string,int>
@@ -334,12 +334,29 @@ final class AITP_Text {
 	public static function script_counts( $s ) {
 		$out = array();
 		foreach ( AITP_Languages::all_scripts() as $script ) {
-			$n = preg_match_all( '~(?=[\p{L}\p{N}])\p{' . $script . '}~u', $s );
+			$n = preg_match_all( '~(?=[\p{L}\p{N}])' . self::script_class( $script ) . '~u', $s );
 			if ( $n ) {
 				$out[ $script ] = (int) $n;
 			}
 		}
 		return $out;
+	}
+
+	/**
+	 * Pattern for the characters of one writing system. Since PCRE2 10.40, \p{Syriac} also matches
+	 * characters other scripts share (the Arabic tatweel, Arabic-Indic digits), so an Arabic
+	 * text counted as Syriac. \p{sc=...} matches a character's own script only; older PCRE
+	 * versions do not know that form but already read \p{...} that way.
+	 *
+	 * @param string $script Script name.
+	 * @return string
+	 */
+	private static function script_class( $script ) {
+		static $own = null;
+		if ( $own === null ) {
+			$own = @preg_match( '~\p{sc=Latin}~u', 'a' ) === 1; // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		}
+		return $own ? '\p{sc=' . $script . '}' : '\p{' . $script . '}';
 	}
 
 	/**
