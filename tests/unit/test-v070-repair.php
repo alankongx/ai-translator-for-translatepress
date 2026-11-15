@@ -91,3 +91,14 @@ test( 'C09: misplacement runs need three rows, the right codes and a dense windo
 	ok( ! AITP_Audit_Logic::shift_like( array( 'number_mismatch' ) ), 'any bad translation may lose a number' );
 	ok( ! AITP_Audit_Logic::shift_like( array( 'markup_mismatch', 'protected_pattern_missing', 'size_changed' ) ) );
 } );
+
+/* C17: plural interface texts are compared with the plural original. */
+
+test( 'C17: a backup still belongs to a plural row whose original now reads as the plural', function () {
+	$row = array( 'original' => '%d items', 'original_single' => '%d item', 'status' => 1, 'translated' => '%d articles' );
+	ok( AITP_Audit_Logic::same_original( array( 'original' => '%d items' ), $row ) );
+	ok( AITP_Audit_Logic::same_original( array( 'original' => '%d item' ), $row ), 'backup made before 0.7.0 holds the singular' );
+	ok( ! AITP_Audit_Logic::same_original( array( 'original' => 'Other' ), $row ) );
+	eq( '', AITP_Audit_Logic::restore_block( array( 'original' => '%d item' ), $row ) );
+	eq( 'changed', AITP_Audit_Logic::restore_block( array( 'original' => 'Other' ), $row ) );
+} );

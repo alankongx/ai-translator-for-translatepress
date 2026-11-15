@@ -119,7 +119,11 @@ final class AITP_Audit {
 	 */
 	private static function select_rows( array $t ) {
 		if ( $t['kind'] === 'gettext' && $t['originals'] !== '' ) {
-			return "SELECT tt.id, COALESCE(NULLIF(ot.original, ''), tt.original) AS original, tt.translated, tt.status, tt.original_id FROM `{$t['table']}` tt LEFT JOIN `{$t['originals']}` ot ON tt.original_id = ot.id";
+			// A plural form (plural_form > 0) is the translation of the plural original: that is the
+			// text TranslatePress sends to the engine, and what the check must compare with.
+			// original_single: the singular, which backups made before 0.7.0 hold for such rows.
+			$single = "COALESCE(NULLIF(ot.original, ''), tt.original)";
+			return "SELECT tt.id, CASE WHEN tt.plural_form > 0 AND ot.original_plural IS NOT NULL AND ot.original_plural <> '' THEN ot.original_plural ELSE $single END AS original, $single AS original_single, tt.translated, tt.status, tt.original_id FROM `{$t['table']}` tt LEFT JOIN `{$t['originals']}` ot ON tt.original_id = ot.id";
 		}
 		return "SELECT tt.id, tt.original, tt.translated, tt.status, tt.original_id FROM `{$t['table']}` tt";
 	}
@@ -151,6 +155,53 @@ final class AITP_Audit {
 	 */
 	private static function source_info( $kind ) {
 		return AITP_Languages::info( $kind === 'gettext' ? 'en_US' : self::default_language() );
+	}
+
+	/**
+	 * Whether TranslatePress itself never sends this text to an engine (numbers, addresses,
+	 * file names, code, very long texts...). It stores such text unchanged as the translation:
+	 * not an error, and resetting it would only bring it back unchanged. TranslatePress's own
+	 * rule is asked (a private method, read through reflection), so each version uses its own.
+	 *
+	 * @param string $text Original.
+	 * @return bool False when it cannot be asked.
+	 */
+	public static function tp_skips( $text ) {
+		static $m = null;
+		if ( $m === null ) {
+			$m = false;
+			if ( class_exists( 'TRP_Machine_Translator' ) && method_exists( 'TRP_Machine_Translator', 'should_translate_string' ) ) {
+				try {
+					$obj = class_exists( 'TRP_Translate_Press' ) ? TRP_Translate_Press::get_trp_instance()->get_component( 'machine_translator' ) : null;
+					if ( ! $obj instanceof TRP_Machine_Translator ) {
+						$obj = ( new ReflectionClass( 'TRP_Machine_Translator' ) )->newInstanceWithoutConstructor();
+					}
+					$r = new ReflectionMethod( 'TRP_Machine_Translator', 'should_translate_string' );
+					$r->setAccessible( true );
+					$m = array( $r, $obj );
+				} catch ( Throwable $e ) {
+					$m = false;
+				}
+			}
+		}
+		if ( ! $m ) {
+			return false;
+		}
+		try {
+			return ! $m[0]->invoke( $m[1], (string) $text );
+		} catch ( Throwable $e ) {
+			return false;
+		}
+	}
+
+	/**
+	 * A row TranslatePress stored unchanged because it never translates such text.
+	 *
+	 * @param array $r Row: original, translated.
+	 * @return bool
+	 */
+	private static function tp_kept( array $r ) {
+		return is_string( $r['translated'] ) && trim( $r['translated'] ) === trim( (string) $r['original'] ) && self::tp_skips( (string) $r['original'] );
 	}
 
 	/* -------------------------------------------------------------------------------------
@@ -194,6 +245,7 @@ final class AITP_Audit {
 				'started'  => 0,
 				'finished' => 0,
 				'rows'     => array(),
+				'tp_kept'  => 0, // Rows TranslatePress stores unchanged on purpose (not recorded).
 			),
 			is_array( $s ) ? $s : array()
 		);
@@ -229,6 +281,7 @@ final class AITP_Audit {
 			'started'  => time(),
 			'finished' => 0,
 			'rows'     => array(),
+			'tp_kept'  => 0,
 		);
 		self::set_state( $s );
 		if ( ! wp_next_scheduled( self::CRON ) ) {
@@ -336,6 +389,10 @@ final class AITP_Audit {
 		foreach ( $rows as $i => $r ) {
 			$s['last_id'] = (int) $r['id'];
 			$f            = AITP_Audit_Logic::check_row( $v, (string) $r['original'], $r['translated'], $si, $ti );
+			if ( $f && self::tp_kept( $r ) ) {
+				$s['tp_kept'] = ( isset( $s['tp_kept'] ) ? (int) $s['tp_kept'] : 0 ) + 1; // TranslatePress keeps it as is on purpose.
+				continue;
+			}
 			if ( $f ) {
 				$found[ $i ] = $f;
 				if ( $f['codes'] === array( 'untranslated' ) && is_string( $r['translated'] ) && trim( $r['translated'] ) === trim( (string) $r['original'] ) ) {
@@ -1071,6 +1128,10 @@ final class AITP_Audit {
 					$skip( $block, (int) $f['id'] );
 					continue;
 				}
+				if ( self::tp_kept( $r ) ) {
+					$skip( 'tp_keeps' ); // Would come back unchanged: TranslatePress never translates such text.
+					continue;
+				}
 				$known = isset( $pages[ (int) $r['id'] ] ) ? $pages[ (int) $r['id'] ] : array();
 				$rp    = AITP_Audit_Logic::visit_pages( $known, $allowed );
 				if ( ! $rp && $allowed !== null && $known ) {
@@ -1678,7 +1739,7 @@ final class AITP_Audit {
 			foreach ( $list as $b ) {
 				$out['reset']++;
 				$r = isset( $cur[ (int) $b['row_id'] ] ) ? $cur[ (int) $b['row_id'] ] : null;
-				if ( ! $r || (string) $r['original'] !== (string) $b['original'] ) {
+				if ( ! $r || ! AITP_Audit_Logic::same_original( $b, $r ) ) {
 					$out['gone']++;
 					continue;
 				}
@@ -1690,7 +1751,7 @@ final class AITP_Audit {
 					$out['untranslated']++;
 					continue;
 				}
-				if ( ! $judge ) {
+				if ( ! $judge || self::tp_kept( $r ) ) {
 					$out['ok']++;
 					continue;
 				}

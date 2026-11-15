@@ -499,7 +499,7 @@ final class AITP_Audit_Logic {
 		if ( ! is_array( $row ) ) {
 			return 'missing';
 		}
-		if ( (string) $row['original'] !== (string) $backup['original'] ) {
+		if ( ! self::same_original( $backup, $row ) ) {
 			return 'changed';
 		}
 		$status = (int) $row['status'];
@@ -510,6 +510,21 @@ final class AITP_Audit_Logic {
 			return '';
 		}
 		return 'changed';
+	}
+
+	/**
+	 * Whether a backup still belongs to the row: same original. Backups of plural interface
+	 * texts made before 0.7.0 hold the singular (original_single).
+	 *
+	 * @param array $backup Backup: original.
+	 * @param array $row    Current row: original (original_single for interface text).
+	 * @return bool
+	 */
+	public static function same_original( array $backup, array $row ) {
+		if ( (string) $row['original'] === (string) $backup['original'] ) {
+			return true;
+		}
+		return isset( $row['original_single'] ) && (string) $row['original_single'] === (string) $backup['original'];
 	}
 
 	/**
