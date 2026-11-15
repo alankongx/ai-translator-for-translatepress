@@ -724,6 +724,22 @@ final class AITP_Audit {
 	}
 
 	/**
+	 * Findings matching filters, per language.
+	 *
+	 * @param array $f Filters (see where()).
+	 * @return array<string,int> language => findings
+	 */
+	public static function lang_counts( array $f ) {
+		global $wpdb;
+		$out = array();
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+		foreach ( (array) $wpdb->get_results( 'SELECT lang, COUNT(*) n FROM ' . AITP_Schema::table( 'audit' ) . ' WHERE ' . self::where( $f ) . ' GROUP BY lang ORDER BY lang', ARRAY_A ) as $r ) {
+			$out[ (string) $r['lang'] ] = (int) $r['n'];
+		}
+		return $out;
+	}
+
+	/**
 	 * Finding ids for an action: explicit ids, or every match of the filters (capped).
 	 *
 	 * @param array $f Filters (may hold ids).

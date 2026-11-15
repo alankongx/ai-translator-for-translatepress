@@ -138,6 +138,17 @@ Updates come from the GitHub releases of this plugin. To turn update checks off:
 * Locks that two requests cannot both take (also with Redis or Memcached); long work lists moved from options to a table.
 * Smaller requests no longer multiply what a refused key or a rate limit costs: requests go out in waves, and after a wave the provider refuses for the whole account (key, billing, rate limit, missing model) the rest wait.
 * Internal access self-test before the queue starts (redirects, HTTP authentication: `AITP_LOOPBACK_AUTH`); lost scheduled tasks are put back.
+* Check results in three levels: certainly wrong, a person should look, for reference. "Reset all" and the auto repair only touch "certainly wrong"; the list shows that level by default. Possible misplacements need a dense run of wrong rows.
+* Repairs reset every machine-translated row of the same original together (TranslatePress may keep several and show any of them); manual and accepted rows are kept.
+* Repairs check first that this engine is selected, automatic translation is on, the provider is configured and not paused; otherwise nothing is reset.
+* Text TranslatePress never translates (addresses, numbers) and stores as it is no longer shows up as "untranslated" and is not reset again and again.
+* Plural interface strings are checked against the plural original.
+* Auto repair: only rows the engine refused count as failures; rows the page visits did not reach are counted apart (more than half: it stops and asks for a look). Rounds go on while they make progress (at most 10 rounds or 30 minutes). Batches cut off before they were judged are taken on next time. When most wrong rows of a language are on no known page, a small sample of pages is read first. One batch per start by default; starting no longer resets anything in the form request.
+* Rollbacks skip rows on the accepted list (also the test journal undo). New from the command line: `wp aitp audit rollback <batch> --only-bad` and `--since=<time> [--auto-only]`; `wp aitp map start --sample`.
+* "Translate just these pages" after a reset visits only the pages of that batch.
+* A row shown on very many pages (menus, footers) is looked up on at most 20 pages; the whole page cache is cleared once instead.
+* Repair batch records moved from an option (last 200) to a table; database version 8.
+* Fixed (from the first part of 0.7.0): good Arabic translations were reported as mixed with another script on PCRE2 10.40 or newer.
 
 = 0.6.6 =
 * Fix: text that is already in the target language (TranslatePress keeps, for example, the language switcher labels of each language as originals) and comes back unchanged was rejected as "untranslated"; with two such strings in a batch the whole answer was thrown away as misaligned and after three such answers the engine paused for every language. Text with clear signs of the target language and no English function word is now asked about once and then kept and listed for review ("already in this language"). Entries handed back unchanged no longer make a batch look misaligned: they fail on their own and the rest of the batch is used. Only when half a batch or more comes back unchanged (strings already rejected for that before not counted) is the whole answer distrusted and counted against the provider. Real English left unchanged (titles, sentences, phrases with English function words) is still rejected and never saved.

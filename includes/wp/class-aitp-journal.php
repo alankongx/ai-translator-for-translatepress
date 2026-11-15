@@ -205,6 +205,9 @@ final class AITP_Journal {
 					if ( ! is_array( $r ) || ! isset( $r['translated'] ) || (int) ( isset( $r['status'] ) ? $r['status'] : 0 ) !== 1 ) {
 						continue; // Only machine translations.
 					}
+					if ( self::tp_raw( isset( $r['original'] ) ? (string) $r['original'] : '', (string) $r['translated'] ) ) {
+						continue; // TranslatePress stored the text as it is (it never translates such text): not ours.
+					}
 					if ( ! empty( $r['id'] ) ) {
 						$by[ (int) $r['id'] ] = (string) $r['translated'];
 					} else {
@@ -556,6 +559,18 @@ final class AITP_Journal {
 	}
 
 	/**
+	 * Whether TranslatePress stored a text as it is because it never translates such text
+	 * (numbers, addresses, ...: its own rule), so no engine translated it.
+	 *
+	 * @param string $original   Original.
+	 * @param string $translated Stored text.
+	 * @return bool
+	 */
+	private static function tp_raw( $original, $translated ) {
+		return $original !== '' && trim( $translated ) === trim( $original ) && AITP_Audit::tp_skips( $original );
+	}
+
+	/**
 	 * What the session recorded, and the rows TranslatePress added since it started.
 	 *
 	 * @return array{entries:array<string,int>,new_rows:array<int,array{kind:string,lang:string,status:int,rows:int}>}
@@ -609,7 +624,7 @@ final class AITP_Journal {
 					break;
 				}
 				foreach ( $rows as $r ) {
-					$row  = array( 'table' => $t['kind'], 'language' => $t['lang'], 'id' => (int) $r['id'], 'original' => (string) $r['original'], 'translated' => $r['translated'], 'status' => (int) $r['status'] );
+					$row  = array( 'table' => $t['kind'], 'language' => $t['lang'], 'id' => (int) $r['id'], 'original' => (string) $r['original'], 'translated' => $r['translated'], 'status' => (int) $r['status'], 'tp_raw' => (int) $r['status'] === 1 && self::tp_raw( (string) $r['original'], (string) $r['translated'] ) );
 					$from = (int) $r['id'];
 					if ( $emit ) {
 						call_user_func( $emit, $row );

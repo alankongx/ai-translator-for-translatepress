@@ -2383,3 +2383,120 @@ msgstr "这些页面会一直列在这里，直到点「不再单独处理这些
 
 msgid "Time ran out: %s languages were not checked. Choose one language to check it on its own."
 msgstr "时间不够：还有 %s 种语言没查。请选一种语言单独查。"
+
+msgid "Certainly wrong"
+msgstr "确定是错的"
+
+msgid "A person should look"
+msgstr "需要人看"
+
+msgid "For reference"
+msgstr "参考"
+
+msgid "All levels"
+msgstr "全部档"
+
+msgid "row no longer exists (TranslatePress \"Optimize database\" may have removed it)"
+msgstr "这一行已经不在了（可能被 TranslatePress 的「优化数据库」清掉了）"
+
+msgid "nothing reset: automatic translation is off in TranslatePress, so the rows would stay untranslated"
+msgstr "一行都没改：TranslatePress 的自动翻译是关着的，改回后这些行会一直没人翻"
+
+msgid "nothing reset: API key or model missing"
+msgstr "一行都没改：还没填 API 密钥或模型"
+
+msgid "nothing reset: the AI provider is failing and translation is paused; try again when it is back"
+msgstr "一行都没改：AI 接口出错，翻译已暂停；等接口恢复后再试"
+
+msgid "not reset: translation of this language is paused after provider errors"
+msgstr "没改：这种语言因为接口出错暂停翻译了"
+
+msgid "not reset: TranslatePress keeps such text untranslated (addresses, numbers), so it would come back the same"
+msgstr "没改：这类文字（网址、数字等）TranslatePress 本来就不翻，改回后还是原样"
+
+msgid "(plus %s for reference only)"
+msgstr "（另有 %s 条仅供参考）"
+
+msgid "\"Certainly wrong\": empty, English stored, cut short, sentences or links missing and the like; only these are reset by \"Reset all\" and by the auto repair. \"A person should look\": sizes, model numbers, number formats, possible misplacements, meaning checks and structured data; they are reset only when you select them."
+msgstr "「确定是错的」：空的、存成英文、被截短、缺句子或缺链接等；只有这一档会被「全部改回」和自动修复处理。「需要人看」：尺码、型号、数字写法、可能错位、要核对意思的，以及结构化数据；只有你手动勾选时才会改回。"
+
+msgid "For reference only: %s (not counted as open)"
+msgstr "仅供参考：%s 条（不算待处理）"
+
+msgid "Rows near a run of wrong rows that look fine on their own. Look at them only when a page still shows misplaced text."
+msgstr "挨着一串错误行、但单看没问题的行。只有页面上仍然看到错位文字时再来看它们。"
+
+msgid "more than half of the last batch was not translated, and the engine refused none of it: the pages visited probably do not show these rows"
+msgstr "上一批有一半以上没翻，而且引擎一条都没拒绝：访问的页面多半没显示这些行"
+
+msgid "the rows left are on no known page"
+msgstr "剩下的行都不在已知页面上"
+
+msgid "translation of the language of the next batch is paused after provider errors"
+msgstr "下一批那种语言因为接口出错暂停翻译了"
+
+msgid "%s rows that are certainly wrong are on no known page: map the pages that show them (tab \"Page map & test journal\"), or select and reset them by hand"
+msgstr "还有 %s 条确定是错的行不知道在哪个页面上：先给显示它们的页面做映射（「页面映射与测试记录」页签），或者手动勾选改回"
+
+msgid "Last batch"
+msgstr "上一批"
+
+msgid "%1$s translated and passing the checks, %2$s still wrong, %3$s refused by the engine, %4$s not reached by the page visits; %5$s show the original text on the site now"
+msgstr "翻好并通过检查 %1$s 条，仍然错 %2$s 条，引擎拒绝 %3$s 条，页面访问没轮到 %4$s 条；前台现在显示原文的有 %5$s 条"
+
+msgid "Finding pages first"
+msgstr "先找页面"
+
+msgid "%1$s: reading sample page %2$s of %3$s (read only: nothing is translated or changed)"
+msgstr "%1$s：正在读第 %2$s / %3$s 个样本页（只读，不翻译也不改任何东西）"
+
+msgid "Languages: %1$s. Page text certainly wrong: %2$s. Rows per batch: %3$s; batches per start: %4$s; characters per day at most: %5$s."
+msgstr "语言：%1$s。确定是错的页面文字：%2$s 条。每批 %3$s 行；这次最多 %4$s 批；每天最多 %5$s 字符。"
+
+msgid "all"
+msgstr "全部"
+
+msgid "no limit"
+msgstr "不限"
+
+msgid "refused %1$s, not reached %2$s"
+msgstr "引擎拒绝 %1$s，没轮到 %2$s"
+
+msgid "Reset %1$s findings that are certainly wrong (%2$s; at most %3$s per click)? \"A person should look\" findings are not touched. They are backed up first and can be rolled back."
+msgstr "把 %1$s 条「确定是错的」改回未翻译（%2$s；每次最多 %3$s 条）？「需要人看」的不会动。改之前先备份，可以回滚。"
+
+msgid "Reset all certainly wrong matching (%s)"
+msgstr "把确定是错的全部改回（%s 条）"
+
+msgid "Only rows on a known page are reset: a page TranslatePress links the string to, or a mapped page that shows it. After a reset, \"Translate just these pages\" (shown at the top) visits only the pages of that batch; the rest of the backfill queue waits. Clear CDN or server caches outside WordPress yourself."
+msgstr "只改回在已知页面上的行：TranslatePress 记录了这句话所在的页面，或者做过映射、看到它的页面。改回后，用顶部的「只翻这批页面」只访问这一批的页面，补翻队列里其它页面先等着。WordPress 以外的 CDN 或服务器缓存需要你自己清。"
+
+msgid "A rollback puts back only the rows its repair reset. Other text that was translated while the pages were visited is not in the backup and stays."
+msgstr "回滚只恢复这批改回的行。访问页面时顺带翻好的其它文字不在备份里，会保留。"
+
+msgid "record expired (its backup rows are still there): shown from them, can be downloaded and rolled back"
+msgstr "记录已过期（备份行仍在）：按备份行显示，可以下载和回滚"
+
+msgid "rows that did not come out well: %1$s — %2$s"
+msgstr "只回滚了没翻好的：%1$s — %2$s"
+
+msgid "Put the old translations of this repair back? Rows translated manually since then, and rows on the accepted list, are kept. Only the rows this repair reset are put back: other text translated while its pages were visited is not in the backup."
+msgstr "把这批修复之前的译文恢复回去？之后人工改过的行和已验收清单上的行会保留。只恢复这批改回的行：访问页面时顺带翻好的其它文字不在备份里。"
+
+msgid "Translate just these pages (%s)"
+msgstr "只翻这批页面（%s 个）"
+
+msgid "Only the pages that show the rows of this batch are visited now; the rest of the backfill queue waits, then goes on as it was."
+msgstr "现在只访问显示这批行的页面；补翻队列里其它页面先等着，之后照原样继续。"
+
+msgid "Use \"Translate just these pages\" at the top to have them translated now (only these pages; the rest of the queue waits)."
+msgstr "可以点顶部的「只翻这批页面」马上翻译（只翻这些页面，队列里其它页面先等着）。"
+
+msgid "No page of this batch is known: nothing was started."
+msgstr "这一批没有已知页面：什么都没开始。"
+
+msgid "%s pages are being translated now. The rest of the backfill queue waits until they are done, then goes on as it was."
+msgstr "正在翻译 %s 个页面。补翻队列里其它页面等它们翻完，再照原样继续。"
+
+msgid "Rows of %s on no known page come back with the whole queue."
+msgstr "%s 里不在已知页面上的行，要等整个队列跑到时才会重新翻译。"
