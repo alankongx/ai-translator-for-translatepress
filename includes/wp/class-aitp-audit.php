@@ -825,6 +825,19 @@ final class AITP_Audit {
 	 * ----------------------------------------------------------------------------------- */
 
 	/**
+	 * Whether a row's current text is on the accepted list (for the test journal's undo).
+	 *
+	 * @param string $kind dictionary|gettext.
+	 * @param string $lang Language.
+	 * @param array  $row  Row: id, original, translated.
+	 * @return bool
+	 */
+	public static function row_accepted( $kind, $lang, array $row ) {
+		$acc = self::accepted( $kind, $lang, array( (int) $row['id'] ) );
+		return AITP_Audit_Logic::is_accepted( $row, isset( $acc[ (int) $row['id'] ] ) ? $acc[ (int) $row['id'] ] : array() );
+	}
+
+	/**
 	 * Accepted entries of some rows.
 	 *
 	 * @param string $kind dictionary|gettext.
@@ -1033,6 +1046,30 @@ final class AITP_Audit {
 	}
 
 	/**
+	 * Why a repair may not reset rows now ('' = it may). Reset rows are translated again by
+	 * whatever engine TranslatePress uses, and only when automatic translation is on and the
+	 * provider answers; otherwise they would just show the original text.
+	 *
+	 * @return string engine_not_selected | automatic_off | not_configured | provider_paused | ''
+	 */
+	public static function repair_blocker() {
+		if ( ! AITP_Plugin::engine_selected() ) {
+			return 'engine_not_selected';
+		}
+		if ( ! AITP_Plugin::automatic_translation_on() ) {
+			return 'automatic_off';
+		}
+		if ( ! AITP_Settings::provider() ) {
+			return 'not_configured';
+		}
+		$b = AITP_Plugin::breaker()->state();
+		if ( $b['status'] !== 'closed' && time() < (int) $b['until'] ) {
+			return 'provider_paused';
+		}
+		return '';
+	}
+
+	/**
 	 * Back up and reset findings to "not translated", then queue their pages.
 	 *
 	 * Only rows on a known page are reset: a page TranslatePress links the string to
@@ -1040,18 +1077,26 @@ final class AITP_Audit {
 	 * (the finding stays open) unless $opts['unlinked'] is set; then every page of that
 	 * language is queued again.
 	 *
+	 * Page text is repaired by original: TranslatePress may keep one original in several rows
+	 * and shows one of them (whichever it reads first). The other machine-translated rows of the
+	 * same original are backed up and reset with the row, so the page cannot keep showing an
+	 * old copy; manual translations and accepted rows of the group are left as they are (the
+	 * page then shows them).
+	 *
 	 * @param int[] $ids  Finding ids (at most MAX_ACTION_ROWS are used).
-	 * @param array $opts unlinked: also reset rows on no known page.
-	 * @return array{batch:int,reset:int,skipped:array<string,int>,pages:int,all_pages:string[],urls:array,no_page:int[]}
+	 * @param array $opts unlinked: also reset rows on no known page; pages: only these pages;
+	 *                    auto: a batch of the auto repair; site_purge_later: do not clear the
+	 *                    whole page cache now when rows show on very many pages (the auto repair
+	 *                    does it once at the end).
+	 * @return array{batch:int,reset:int,group:int,skipped:array<string,int>,pages:int,all_pages:string[],urls:array,no_page:int[],wide:bool,blocked?:string}
 	 */
 	public static function repair( array $ids, array $opts = array() ) {
-		global $wpdb;
-		$batch    = (int) round( microtime( true ) * 1000 );
-		$unlinked = ! empty( $opts['unlinked'] );
-		$out      = array( 'batch' => $batch, 'reset' => 0, 'skipped' => array(), 'pages' => 0, 'all_pages' => array(), 'urls' => array(), 'no_page' => array() );
-		if ( ! AITP_Plugin::engine_selected() ) {
-			// Reset rows would be translated again by whatever engine TranslatePress uses.
-			$out['skipped']['engine_not_selected'] = count( $ids );
+		$batch = (int) round( microtime( true ) * 1000 );
+		$out   = array( 'batch' => $batch, 'reset' => 0, 'group' => 0, 'skipped' => array(), 'pages' => 0, 'all_pages' => array(), 'urls' => array(), 'no_page' => array(), 'wide' => false );
+		$why   = self::repair_blocker();
+		if ( $why !== '' ) {
+			$out['skipped'][ $why ] = count( $ids );
+			$out['blocked']         = $why;
 			return $out;
 		}
 		if ( ! self::write_lock( 'repair' ) ) {
@@ -1075,6 +1120,7 @@ final class AITP_Audit {
 		global $wpdb;
 		$batch    = $out['batch'];
 		$unlinked = ! empty( $opts['unlinked'] );
+		$auto     = ! empty( $opts['auto'] );
 		// Finish even when the browser goes away; the batch record is written before any change.
 		ignore_user_abort( true );
 		if ( function_exists( 'set_time_limit' ) ) {
@@ -1084,16 +1130,88 @@ final class AITP_Audit {
 		$only     = $allowed !== null ? array_values( array_unique( array_filter( array_map( 'strval', $opts['pages'] ) ) ) ) : array(); // Kept with the batch.
 		$audit    = AITP_Schema::table( 'audit' );
 		$repair   = AITP_Schema::table( 'repair' );
+		$held     = AITP_Plugin::breaker()->held_locales();
 		$started  = false;
 		$pages_of = array(); // row key => pages to visit for the row.
-		$purge_of = array(); // row key => every known page showing the row.
+		$purge_of = array(); // row key => known pages showing the row (at most AITP_Pagemap::ROW_PAGES).
 		$all_lang = array(); // Languages with reset rows on no known page.
+		$langs    = array();
+		$done     = array(); // row key => true: reset in this batch (a group is handled once).
 		$failures = new AITP_WP_Failures();
 		$skip     = function ( $why, $fid = 0 ) use ( &$out, $wpdb, $audit ) {
 			$out['skipped'][ $why ] = ( isset( $out['skipped'][ $why ] ) ? $out['skipped'][ $why ] : 0 ) + 1;
 			if ( $fid && in_array( $why, array( 'changed', 'manual', 'missing', 'untranslated' ), true ) ) {
 				$wpdb->update( $audit, array( 'state' => 'changed' ), array( 'id' => $fid ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			}
+		};
+		// Back up one row and reset it. False when it was not reset (counted in skipped).
+		$reset = function ( array $t, array $r, $fid ) use ( &$started, &$out, &$done, $batch, $auto, $only, $wpdb, $audit, $repair, $failures, $skip ) {
+			$kind = $t['kind'];
+			$lang = $t['lang'];
+			if ( ! $started ) {
+				// Recorded before the first row changes: a cut-off repair can still be rolled back
+				// (and an auto repair batch cut off here is picked up again: see AITP_Autofix).
+				self::save_batch(
+					$batch,
+					array(
+						'time'      => time(),
+						'user'      => get_current_user_id(),
+						'state'     => 'running',
+						'auto'      => $auto ? 1 : 0,
+						'lang'      => $lang,
+						'reset'     => 0,
+						'skipped'   => array(),
+						'pages'     => 0,
+						'urls'      => array(),
+						'all_pages' => array(),
+						'only'      => $only,
+						'journal'   => AITP_Journal::max_id(), // Test journal entries after this one belong to the batch.
+					)
+				);
+				$started = true;
+			}
+			// phpcs:disable WordPress.DB.DirectDatabaseQuery
+			$wpdb->insert(
+				$repair,
+				array(
+					'batch'      => $batch,
+					'kind'       => $kind,
+					'lang'       => $lang,
+					'row_id'     => (int) $r['id'],
+					'finding_id' => (int) $fid,
+					'original'   => (string) $r['original'],
+					'translated' => (string) $r['translated'],
+					'status'     => (int) $r['status'],
+					'exact'      => 1,
+					'created_at' => current_time( 'mysql', true ),
+				) + ( $r['original_id'] !== null && $r['original_id'] !== '' ? array( 'original_id' => (int) $r['original_id'] ) : array() )
+			);
+			$backup_id = (int) $wpdb->insert_id;
+			if ( ! $backup_id ) {
+				$skip( 'backup_failed' );
+				return false;
+			}
+			$empty = $kind === 'gettext' ? "''" : 'NULL';
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$n = $wpdb->query( $wpdb->prepare( "UPDATE `{$t['table']}` SET translated = $empty, status = 0 WHERE id = %d AND status = 1 AND BINARY translated = BINARY %s", (int) $r['id'], (string) $r['translated'] ) );
+			if ( $n !== 1 ) {
+				$wpdb->delete( $repair, array( 'id' => $backup_id ) );
+				$skip( 'changed', (int) $fid );
+				return false;
+			}
+			if ( $fid ) {
+				$wpdb->update( $audit, array( 'state' => 'fixed', 'batch' => $batch ), array( 'id' => (int) $fid ) );
+			}
+			// phpcs:enable
+			$src = $kind === 'gettext' ? 'en_US' : self::default_language();
+			$failures->clear( AITP_Translator::failure_key( (string) $r['original'], $src, $lang ) );
+			$decoded = html_entity_decode( (string) $r['original'], ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+			if ( $decoded !== (string) $r['original'] ) {
+				$failures->clear( AITP_Translator::failure_key( $decoded, $src, $lang ) ); // The engine is given decoded text.
+			}
+			$done[ $kind . '|' . $lang . '|' . (int) $r['id'] ] = true;
+			$out['reset']++;
+			return true;
 		};
 		$by = array();
 		foreach ( self::findings( $ids ) as $f ) {
@@ -1112,11 +1230,29 @@ final class AITP_Audit {
 				}
 				continue;
 			}
-			$cur = self::rows( $t, wp_list_pluck( $list, 'row_id' ) );
-			$acc = self::accepted( $kind, $lang, wp_list_pluck( $list, 'row_id' ) );
-			$src   = $kind === 'gettext' ? 'en_US' : self::default_language();
-			$pages = self::row_pages( $t, $cur );
+			if ( isset( $held[ $t['lang'] ] ) ) {
+				// The provider keeps failing for this language: reset rows would stay untranslated.
+				$out['skipped']['language_paused'] = ( isset( $out['skipped']['language_paused'] ) ? $out['skipped']['language_paused'] : 0 ) + count( $list );
+				continue;
+			}
+			$cur   = self::rows( $t, wp_list_pluck( $list, 'row_id' ) );
+			$acc   = self::accepted( $kind, $lang, wp_list_pluck( $list, 'row_id' ) );
+			$wide  = array();
+			$pages = self::row_pages( $t, $cur, $wide );
+			$group = $kind === 'dictionary' ? self::same_original_rows( $t, $cur ) : array();
+			$g_ids = array();
+			foreach ( $group as $rows ) {
+				$g_ids = array_merge( $g_ids, array_keys( $rows ) );
+			}
+			$g_acc  = self::accepted( $kind, $lang, $g_ids );
+			$g_find = self::open_findings( $kind, $lang, $g_ids );
 			foreach ( $list as $f ) {
+				$key = $kind . '|' . $lang . '|' . (int) $f['row_id'];
+				if ( isset( $done[ $key ] ) ) {
+					// Reset already in this batch, with another row of the same original.
+					$wpdb->update( $audit, array( 'state' => 'fixed', 'batch' => $batch ), array( 'id' => (int) $f['id'] ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+					continue;
+				}
 				$r     = isset( $cur[ (int) $f['row_id'] ] ) ? $cur[ (int) $f['row_id'] ] : null;
 				$block = AITP_Audit_Logic::reset_block( $f, $r, isset( $acc[ (int) $f['row_id'] ] ) ? $acc[ (int) $f['row_id'] ] : array() );
 				if ( $block === 'accepted' ) {
@@ -1143,68 +1279,30 @@ final class AITP_Audit {
 					$out['no_page'][] = (int) $f['id'];
 					continue;
 				}
-				if ( ! $started ) {
-					// Recorded before the first row changes: a cut-off repair can still be rolled back.
-					self::save_batch(
-						$batch,
-						array(
-							'time'      => time(),
-							'user'      => get_current_user_id(),
-							'state'     => 'running',
-							'reset'     => 0,
-							'skipped'   => array(),
-							'pages'     => 0,
-							'urls'      => array(),
-							'all_pages' => array(),
-							'only'      => $only,
-							'journal'   => AITP_Journal::max_id(), // Test journal entries after this one belong to the batch.
-						)
-					);
-					$started = true;
-				}
-				// phpcs:disable WordPress.DB.DirectDatabaseQuery
-				$wpdb->insert(
-					$repair,
-					array(
-						'batch'      => $batch,
-						'kind'       => $kind,
-						'lang'       => $lang,
-						'row_id'     => (int) $r['id'],
-						'finding_id' => (int) $f['id'],
-						'original'   => (string) $r['original'],
-						'translated' => (string) $r['translated'],
-						'status'     => (int) $r['status'],
-						'exact'      => 1,
-						'created_at' => current_time( 'mysql', true ),
-					) + ( $r['original_id'] !== null && $r['original_id'] !== '' ? array( 'original_id' => (int) $r['original_id'] ) : array() )
-				);
-				$backup_id = (int) $wpdb->insert_id;
-				if ( ! $backup_id ) {
-					$skip( 'backup_failed' );
+				if ( ! $reset( $t, $r, (int) $f['id'] ) ) {
 					continue;
 				}
-				$empty = $kind === 'gettext' ? "''" : 'NULL';
-				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				$n = $wpdb->query( $wpdb->prepare( "UPDATE `{$t['table']}` SET translated = $empty, status = 0 WHERE id = %d AND status = 1 AND BINARY translated = BINARY %s", (int) $r['id'], (string) $r['translated'] ) );
-				if ( $n !== 1 ) {
-					$wpdb->delete( $repair, array( 'id' => $backup_id ) );
-					$skip( 'changed', (int) $f['id'] );
-					continue;
-				}
-				$wpdb->update( $audit, array( 'state' => 'fixed', 'batch' => $batch ), array( 'id' => (int) $f['id'] ) );
-				// phpcs:enable
-				$failures->clear( AITP_Translator::failure_key( (string) $r['original'], $src, $lang ) );
-				$decoded = html_entity_decode( (string) $r['original'], ENT_QUOTES | ENT_HTML5, 'UTF-8' );
-				if ( $decoded !== (string) $r['original'] ) {
-					$failures->clear( AITP_Translator::failure_key( $decoded, $src, $lang ) ); // The engine is given decoded text.
-				}
+				$langs[ $lang ] = true;
 				if ( $rp ) {
-					$pages_of[ $kind . '|' . $lang . '|' . (int) $r['id'] ] = $rp;
-					$purge_of[ $kind . '|' . $lang . '|' . (int) $r['id'] ] = $known;
+					$pages_of[ $key ] = $rp;
+					$purge_of[ $key ] = $known;
 				} else {
 					$all_lang[ $lang ] = true;
 				}
-				$out['reset']++;
+				if ( isset( $wide[ (int) $r['id'] ] ) ) {
+					$out['wide'] = true; // Shown on more pages than were looked up: the whole cache needs clearing.
+				}
+				foreach ( isset( $group[ (string) $r['original'] ] ) ? $group[ (string) $r['original'] ] : array() as $sid => $sr ) {
+					if ( (int) $sid === (int) $r['id'] || isset( $done[ $kind . '|' . $lang . '|' . (int) $sid ] ) || (int) $sr['status'] !== 1 ) {
+						continue; // Manual (2) and untranslated (0) rows of the group are left alone.
+					}
+					if ( AITP_Audit_Logic::is_accepted( $sr, isset( $g_acc[ (int) $sid ] ) ? $g_acc[ (int) $sid ] : array() ) ) {
+						continue;
+					}
+					if ( $reset( $t, $sr, isset( $g_find[ (int) $sid ] ) ? $g_find[ (int) $sid ] : 0 ) ) {
+						$out['group']++;
+					}
+				}
 			}
 		}
 		if ( $out['reset'] ) {
@@ -1223,21 +1321,80 @@ final class AITP_Audit {
 					'time'      => time(),
 					'user'      => get_current_user_id(),
 					'state'     => 'done',
+					'auto'      => $auto ? 1 : 0,
+					'lang'      => count( $langs ) === 1 ? (string) key( $langs ) : '',
 					'reset'     => $out['reset'],
+					'group'     => $out['group'],
 					'skipped'   => $out['skipped'],
 					'pages'     => $out['pages'],
 					'urls'      => $out['urls'],
+					'visit'     => array_values( $visit ), // Whole page entries, for "translate just these pages".
 					'all_pages' => $out['all_pages'],
 					'only'      => $only,
+					'wide'      => $out['wide'],
 					'journal'   => isset( $prev_info['journal'] ) ? $prev_info['journal'] : 0,
 				)
 			);
-			// Cached copies of every page showing the rows: cleared in the background, in small steps.
+			// Cached copies of the pages showing the rows: cleared in the background, in small steps.
 			$out['purge'] = AITP_Cache_Purge::urls( self::all_urls( $purge_of ) );
+			if ( $out['wide'] && empty( $opts['site_purge_later'] ) ) {
+				$out['purge_site'] = AITP_Cache_Purge::site( 'repair' );
+			}
 		} elseif ( $started ) {
 			AITP_Batches::delete( $batch ); // Nothing was reset after all: no empty "running" batch is left behind.
 		}
 		( new AITP_WP_Log() )->log( 'notice', 'repair', $out );
+		return $out;
+	}
+
+	/**
+	 * Every row of a dictionary table with the same original as some rows (byte for byte).
+	 *
+	 * @param array $t    Dictionary table entry.
+	 * @param array $rows id => row.
+	 * @return array<string,array<int,array>> original => id => row (only originals with more than one row)
+	 */
+	private static function same_original_rows( array $t, array $rows ) {
+		global $wpdb;
+		$originals = array();
+		foreach ( $rows as $r ) {
+			$originals[ (string) $r['original'] ] = true;
+		}
+		$out = array();
+		foreach ( array_chunk( array_keys( $originals ), 50 ) as $chunk ) {
+			$chunk = array_map( 'strval', $chunk );
+			$ph    = implode( ',', array_fill( 0, count( $chunk ), '%s' ) );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
+			foreach ( (array) $wpdb->get_results( $wpdb->prepare( self::select_rows( $t ) . " WHERE tt.original IN ($ph)", $chunk ), ARRAY_A ) as $r ) {
+				if ( isset( $originals[ (string) $r['original'] ] ) ) {
+					$out[ (string) $r['original'] ][ (int) $r['id'] ] = $r; // Byte for byte (the IN above ignores case).
+				}
+			}
+		}
+		return array_filter(
+			$out,
+			function ( $g ) {
+				return count( $g ) > 1;
+			}
+		);
+	}
+
+	/**
+	 * @param string $kind Table kind.
+	 * @param string $lang Language.
+	 * @param int[]  $ids  Row ids.
+	 * @return array<int,int> row id => open finding id
+	 */
+	private static function open_findings( $kind, $lang, array $ids ) {
+		global $wpdb;
+		$ids = array_values( array_unique( array_filter( array_map( 'intval', $ids ) ) ) );
+		$out = array();
+		foreach ( array_chunk( $ids, 500 ) as $chunk ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+			foreach ( (array) $wpdb->get_results( $wpdb->prepare( 'SELECT id, row_id FROM ' . AITP_Schema::table( 'audit' ) . " WHERE kind = %s AND lang = %s AND state = 'open' AND row_id IN (" . implode( ',', $chunk ) . ')', $kind, $lang ), ARRAY_A ) as $f ) {
+				$out[ (int) $f['row_id'] ] = (int) $f['id'];
+			}
+		}
 		return $out;
 	}
 
@@ -1260,11 +1417,16 @@ final class AITP_Audit {
 	 * content, via post_parent_id) and mapped pages (see AITP_Pagemap). Interface text
 	 * (gettext) has no known page.
 	 *
+	 * At most AITP_Pagemap::ROW_PAGES pages are kept per row (one is enough to translate it
+	 * again); rows shown on more pages (headers, footers, menus) are listed in $wide.
+	 *
 	 * @param array $t    Table entry.
 	 * @param array $rows id => row (with original_id).
+	 * @param array $wide Filled: row id => true for rows shown on more pages than were kept.
 	 * @return array<int,array<string,array{url:string,source_url:string,lang:string,object_type:string,object_id:int}>> row id => key => page
 	 */
-	public static function row_pages( array $t, array $rows ) {
+	public static function row_pages( array $t, array $rows, &$wide = null ) {
+		$wide = array();
 		$out = array();
 		if ( $t['kind'] !== 'dictionary' || ! $rows ) {
 			return $out;
@@ -1279,7 +1441,13 @@ final class AITP_Audit {
 		foreach ( $rows as $id => $r ) {
 			$by_original[ (int) $r['original_id'] ][] = (int) $id;
 		}
-		foreach ( self::meta_posts( array_keys( $by_original ) ) as $oid => $posts ) {
+		$wide_oid = array();
+		foreach ( self::meta_posts( array_keys( $by_original ), $wide_oid ) as $oid => $posts ) {
+			if ( isset( $wide_oid[ $oid ] ) ) {
+				foreach ( $by_original[ $oid ] as $row_id ) {
+					$wide[ $row_id ] = true;
+				}
+			}
 			foreach ( $posts as $post_id ) {
 				$p = self::post_page( $lang, $post_id );
 				if ( $p ) {
@@ -1289,11 +1457,13 @@ final class AITP_Audit {
 				}
 			}
 		}
-		foreach ( AITP_Pagemap::pages_of_rows( $lang, array_keys( $rows ) ) as $row_id => $list ) {
+		$wide_map = array();
+		foreach ( AITP_Pagemap::pages_of_rows( $lang, array_keys( $rows ), $wide_map ) as $row_id => $list ) {
 			foreach ( $list as $p ) {
 				$add( $row_id, $p, 'map' );
 			}
 		}
+		$wide += $wide_map;
 		return $out;
 	}
 
@@ -1301,9 +1471,11 @@ final class AITP_Audit {
 	 * Posts TranslatePress links some strings to.
 	 *
 	 * @param int[] $original_ids TranslatePress original ids.
+	 * @param array $wide         Filled: original id => true when linked to more posts than kept.
 	 * @return array<int,int[]> original id => post ids
 	 */
-	private static function meta_posts( array $original_ids ) {
+	private static function meta_posts( array $original_ids, &$wide = null ) {
+		$wide = array();
 		global $wpdb;
 		$meta = self::meta_table();
 		$ids  = array_values( array_unique( array_filter( array_map( 'intval', $original_ids ) ) ) );
@@ -1315,9 +1487,14 @@ final class AITP_Audit {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
 			$rows = (array) $wpdb->get_results( "SELECT DISTINCT original_id, meta_value FROM `$meta` WHERE meta_key = 'post_parent_id' AND original_id IN (" . implode( ',', $chunk ) . ')', ARRAY_A );
 			foreach ( $rows as $r ) {
-				if ( (int) $r['meta_value'] > 0 && ( ! isset( $out[ (int) $r['original_id'] ] ) || count( $out[ (int) $r['original_id'] ] ) < AITP_Pagemap::ROW_PAGES ) ) {
-					$out[ (int) $r['original_id'] ][] = (int) $r['meta_value'];
+				if ( (int) $r['meta_value'] <= 0 ) {
+					continue;
 				}
+				if ( isset( $out[ (int) $r['original_id'] ] ) && count( $out[ (int) $r['original_id'] ] ) >= AITP_Pagemap::ROW_PAGES ) {
+					$wide[ (int) $r['original_id'] ] = true;
+					continue;
+				}
+				$out[ (int) $r['original_id'] ][] = (int) $r['meta_value'];
 			}
 		}
 		return $out;
@@ -1402,6 +1579,7 @@ final class AITP_Audit {
 			$t                   = self::table_for( $kind, $lang );
 			$cur                 = $t ? self::rows( $t, wp_list_pluck( $list, 'row_id' ) ) : array();
 			$newer               = self::newer_batches( $kind, $lang, (int) $batch, wp_list_pluck( $list, 'row_id' ) );
+			$acc                 = self::accepted( $kind, $lang, wp_list_pluck( $list, 'row_id' ) );
 			foreach ( $list as $b ) {
 				if ( isset( $newer[ (int) $b['row_id'] ] ) ) {
 					// A newer repair, not rolled back yet, also reset this row: its backup holds the text in
@@ -1412,6 +1590,9 @@ final class AITP_Audit {
 				}
 				$r     = isset( $cur[ (int) $b['row_id'] ] ) ? $cur[ (int) $b['row_id'] ] : null;
 				$block = $t ? AITP_Audit_Logic::restore_block( $b, $r ) : 'missing';
+				if ( $block === '' && AITP_Audit_Logic::is_accepted( $r, isset( $acc[ (int) $b['row_id'] ] ) ? $acc[ (int) $b['row_id'] ] : array() ) ) {
+					$block = 'accepted'; // People reviewed the text it has now: a rollback must not replace it.
+				}
 				if ( $block === '' ) {
 					$cond = $r['translated'] === null ? 'translated IS NULL' : $wpdb->prepare( 'BINARY translated = BINARY %s', (string) $r['translated'] );
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
@@ -1462,13 +1643,20 @@ final class AITP_Audit {
 		if ( $restored ) {
 			// Restored rows are translated: nothing to queue, only cached copies to refresh (in the background).
 			$pages_of = array();
+			$wide     = false;
 			foreach ( $restored as $k => $rows ) {
 				list( $kind, $lang ) = explode( '|', $k );
-				foreach ( self::row_pages( self::table_for( $kind, $lang ), $rows ) as $id => $list ) {
+				$w                   = false;
+				foreach ( self::row_pages( self::table_for( $kind, $lang ), $rows, $w ) as $id => $list ) {
 					$pages_of[ $k . '|' . $id ] = $list;
 				}
+				$wide = $wide || $w;
 			}
 			$out['purge'] = AITP_Cache_Purge::urls( self::all_urls( $pages_of ) );
+			if ( $wide ) {
+				// Some rows show on more pages than the list holds (menus, footers): the whole cache, once.
+				$out['purge_site'] = AITP_Cache_Purge::site( 'rollback' );
+			}
 		}
 		( new AITP_WP_Log() )->log( 'notice', 'rollback', array( 'batch' => $batch ) + $out );
 		return $out;
@@ -1672,6 +1860,24 @@ final class AITP_Audit {
 			$out['no_page']    += $skip['no_page'];
 		}
 		return $out;
+	}
+
+	/**
+	 * "Translate just these pages" for a repair batch: only the pages that show its rows are
+	 * visited now (the rest of the queue waits, then goes on as it was).
+	 *
+	 * @param int $batch Batch id.
+	 * @return array{queued:int,all_pages:string[]} all_pages: languages whose rows had no known
+	 *         page (they come back with the whole queue, not with these pages).
+	 */
+	public static function visit_batch( $batch ) {
+		$info  = AITP_Batches::get( (int) $batch );
+		$info  = is_array( $info ) ? $info : array();
+		$pages = ! empty( $info['visit'] ) ? (array) $info['visit'] : AITP_Queue::entries_for( self::batch_urls( (int) $batch ) );
+		return array(
+			'queued'    => $pages ? AITP_Queue::start_pages( $pages ) : 0,
+			'all_pages' => ! empty( $info['all_pages'] ) ? array_values( (array) $info['all_pages'] ) : array(),
+		);
 	}
 
 	/**

@@ -113,6 +113,11 @@ final class AITP_Admin_Audit {
 			'no_page'       => __( 'on no known page (not reset)', 'ai-translator-for-translatepress' ),
 			'outside_pages' => __( 'not on any page of the given list (not reset)', 'ai-translator-for-translatepress' ),
 			'newer_batch'   => __( 'also reset by a newer repair that is not rolled back yet (roll that one back first, then this one again)', 'ai-translator-for-translatepress' ),
+			'automatic_off'   => __( 'nothing reset: automatic translation is off in TranslatePress, so the rows would stay untranslated', 'ai-translator-for-translatepress' ),
+			'not_configured'  => __( 'nothing reset: API key or model missing', 'ai-translator-for-translatepress' ),
+			'provider_paused' => __( 'nothing reset: the AI provider is failing and translation is paused; try again when it is back', 'ai-translator-for-translatepress' ),
+			'language_paused' => __( 'not reset: translation of this language is paused after provider errors', 'ai-translator-for-translatepress' ),
+			'tp_keeps'        => __( 'not reset: TranslatePress keeps such text untranslated (addresses, numbers), so it would come back the same', 'ai-translator-for-translatepress' ),
 		);
 		return isset( $map[ $why ] ) ? $map[ $why ] : $why;
 	}
@@ -225,6 +230,8 @@ final class AITP_Admin_Audit {
 			'max_batches'         => __( 'the number of batches set for one start is done', 'ai-translator-for-translatepress' ),
 			'visit_check'         => __( 'a test load of a page before the next batch failed (nothing was reset)', 'ai-translator-for-translatepress' ),
 			'busy'                => __( 'a repair, rollback or undo is running', 'ai-translator-for-translatepress' ),
+			'provider_paused'     => __( 'the AI provider is failing (engine paused)', 'ai-translator-for-translatepress' ),
+			'language_paused'     => __( 'translation of the language of the next batch is paused after provider errors', 'ai-translator-for-translatepress' ),
 		);
 		if ( isset( $map[ $r ] ) ) {
 			return $map[ $r ];
@@ -676,6 +683,11 @@ final class AITP_Admin_Audit {
 				self::action_record( $form, array( 'state' => 'done', 'batch' => $r['reset'] ? (int) $r['batch'] : 0, 'n' => (int) $r['reset'] ) );
 				if ( ! empty( $r['busy'] ) ) {
 					$msg  = self::busy_message( $r['busy'] );
+					$type = 'warning';
+					break;
+				}
+				if ( ! empty( $r['blocked'] ) ) {
+					$msg  = self::skip_label( $r['blocked'] ) . '.';
 					$type = 'warning';
 					break;
 				}

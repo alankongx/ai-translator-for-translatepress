@@ -756,7 +756,20 @@ final class AITP_Queue {
 		if ( ! $p['items'] ) {
 			return array( 'queued' => 0, 'bad' => $p['bad'] );
 		}
-		$n = self::requeue_urls( $p['items'], 'target', time() );
+		return array( 'queued' => self::start_pages( $p['items'] ), 'bad' => $p['bad'] );
+	}
+
+	/**
+	 * Visit only these pages now (see start_target()); the rest of the queue waits.
+	 *
+	 * @param array $pages Each url, source_url, lang, object_type, object_id.
+	 * @return int Pages queued (0: nothing started).
+	 */
+	public static function start_pages( array $pages ) {
+		$n = self::requeue_urls( $pages, 'target', time() );
+		if ( ! $n ) {
+			return 0;
+		}
 		$s = self::state();
 		self::update_state(
 			array(
@@ -765,7 +778,34 @@ final class AITP_Queue {
 			)
 		);
 		self::start( false );
-		return array( 'queued' => $n, 'bad' => $p['bad'] );
+		return $n;
+	}
+
+	/**
+	 * Queue entries of some translated addresses (to visit them again).
+	 *
+	 * @param array $urls Each url, lang.
+	 * @return array Each url, source_url, lang, object_type, object_id.
+	 */
+	public static function entries_for( array $urls ) {
+		global $wpdb;
+		$out = array();
+		foreach ( array_chunk( $urls, 100 ) as $chunk ) {
+			$or = array();
+			foreach ( $chunk as $u ) {
+				if ( ! empty( $u['url'] ) && ! empty( $u['lang'] ) ) {
+					$or[] = $wpdb->prepare( '(url = %s AND lang = %s)', (string) $u['url'], (string) $u['lang'] );
+				}
+			}
+			if ( ! $or ) {
+				continue;
+			}
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+			foreach ( (array) $wpdb->get_results( 'SELECT url, source_url, lang, object_type, object_id FROM ' . AITP_Schema::table( 'queue' ) . ' WHERE ' . implode( ' OR ', $or ), ARRAY_A ) as $r ) {
+				$out[] = $r;
+			}
+		}
+		return $out;
 	}
 
 	/**

@@ -26,7 +26,7 @@ final class AITP_Pagemap {
 	const CRON      = 'aitp_map_tick';
 	const GAP       = 5;    // Seconds between two map visits.
 	const MAX_ITEMS = 3000; // Pages x languages of one run.
-	const ROW_PAGES = 250;  // Pages kept per row (a footer line is on every page; more than 200 clear the whole cache anyway).
+	const ROW_PAGES = 20;   // Pages kept per row: one is enough to translate it again; a footer line is on every page.
 
 	/** @var int Seconds between two map visits (WP-CLI --ignore-rate sets 0). */
 	public static $gap = self::GAP;
@@ -489,28 +489,27 @@ final class AITP_Pagemap {
 	}
 
 	/**
-	 * Mapped pages that show some rows of one language.
+	 * Mapped pages that show some rows of one language, at most ROW_PAGES per row. Pages are
+	 * counted first, so a footer line shown on 2,000 pages does not load 2,000 rows into memory.
 	 *
 	 * @param string $lang    Language.
 	 * @param int[]  $row_ids Dictionary row ids.
+	 * @param array  $wide    Filled: row id => true for rows shown on more pages than returned.
 	 * @return array<int,array<int,array{url:string,source_url:string,lang:string,object_type:string,object_id:int}>> row id => pages
 	 */
-	public static function pages_of_rows( $lang, array $row_ids ) {
+	public static function pages_of_rows( $lang, array $row_ids, &$wide = null ) {
 		global $wpdb;
-		$ids = array_values( array_unique( array_filter( array_map( 'intval', $row_ids ) ) ) );
-		$out = array();
+		$wide = array();
+		$ids  = array_values( array_unique( array_filter( array_map( 'intval', $row_ids ) ) ) );
+		$out  = array();
 		if ( ! $ids ) {
 			return $out;
 		}
 		$table = AITP_Schema::table( 'pagemap' );
 		$ps    = AITP_Schema::table( 'pagestr' );
-		foreach ( array_chunk( $ids, 50 ) as $chunk ) {
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
-			$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT p.row_id, m.url, m.source_url, m.lang, m.object_type, m.object_id FROM $ps p JOIN $table m ON m.id = p.page_id WHERE p.lang = %s AND p.row_id IN (" . implode( ',', $chunk ) . ')', $lang ), ARRAY_A );
+		$cols  = 'p.row_id, m.url, m.source_url, m.lang, m.object_type, m.object_id';
+		$add   = function ( array $rows ) use ( &$out ) {
 			foreach ( $rows as $r ) {
-				if ( isset( $out[ (int) $r['row_id'] ] ) && count( $out[ (int) $r['row_id'] ] ) >= self::ROW_PAGES ) {
-					continue;
-				}
 				$out[ (int) $r['row_id'] ][] = array(
 					'url'         => (string) $r['url'],
 					'source_url'  => (string) $r['source_url'],
@@ -519,7 +518,25 @@ final class AITP_Pagemap {
 					'object_id'   => (int) $r['object_id'],
 				);
 			}
+		};
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+		foreach ( array_chunk( $ids, 200 ) as $chunk ) {
+			$n     = (array) $wpdb->get_results( $wpdb->prepare( "SELECT row_id, COUNT(*) AS n FROM $ps WHERE lang = %s AND row_id IN (" . implode( ',', $chunk ) . ') GROUP BY row_id', $lang ), ARRAY_A );
+			$few   = array();
+			foreach ( $n as $c ) {
+				if ( (int) $c['n'] <= self::ROW_PAGES ) {
+					$few[] = (int) $c['row_id'];
+					continue;
+				}
+				$wide[ (int) $c['row_id'] ] = true;
+				// Pages of a post first (the post the text belongs to is usually among them), then the oldest mapped.
+				$add( (array) $wpdb->get_results( $wpdb->prepare( "SELECT $cols FROM $ps p JOIN $table m ON m.id = p.page_id WHERE p.lang = %s AND p.row_id = %d ORDER BY m.object_type = 'post' DESC, m.id LIMIT %d", $lang, (int) $c['row_id'], self::ROW_PAGES ), ARRAY_A ) );
+			}
+			if ( $few ) {
+				$add( (array) $wpdb->get_results( $wpdb->prepare( "SELECT $cols FROM $ps p JOIN $table m ON m.id = p.page_id WHERE p.lang = %s AND p.row_id IN (" . implode( ',', $few ) . ')', $lang ), ARRAY_A ) );
+			}
 		}
+		// phpcs:enable
 		return $out;
 	}
 

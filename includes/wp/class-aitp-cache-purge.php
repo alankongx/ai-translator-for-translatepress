@@ -98,6 +98,34 @@ final class AITP_Cache_Purge {
 	}
 
 	/**
+	 * Clear the whole page cache once: after rows shown on very many pages (a header, a footer)
+	 * changed. LiteSpeed is cleared here (not from the command line, where it cannot be); other
+	 * caches hear about it through the action aitp_purge_site, and the result says whether a
+	 * person should clear them by hand.
+	 *
+	 * @param string $why What changed (logged).
+	 * @return array{litespeed:bool,manual:bool}
+	 */
+	public static function site( $why ) {
+		$out = array( 'litespeed' => false, 'manual' => false );
+		if ( self::litespeed() ) {
+			if ( self::cli() ) {
+				$out['manual'] = true;
+			} else {
+				self::litespeed_all( 0 );
+				$out['litespeed'] = true;
+			}
+		}
+		do_action( 'aitp_purge_site', (string) $why ); // phpcs:ignore WordPress.NamingConventions.ValidHookName
+		$d = self::detected();
+		if ( count( $d['per_url'] ) > ( self::litespeed() ? 1 : 0 ) || ! empty( $d['whole_only'] ) ) {
+			$out['manual'] = true;
+		}
+		( new AITP_WP_Log() )->log( 'notice', 'cache_purge_site', array( 'why' => (string) $why ) + $out );
+		return $out;
+	}
+
+	/**
 	 * Work through the list for a few seconds.
 	 *
 	 * @param int $seconds Time budget.

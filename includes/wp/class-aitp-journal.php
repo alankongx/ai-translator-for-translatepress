@@ -534,6 +534,9 @@ final class AITP_Journal {
 		if ( (int) $r['status'] === 2 ) {
 			return 'manual';
 		}
+		if ( AITP_Audit::row_accepted( $e['kind'], $e['lang'], $r ) ) {
+			return 'accepted'; // People reviewed the text it has now: the undo must not replace it.
+		}
 		$ours = array( (string) $e['translated'] );
 		if ( ! $exact && $sanitize ) {
 			$ours[] = (string) trp_sanitize_string( (string) $e['translated'] );

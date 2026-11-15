@@ -384,8 +384,16 @@ final class AITP_Autofix {
 		}
 		if ( ! $r['reset'] ) {
 			self::save( $s );
-			if ( isset( $r['skipped']['engine_not_selected'] ) || isset( $r['skipped']['backup_failed'] ) ) {
-				self::stop( isset( $r['skipped']['backup_failed'] ) ? 'backup_failed' : 'engine_not_selected' );
+			if ( ! empty( $r['blocked'] ) ) {
+				self::stop( $r['blocked'] ); // Checked before anything was reset.
+				return 'stopped';
+			}
+			if ( isset( $r['skipped']['backup_failed'] ) ) {
+				self::stop( 'backup_failed' );
+				return 'stopped';
+			}
+			if ( isset( $r['skipped']['language_paused'] ) ) {
+				self::stop( 'language_paused' ); // Would pick the same rows again and again.
 				return 'stopped';
 			}
 			return 'empty';
