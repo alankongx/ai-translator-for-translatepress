@@ -1783,9 +1783,9 @@ final class AITP_Audit {
 	 * @param array $extra Fields.
 	 */
 	public static function tag_batch( $batch, array $extra ) {
-		$b = self::batches();
-		if ( isset( $b[ $batch ] ) ) {
-			self::save_batch( $batch, array_merge( $b[ $batch ], $extra ) );
+		$info = AITP_Batches::get( (int) $batch ); // Only this record (batches() reads them all).
+		if ( is_array( $info ) ) {
+			self::save_batch( $batch, array_merge( $info, $extra ) );
 		}
 	}
 
@@ -1806,12 +1806,13 @@ final class AITP_Audit {
 	 *
 	 * @param string[] $langs Languages in order (empty = all).
 	 * @param int      $limit Rows.
-	 * @return array{lang:string,ids:int[],structured:int,no_page:int} ids: finding ids.
+	 * @return array{lang:string,ids:int[],structured:int,no_page:int,unmapped:string[]} ids:
+	 *         finding ids; unmapped: languages looked at where most rows are on no known page.
 	 */
 	public static function autofix_pick( array $langs, $limit ) {
 		global $wpdb;
 		$audit = AITP_Schema::table( 'audit' );
-		$out   = array( 'lang' => '', 'ids' => array(), 'structured' => 0, 'no_page' => 0 );
+		$out   = array( 'lang' => '', 'ids' => array(), 'structured' => 0, 'no_page' => 0, 'unmapped' => array() );
 		if ( ! $langs ) {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			$langs = (array) $wpdb->get_col( "SELECT DISTINCT lang FROM $audit WHERE state = 'open' AND tier = 'a' AND kind = 'dictionary' AND NOT FIND_IN_SET('auto_retried', codes) ORDER BY lang" );
@@ -1849,6 +1850,9 @@ final class AITP_Audit {
 						$out['ids'][] = (int) $f['id'];
 					}
 				}
+			}
+			if ( $skip['no_page'] > count( $out['ids'] ) ) {
+				$out['unmapped'][] = $t['lang'];
 			}
 			if ( $out['ids'] ) {
 				$out['lang']       = $t['lang'];
@@ -1919,59 +1923,136 @@ final class AITP_Audit {
 	/**
 	 * State of the rows of a repair batch now.
 	 *
+	 * Rows still untranslated are told apart: "refused" (the engine refused the text: a
+	 * failure is on record for it), "duplicate" (another row of the same original is
+	 * translated, and TranslatePress shows that one: counted as ok) and "left" (nothing on
+	 * record: no visit asked for it yet). "untranslated" is refused + left.
+	 *
 	 * With $judge the new translations are checked with the audit rules and recorded as
 	 * findings again when still wrong (so they show up in the list and are never picked
 	 * by the auto repair twice without a new check).
 	 *
-	 * @param int  $batch Batch id.
-	 * @param bool $judge Check new translations.
-	 * @return array{reset:int,ok:int,wrong:int,english:int,untranslated:int,manual:int,gone:int}
+	 * @param int  $batch  Batch id.
+	 * @param bool $judge  Check new translations.
+	 * @param bool $detail Also return 'rows': "kind|lang|row id" => ok | wrong | english |
+	 *                     refused | left | duplicate | manual | gone.
+	 * @return array{reset:int,ok:int,wrong:int,english:int,untranslated:int,refused:int,left:int,duplicate:int,manual:int,gone:int}
 	 */
-	public static function batch_check( $batch, $judge ) {
+	public static function batch_check( $batch, $judge, $detail = false ) {
 		global $wpdb;
-		$out = array( 'reset' => 0, 'ok' => 0, 'wrong' => 0, 'english' => 0, 'untranslated' => 0, 'manual' => 0, 'gone' => 0 );
+		$out  = array( 'reset' => 0, 'ok' => 0, 'wrong' => 0, 'english' => 0, 'untranslated' => 0, 'refused' => 0, 'left' => 0, 'duplicate' => 0, 'manual' => 0, 'gone' => 0 );
+		$rows = array();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$rows = (array) $wpdb->get_results( $wpdb->prepare( 'SELECT kind, lang, row_id, original FROM ' . AITP_Schema::table( 'repair' ) . ' WHERE batch = %d', (int) $batch ), ARRAY_A );
-		$by   = array();
-		foreach ( $rows as $b ) {
-			$by[ $b['kind'] . '|' . $b['lang'] ][] = $b;
+		$list_all = (array) $wpdb->get_results( $wpdb->prepare( 'SELECT kind, lang, row_id, original FROM ' . AITP_Schema::table( 'repair' ) . ' WHERE batch = %d', (int) $batch ), ARRAY_A );
+		$by       = array();
+		foreach ( $list_all as $b ) {
+			$by[ $b['kind'] . '|' . $b['lang'] ][ (int) $b['row_id'] ] = $b; // One entry per row (a row reset twice in a batch is counted once).
 		}
 		$v    = $judge ? new AITP_Validator( AITP_Settings::rules() ) : null;
 		$scan = (int) self::state()['scan'];
+		$put  = function ( $key, $cat ) use ( &$out, &$rows ) {
+			$out[ $cat ]++;
+			$rows[ $key ] = $cat;
+		};
 		foreach ( $by as $k => $list ) {
 			list( $kind, $lang ) = explode( '|', $k );
 			$t                   = self::table_for( $kind, $lang );
-			$cur                 = $t ? self::rows( $t, wp_list_pluck( $list, 'row_id' ) ) : array();
+			$cur                 = $t ? self::rows( $t, array_keys( $list ) ) : array();
+			$zero                = array(); // Rows still untranslated: told apart below.
 			foreach ( $list as $b ) {
 				$out['reset']++;
-				$r = isset( $cur[ (int) $b['row_id'] ] ) ? $cur[ (int) $b['row_id'] ] : null;
+				$key = $k . '|' . (int) $b['row_id'];
+				$r   = isset( $cur[ (int) $b['row_id'] ] ) ? $cur[ (int) $b['row_id'] ] : null;
 				if ( ! $r || ! AITP_Audit_Logic::same_original( $b, $r ) ) {
-					$out['gone']++;
+					$put( $key, 'gone' );
 					continue;
 				}
 				if ( (int) $r['status'] === 2 ) {
-					$out['manual']++;
+					$put( $key, 'manual' );
 					continue;
 				}
 				if ( (int) $r['status'] !== 1 || $r['translated'] === null || (string) $r['translated'] === '' ) {
-					$out['untranslated']++;
+					$zero[ (int) $r['id'] ] = $r;
 					continue;
 				}
 				if ( ! $judge || self::tp_kept( $r ) ) {
-					$out['ok']++;
+					$put( $key, 'ok' );
 					continue;
 				}
 				$f = AITP_Audit_Logic::check_row( $v, (string) $r['original'], $r['translated'], self::source_info( $kind ), AITP_Languages::info( $lang ) );
 				if ( $f && $f['severity'] === AITP_Audit_Logic::ERROR ) {
-					$out['wrong']++;
+					$put( $key, 'wrong' );
 					if ( AITP_Autofix_Logic::is_english( $f['codes'] ) ) {
 						$out['english']++;
+						$rows[ $key ] = 'english';
 					}
 					$f['codes'][] = 'auto_retried'; // Not picked by the auto repair again; a person decides.
 					self::record( $t, $r, $f, 'scan', $scan );
 					continue;
 				}
-				$out['ok']++;
+				$put( $key, 'ok' );
+			}
+			if ( ! $zero ) {
+				continue;
+			}
+			// Another row of the same original translated: TranslatePress shows that one.
+			$shown = array();
+			if ( $kind === 'dictionary' ) {
+				foreach ( self::same_original_rows( $t, $zero ) as $orig => $group ) {
+					foreach ( $group as $sid => $sr ) {
+						if ( ! isset( $zero[ (int) $sid ] ) && in_array( (int) $sr['status'], array( 1, 2 ), true ) && (string) $sr['translated'] !== '' ) {
+							$shown[ (string) $orig ] = true;
+						}
+					}
+				}
+			}
+			$src     = $kind === 'gettext' ? 'en_US' : self::default_language();
+			$refused = self::refused( $zero, $src, $lang );
+			foreach ( $zero as $id => $r ) {
+				$key = $k . '|' . (int) $id;
+				if ( isset( $shown[ (string) $r['original'] ] ) ) {
+					$out['ok']++;
+					$put( $key, 'duplicate' );
+				} elseif ( isset( $refused[ (int) $id ] ) ) {
+					$out['untranslated']++;
+					$put( $key, 'refused' );
+				} else {
+					$out['untranslated']++;
+					$put( $key, 'left' );
+				}
+			}
+		}
+		if ( $detail ) {
+			$out['rows'] = $rows;
+		}
+		return $out;
+	}
+
+	/**
+	 * Rows whose text the engine refused (a failure is on record for it).
+	 *
+	 * @param array  $rows Row id => row.
+	 * @param string $src  Source language.
+	 * @param string $lang Target language.
+	 * @return array<int,bool> row id => true
+	 */
+	private static function refused( array $rows, $src, $lang ) {
+		global $wpdb;
+		$keys = array();
+		foreach ( $rows as $id => $r ) {
+			$o                                                       = (string) $r['original'];
+			$keys[ AITP_Translator::failure_key( $o, $src, $lang ) ] = (int) $id;
+			$decoded = html_entity_decode( $o, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+			if ( $decoded !== $o ) {
+				$keys[ AITP_Translator::failure_key( $decoded, $src, $lang ) ] = (int) $id; // The engine is given decoded text.
+			}
+		}
+		$out = array();
+		foreach ( array_chunk( array_keys( $keys ), 200 ) as $chunk ) {
+			$ph = implode( ',', array_fill( 0, count( $chunk ), '%s' ) );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+			foreach ( (array) $wpdb->get_col( $wpdb->prepare( 'SELECT fkey FROM ' . AITP_Schema::table( 'failures' ) . " WHERE fkey IN ($ph)", $chunk ) ) as $fk ) {
+				$out[ $keys[ $fk ] ] = true;
 			}
 		}
 		return $out;

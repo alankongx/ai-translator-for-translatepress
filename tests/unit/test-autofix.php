@@ -1,4 +1,10 @@
 <?php
+
+if ( ! function_exists( 'wp_list_pluck_test' ) ) {
+	function wp_list_pluck_test( array $list, $k ) {
+		return array_map( function ( $x ) use ( $k ) { return $x[ $k ]; }, $list );
+	}
+}
 /**
  * Decisions of the batch auto repair.
  */
@@ -16,7 +22,8 @@ test( 'autofix: settings are off by default and clamped', function () {
 	eq( 1200, $s['cap'] );
 	eq( 20, AITP_Autofix_Logic::clean_settings( array( 'batch' => 1 ), array(), 0 )['batch'], 'at least 20 rows' );
 	eq( 500000, AITP_Autofix_Logic::clean_settings( array( 'cap' => 0 ), array(), 0 )['cap'], 'no TranslatePress limit -> fixed default' );
-	eq( 0, AITP_Autofix_Logic::clean_settings( array(), array(), 0 )['max_batches'], 'no batch limit by default' );
+	eq( 1, AITP_Autofix_Logic::clean_settings( array(), array(), 0 )['max_batches'], 'one batch per start by default (C13)' );
+	eq( 0, AITP_Autofix_Logic::clean_settings( array( 'max_batches' => '0' ), array(), 0 )['max_batches'], '0 = no limit, when set' );
 	eq( 1, AITP_Autofix_Logic::clean_settings( array( 'max_batches' => '1' ), array(), 0 )['max_batches'], 'one batch per start' );
 	eq( 0, AITP_Autofix_Logic::clean_settings( array( 'max_batches' => '-3' ), array(), 0 )['max_batches'], 'negative -> no limit' );
 	eq( 1000, AITP_Autofix_Logic::clean_settings( array( 'max_batches' => 99999 ), array(), 0 )['max_batches'], 'at most 1000' );
@@ -26,8 +33,15 @@ test( 'autofix: rounds of page visits', function () {
 	eq( 'judge', AITP_Autofix_Logic::after_pass( 1, 0, 200 ), 'everything translated' );
 	eq( 'again', AITP_Autofix_Logic::after_pass( 1, 30, 200 ), 'some left after the first round' );
 	eq( 'again', AITP_Autofix_Logic::after_pass( 2, 10, 30 ), 'progress in round 2' );
-	eq( 'judge', AITP_Autofix_Logic::after_pass( 2, 30, 30 ), 'no progress in round 2' );
-	eq( 'judge', AITP_Autofix_Logic::after_pass( 3, 5, 10 ), 'at most 3 rounds' );
+	eq( 'again', AITP_Autofix_Logic::after_pass( 2, 30, 30, 0 ), 'one round without progress: one more try (C02)' );
+	eq( 'judge', AITP_Autofix_Logic::after_pass( 3, 30, 30, 1 ), 'two rounds in a row without progress' );
+	eq( 'again', AITP_Autofix_Logic::after_pass( 4, 20, 30, 1 ), 'progress again: the count starts over' );
+	eq( 0, AITP_Autofix_Logic::stalls( 1, 20, 30 ), 'progress resets the stall count' );
+	eq( 2, AITP_Autofix_Logic::stalls( 1, 30, 30 ) );
+	eq( 'again', AITP_Autofix_Logic::after_pass( 3, 5, 10 ), 'a long article: more than 3 rounds while it makes progress' );
+	eq( 'judge', AITP_Autofix_Logic::after_pass( 10, 5, 10 ), 'at most 10 rounds' );
+	eq( 'judge', AITP_Autofix_Logic::after_pass( 4, 5, 10, 0, 1800 ), 'at most 30 minutes of visits' );
+	eq( 'again', AITP_Autofix_Logic::after_pass( 4, 5, 10, 0, 1799 ) );
 } );
 
 test( 'autofix: judging a batch', function () {
@@ -43,6 +57,40 @@ test( 'autofix: judging a batch', function () {
 	eq( 20, $j['base'] );
 	$j = AITP_Autofix_Logic::judge( array( 'reset' => 10, 'gone' => 10 ) );
 	eq( 'ok', $j['result'], 'nothing left to judge' );
+} );
+
+test( 'autofix: judging with refused and not reached rows (C02)', function () {
+	// Rows the engine never saw (not reached) are not failures.
+	$j = AITP_Autofix_Logic::judge( array( 'reset' => 200, 'ok' => 150, 'wrong' => 2, 'refused' => 3, 'left' => 45 ) );
+	eq( 'ok', $j['result'], '5 failures of 155 reached = 3.2%' );
+	eq( 155, $j['base'] );
+	eq( 45, $j['left'] );
+	$j = AITP_Autofix_Logic::judge( array( 'reset' => 200, 'ok' => 150, 'wrong' => 2, 'refused' => 8, 'left' => 40 ) );
+	eq( 'too_many_failures', $j['result'], 'the engine refused 8: 10 of 160 = 6.25%' );
+	$j = AITP_Autofix_Logic::judge( array( 'reset' => 100, 'ok' => 40, 'refused' => 0, 'left' => 60 ) );
+	eq( 'many_left', $j['result'], 'more than half not reached: a person looks' );
+	$j = AITP_Autofix_Logic::judge( array( 'reset' => 100, 'ok' => 50, 'refused' => 0, 'left' => 50 ) );
+	eq( 'ok', $j['result'], 'exactly half is not more than half' );
+	$j = AITP_Autofix_Logic::judge( array( 'reset' => 100, 'ok' => 30, 'manual' => 20, 'refused' => 0, 'left' => 50 ) );
+	eq( 'many_left', $j['result'], 'half of the rows still ours (80): 50 > 40' );
+	$j = AITP_Autofix_Logic::judge( array( 'reset' => 100, 'ok' => 39, 'wrong' => 1, 'english' => 1, 'refused' => 0, 'left' => 60 ) );
+	eq( 'english_saved', $j['result'], 'English first' );
+	$j = AITP_Autofix_Logic::judge( array( 'reset' => 10, 'ok' => 10, 'duplicate' => 4, 'refused' => 0, 'left' => 0 ) );
+	eq( 'ok', $j['result'], 'duplicates count as ok' );
+} );
+
+test( 'autofix: sample pages to read (D40)', function () {
+	$items = array();
+	foreach ( array( 'pt:page', 'pt:page', 'pt:page', 'pt:post', 'home', 'pt:post', 'pt:post', 'tax:category', 'pt:product' ) as $i => $g ) {
+		$items[] = array( 'url' => 'u' . $i, 'group' => $g );
+	}
+	$got = wp_list_pluck_test( AITP_Autofix_Logic::sample_pages( $items, 2, 24 ), 'url' );
+	eq( array( 'u4', 'u0', 'u3', 'u7', 'u8', 'u1', 'u5' ), $got, 'home first, one of each kind, then a second of each' );
+	$got = wp_list_pluck_test( AITP_Autofix_Logic::sample_pages( $items, 2, 3 ), 'url' );
+	eq( array( 'u4', 'u0', 'u3' ), $got, 'at most the given number' );
+	eq( array(), AITP_Autofix_Logic::sample_pages( array(), 2, 24 ), 'no pages' );
+	$got = wp_list_pluck_test( AITP_Autofix_Logic::sample_pages( array( array( 'url' => 'a', 'group' => 'pt:page' ) ), 2, 24 ), 'url' );
+	eq( array( 'a' ), $got, 'no home page in the list' );
 } );
 
 test( 'autofix: engine stop reasons', function () {

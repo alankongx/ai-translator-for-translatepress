@@ -231,6 +231,8 @@ final class AITP_Admin_Audit {
 			'visit_check'         => __( 'a test load of a page before the next batch failed (nothing was reset)', 'ai-translator-for-translatepress' ),
 			'busy'                => __( 'a repair, rollback or undo is running', 'ai-translator-for-translatepress' ),
 			'provider_paused'     => __( 'the AI provider is failing (engine paused)', 'ai-translator-for-translatepress' ),
+			'many_left'           => __( 'more than half of the last batch was not translated, and the engine refused none of it: the pages visited probably do not show these rows', 'ai-translator-for-translatepress' ),
+			'no_page'             => __( 'the rows left are on no known page', 'ai-translator-for-translatepress' ),
 			'language_paused'     => __( 'translation of the language of the next batch is paused after provider errors', 'ai-translator-for-translatepress' ),
 		);
 		if ( isset( $map[ $r ] ) ) {
@@ -807,7 +809,11 @@ final class AITP_Admin_Audit {
 					$type = 'warning';
 					break;
 				}
-				AITP_Autofix::step( 15 );
+				// Nothing is reset in this request: the first batch is left to the background
+				// (a slow host would end this request before the batch is set up).
+				if ( function_exists( 'spawn_cron' ) ) {
+					spawn_cron();
+				}
 				$msg = __( 'Auto repair started. It continues in the background (WP-Cron); you can also advance it from this page.', 'ai-translator-for-translatepress' );
 				break;
 			case 'autofix_stop':

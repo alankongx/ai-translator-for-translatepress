@@ -143,6 +143,90 @@ final class AITP_Pagemap {
 	}
 
 	/**
+	 * A few pages of one language to read, so the auto repair learns where wrong rows are
+	 * shown: the home page and two pages of each kind (post type, taxonomy) from the queue's
+	 * page list, leaving out pages read in the last 7 days.
+	 *
+	 * @param string $lang Language.
+	 * @param int    $max  Pages.
+	 * @return array Each url, source_url, lang, object_type, object_id.
+	 */
+	public static function sample_plan( $lang, $max = AITP_Autofix_Logic::SAMPLE_PAGES ) {
+		global $wpdb;
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+		$rows = (array) $wpdb->get_results( $wpdb->prepare( 'SELECT url, source_url, lang, object_type, object_id FROM ' . AITP_Schema::table( 'queue' ) . ' WHERE lang = %s ORDER BY priority, id LIMIT 3000', $lang ), ARRAY_A );
+		if ( ! $rows ) {
+			return array();
+		}
+		// Read lately: left out (one query per chunk of keys).
+		$recent = array();
+		$since  = gmdate( 'Y-m-d H:i:s', time() - 7 * DAY_IN_SECONDS );
+		foreach ( array_chunk( $rows, 500 ) as $chunk ) {
+			$keys = array();
+			foreach ( $chunk as $r ) {
+				$keys[] = sha1( $r['lang'] . '|' . $r['url'] );
+			}
+			$ph = implode( ',', array_fill( 0, count( $keys ), '%s' ) );
+			foreach ( (array) $wpdb->get_col( $wpdb->prepare( 'SELECT ukey FROM ' . AITP_Schema::table( 'pagemap' ) . " WHERE ukey IN ($ph) AND mapped_at >= %s AND http BETWEEN 200 AND 299", array_merge( $keys, array( $since ) ) ) ) as $k ) {
+				$recent[ $k ] = true;
+			}
+		}
+		// Kind of each page.
+		$posts = array();
+		$terms = array();
+		foreach ( $rows as $r ) {
+			if ( $r['object_type'] === 'post' ) {
+				$posts[] = (int) $r['object_id'];
+			} elseif ( $r['object_type'] === 'term' ) {
+				$terms[] = (int) $r['object_id'];
+			}
+		}
+		$ptype = array();
+		foreach ( array_chunk( array_unique( array_filter( $posts ) ), 500 ) as $chunk ) {
+			foreach ( (array) $wpdb->get_results( 'SELECT ID, post_type FROM ' . $wpdb->posts . ' WHERE ID IN (' . implode( ',', $chunk ) . ')', ARRAY_A ) as $p ) {
+				$ptype[ (int) $p['ID'] ] = (string) $p['post_type'];
+			}
+		}
+		$tax = array();
+		foreach ( array_chunk( array_unique( array_filter( $terms ) ), 500 ) as $chunk ) {
+			foreach ( (array) $wpdb->get_results( 'SELECT term_id, taxonomy FROM ' . $wpdb->term_taxonomy . ' WHERE term_id IN (' . implode( ',', $chunk ) . ')', ARRAY_A ) as $t ) {
+				$tax[ (int) $t['term_id'] ] = (string) $t['taxonomy'];
+			}
+		}
+		// phpcs:enable
+		$items = array();
+		foreach ( $rows as $r ) {
+			if ( isset( $recent[ sha1( $r['lang'] . '|' . $r['url'] ) ] ) ) {
+				continue;
+			}
+			$id = (int) $r['object_id'];
+			if ( $r['object_type'] === 'home' ) {
+				$group = 'home';
+			} elseif ( $r['object_type'] === 'post' ) {
+				$group = 'pt:' . ( isset( $ptype[ $id ] ) ? $ptype[ $id ] : '' );
+			} elseif ( $r['object_type'] === 'term' ) {
+				$group = 'tax:' . ( isset( $tax[ $id ] ) ? $tax[ $id ] : '' );
+			} else {
+				$group = (string) $r['object_type'];
+			}
+			$items[] = array(
+				'url'         => (string) $r['url'],
+				'source_url'  => (string) $r['source_url'],
+				'lang'        => (string) $r['lang'],
+				'object_type' => (string) $r['object_type'],
+				'object_id'   => $id,
+				'group'       => $group,
+			);
+		}
+		$out = array();
+		foreach ( AITP_Autofix_Logic::sample_pages( $items, AITP_Autofix_Logic::SAMPLE_PER_TYPE, (int) $max ) as $it ) {
+			unset( $it['group'] );
+			$out[] = $it;
+		}
+		return $out;
+	}
+
+	/**
 	 * @param string $url Default-language address.
 	 * @return array{0:string,1:int} Object type and id.
 	 */

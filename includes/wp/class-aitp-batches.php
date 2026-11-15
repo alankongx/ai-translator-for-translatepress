@@ -92,6 +92,28 @@ final class AITP_Batches {
 		);
 	}
 
+	/**
+	 * Batches of the auto repair that were reset but never judged (the request that reset
+	 * them ended before the auto repair took them on), oldest first.
+	 *
+	 * @param int $except Batch the auto repair is working on.
+	 * @return array<int,array> batch id => info
+	 */
+	public static function auto_unjudged( $except = 0 ) {
+		global $wpdb;
+		$out = array();
+		$old = gmdate( 'Y-m-d H:i:s', time() - 10 * MINUTE_IN_SECONDS );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$rows = (array) $wpdb->get_results( $wpdb->prepare( 'SELECT id, state, info, updated_at FROM ' . AITP_Schema::table( 'batches' ) . " WHERE auto = 1 AND id <> %d AND (state = 'done' OR (state = 'running' AND updated_at < %s)) ORDER BY id DESC LIMIT 20", (int) $except, $old ), ARRAY_A );
+		foreach ( array_reverse( $rows ) as $r ) {
+			$info = json_decode( (string) $r['info'], true );
+			if ( is_array( $info ) && empty( $info['auto_result'] ) && empty( $info['rolled_back'] ) ) {
+				$out[ (int) $r['id'] ] = $info;
+			}
+		}
+		return $out;
+	}
+
 	/** @param int $id Batch id. */
 	public static function delete( $id ) {
 		global $wpdb;

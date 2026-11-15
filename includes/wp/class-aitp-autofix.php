@@ -3,11 +3,16 @@
  * Batch auto repair (off by default).
  *
  * Works through the "wrong" findings of the check one batch at a time:
+ *   0. when most wrong rows of a language are on no known page, read a few sample pages of
+ *      it first (read only), once per language and run;
  *   1. back up and reset up to N rows of one language (AITP_Audit::repair, same as by hand);
- *   2. visit only the pages that show them, until they are translated again;
+ *   2. visit only the pages that show them, round after round while they make progress;
  *   3. check the new translations with the audit rules;
  *   4. go on with the next batch only when the batch came out clean enough.
- * It stops by itself when more than 5% of a batch is still wrong or untranslated, when
+ * A batch reset by a request that ended before the auto repair took it on is taken on by the
+ * next run (never left behind unjudged). The whole page cache is cleared once at the end of
+ * a run when some reset row shows on very many pages (menus, footers).
+ * It stops by itself when more than 5% of a batch is wrong or refused by the engine, when
  * English is stored as a translation, on provider errors, failed page loads, when
  * TranslatePress no longer uses this engine or automatic translation is off, when a batch
  * is rolled back, or when a person stops it. It never touches manual translations, rows on
@@ -77,6 +82,9 @@ final class AITP_Autofix {
 				'rows_ok'     => 0,
 				'left'        => array( 'structured' => 0, 'no_page' => 0 ),
 				'history'     => array(),
+				'mapping'     => null,    // Sample pages being read: lang, items, i, next_at, ok.
+				'mapped'      => array(), // Languages sampled in this run.
+				'run_wide'    => false,   // A batch of this run had rows on very many pages: clear the whole cache at the end.
 			),
 			is_array( $s ) ? $s : array()
 		);
@@ -157,6 +165,8 @@ final class AITP_Autofix {
 		$s['wait_until']  = 0;
 		$s['wait_reason'] = '';
 		$s['run_batches'] = 0;
+		$s['mapped']      = array();
+		$s['mapping']     = null;
 		self::save( $s, true );
 		if ( ! wp_next_scheduled( self::CRON ) ) {
 			wp_schedule_event( time() + 5, AITP_Queue::SCHEDULE, self::CRON );
@@ -174,13 +184,25 @@ final class AITP_Autofix {
 	public static function stop( $reason ) {
 		$s = self::state();
 		if ( $s['status'] === 'running' ) {
-			$s['status'] = 'stopped';
-			$s['reason'] = (string) $reason;
-			$s['ended']  = time();
+			$s['status']  = 'stopped';
+			$s['reason']  = (string) $reason;
+			$s['ended']   = time();
+			$s['mapping'] = null;
 			self::save( $s );
 			( new AITP_WP_Log() )->log( $reason === 'manual' ? 'notice' : 'warning', 'autofix_stop', array( 'reason' => $reason, 'batch' => $s['batch'] ? $s['batch']['id'] : 0 ) );
 		}
+		self::end_run();
 		wp_clear_scheduled_hook( self::CRON );
+	}
+
+	/** End of a run: clear the whole page cache once if a batch needed it. */
+	private static function end_run() {
+		$s = self::state();
+		if ( ! empty( $s['run_wide'] ) ) {
+			$s['run_wide'] = false;
+			update_option( self::STATE, $s, false );
+			AITP_Cache_Purge::site( 'autofix' );
+		}
 	}
 
 	/** WP-Cron tick. */
@@ -242,6 +264,26 @@ final class AITP_Autofix {
 					break;
 				}
 
+				if ( ! empty( $s['mapping'] ) ) {
+					$m = $s['mapping'];
+					if ( $now < (int) $m['next_at'] ) {
+						if ( $now + ( (int) $m['next_at'] - $now ) >= $end ) {
+							$result = 'rate';
+							$wait   = (int) $m['next_at'] - $now;
+							break;
+						}
+						sleep( (int) $m['next_at'] - $now );
+						continue;
+					}
+					if ( $visits > 0 && time() + AITP_Queue::page_seconds() + 15 > $end ) {
+						$result = 'time';
+						break;
+					}
+					$visits++;
+					self::map_next( $s );
+					continue;
+				}
+
 				if ( ! $s['batch'] ) {
 					$budget = self::budget_block( $s );
 					if ( $budget !== '' ) {
@@ -266,8 +308,8 @@ final class AITP_Autofix {
 				}
 
 				$batch = $s['batch'];
-				$info  = AITP_Audit::batches();
-				if ( ! empty( $info[ $batch['id'] ]['rolled_back'] ) ) {
+				$info  = AITP_Batches::get( (int) $batch['id'] );
+				if ( ! empty( $info['rolled_back'] ) ) {
 					$s['batch'] = null;
 					self::save( $s );
 					self::stop( 'rolled_back' );
@@ -352,20 +394,45 @@ final class AITP_Autofix {
 	 * @return string started | empty | done | stopped | busy.
 	 */
 	private static function begin_batch( array $s ) {
-		$set  = self::settings();
+		$set = self::settings();
+		// A batch reset earlier but never judged (its request ended first): take it on now.
+		foreach ( AITP_Batches::auto_unjudged( $s['batch'] ? (int) $s['batch']['id'] : 0 ) as $id => $info ) {
+			( new AITP_WP_Log() )->log( 'notice', 'autofix_adopt', array( 'batch' => (int) $id ) );
+			return self::take_on( $s, (int) $id, $info ) ? 'started' : 'stopped';
+		}
 		if ( $set['max_batches'] > 0 && (int) $s['run_batches'] >= $set['max_batches'] ) {
 			self::save( $s );
 			self::stop( 'max_batches' );
 			return 'stopped';
 		}
-		$pick = AITP_Audit::autofix_pick( $set['languages'], $set['batch'] );
+		$pick      = AITP_Audit::autofix_pick( $set['languages'], $set['batch'] );
 		$s['left'] = array( 'structured' => $pick['structured'], 'no_page' => $pick['no_page'] );
+		// Most wrong rows of a language on no known page: read a few of its pages first.
+		$todo = array_values( array_diff( $pick['unmapped'], (array) $s['mapped'] ) );
+		if ( $todo ) {
+			$lang          = $todo[0];
+			$s['mapped'][] = $lang; // Once per language and run, whatever it finds.
+			$items         = AITP_Pagemap::sample_plan( $lang );
+			if ( $items ) {
+				$s['mapping'] = array( 'lang' => $lang, 'items' => $items, 'i' => 0, 'ok' => 0, 'next_at' => 0 );
+				self::save( $s );
+				( new AITP_WP_Log() )->log( 'info', 'autofix_map', array( 'lang' => $lang, 'pages' => count( $items ) ) );
+				return 'mapping';
+			}
+		}
 		if ( ! $pick['ids'] ) {
+			self::save( $s );
+			if ( $pick['no_page'] > 0 ) {
+				self::stop( 'no_page' ); // Not "finished": these rows are left, on no known page.
+				return 'stopped';
+			}
+			$s           = self::state();
 			$s['status'] = 'done';
 			$s['reason'] = '';
 			$s['ended']  = time();
 			self::save( $s );
 			wp_clear_scheduled_hook( self::CRON );
+			self::end_run();
 			( new AITP_WP_Log() )->log( 'notice', 'autofix_done', array( 'batches' => $s['batches'], 'rows_ok' => $s['rows_ok'], 'left' => $s['left'] ) );
 			return 'done';
 		}
@@ -377,7 +444,7 @@ final class AITP_Autofix {
 			self::stop( $check );
 			return 'stopped';
 		}
-		$r = AITP_Audit::repair( $pick['ids'] );
+		$r = AITP_Audit::repair( $pick['ids'], array( 'auto' => true, 'site_purge_later' => true ) );
 		if ( ! empty( $r['busy'] ) ) {
 			self::save( $s );
 			return 'busy';
@@ -398,30 +465,74 @@ final class AITP_Autofix {
 			}
 			return 'empty';
 		}
-		$urls = AITP_Audit::batch_urls( $r['batch'] );
-		AITP_Audit::tag_batch( $r['batch'], array( 'auto' => 1 ) );
+		if ( ! empty( $r['wide'] ) ) {
+			$s['run_wide'] = true;
+		}
+		return self::take_on( $s, (int) $r['batch'], array( 'lang' => $pick['lang'], 'reset' => (int) $r['reset'] ) ) ? 'started' : 'stopped';
+	}
+
+	/**
+	 * Work on a batch that was reset: visit its pages, then judge it.
+	 *
+	 * @param array $s     State.
+	 * @param int   $id    Batch id.
+	 * @param array $info  Batch record (lang, reset, wide).
+	 * @return bool False when it has no page to visit (then it was rolled back).
+	 */
+	private static function take_on( array $s, $id, array $info ) {
+		$urls = AITP_Audit::batch_urls( $id );
 		if ( ! $urls ) {
 			// Should not happen (rows were picked because their pages are known): undo at once.
-			AITP_Audit::rollback( $r['batch'] );
+			AITP_Audit::rollback( $id );
+			AITP_Audit::tag_batch( $id, array( 'auto_result' => 'no_pages' ) );
 			self::save( $s );
 			self::stop( 'no_pages' );
-			return 'stopped';
+			return false;
+		}
+		$reset = isset( $info['reset'] ) ? (int) $info['reset'] : 0;
+		if ( ! empty( $info['wide'] ) ) {
+			$s['run_wide'] = true;
 		}
 		$s['batch'] = array(
-			'id'      => (int) $r['batch'],
-			'lang'    => $pick['lang'],
-			'reset'   => (int) $r['reset'],
+			'id'      => (int) $id,
+			'lang'    => isset( $info['lang'] ) && $info['lang'] !== '' ? (string) $info['lang'] : (string) $urls[0]['lang'],
+			'reset'   => $reset,
 			'urls'    => $urls,
 			'ui'      => 0,
 			'pass'    => 1,
-			'before'  => (int) $r['reset'],
+			'before'  => $reset,
+			'stalls'  => 0,
+			'secs'    => 0,
 			'next_at' => 0,
 			'started' => time(),
 			'chars'   => 0,
 			'fails'   => 0,
 		);
 		self::save( $s );
-		return 'started';
+		return true;
+	}
+
+	/**
+	 * Read the next sample page (read only: nothing is translated or saved).
+	 *
+	 * @param array $s State.
+	 */
+	private static function map_next( array $s ) {
+		$m    = $s['mapping'];
+		$item = $m['items'][ (int) $m['i'] ];
+		$ok   = AITP_Pagemap::map_one( $item );
+		$s    = self::state(); // A person may have stopped it during the visit.
+		if ( empty( $s['mapping'] ) ) {
+			return;
+		}
+		$s['mapping']['i']       = (int) $m['i'] + 1;
+		$s['mapping']['ok']      = (int) $m['ok'] + ( $ok ? 1 : 0 );
+		$s['mapping']['next_at'] = time() + AITP_Pagemap::GAP;
+		if ( $s['mapping']['i'] >= count( $m['items'] ) ) {
+			( new AITP_WP_Log() )->log( 'info', 'autofix_mapped', array( 'lang' => $m['lang'], 'pages' => count( $m['items'] ), 'read' => $s['mapping']['ok'] ) );
+			$s['mapping'] = null;
+		}
+		self::save( $s );
 	}
 
 	/**
@@ -469,6 +580,7 @@ final class AITP_Autofix {
 		$gap                  = (int) ceil( 60 / max( 1, (int) AITP_Queue::settings()['per_minute'] ) );
 		$s['batch']['ui']     = (int) $batch['ui'] + 1;
 		$s['batch']['chars'] += (int) $v['sent'];
+		$s['batch']['secs']   = ( isset( $batch['secs'] ) ? (int) $batch['secs'] : 0 ) + (int) ceil( (int) $v['ms'] / 1000 );
 		$s['batch']['next_at'] = time() + $gap;
 		$s['day_chars']      += (int) $v['sent'];
 		if ( $v['sig'] !== '' ) {
@@ -511,10 +623,13 @@ final class AITP_Autofix {
 	 */
 	private static function end_pass( array $s ) {
 		$batch = $s['batch'];
-		$now_c = AITP_Audit::batch_check( $batch['id'], false );
-		if ( AITP_Autofix_Logic::after_pass( (int) $batch['pass'], $now_c['untranslated'], (int) $batch['before'] ) === 'again' ) {
+		$now_c  = AITP_Audit::batch_check( $batch['id'], false );
+		$stalls = isset( $batch['stalls'] ) ? (int) $batch['stalls'] : 0;
+		$secs   = isset( $batch['secs'] ) ? (int) $batch['secs'] : 0;
+		if ( AITP_Autofix_Logic::after_pass( (int) $batch['pass'], $now_c['untranslated'], (int) $batch['before'], $stalls, $secs ) === 'again' ) {
 			$s['batch']['pass']    = (int) $batch['pass'] + 1;
 			$s['batch']['ui']      = 0;
+			$s['batch']['stalls']  = AITP_Autofix_Logic::stalls( $stalls, $now_c['untranslated'], (int) $batch['before'] );
 			$s['batch']['before']  = $now_c['untranslated'];
 			$s['batch']['next_at'] = time() + AITP_Autofix_Logic::PASS_GAP;
 			self::save( $s );
