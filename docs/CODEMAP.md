@@ -204,7 +204,7 @@
 ### 第 3 批 修复重做（2026-11-15）
 
 - **分档**（C10）：`Audit_Logic::TIER_A_CODES` 里的代码（空、存成英文、截短、缺句、链接 / 占位符 / 标记坏了等）是「确定是错的」（a）；`structured_broken`、其它代码和以后新增的代码是「需要人看」（b）；`near_misaligned` 是「参考」（ref，不算待处理）。`record()` 写 `tier`；`tier_sql()` 给升级时补旧发现。「全部改回」和自动修复只碰 a。真实数据核对：4,220 条好译文 1 条进 a，933 条坏译文 874 条进 a。
-- **错位只看密集段**（C09）：`neighbor_ranges()` 加最小密度；`scan_neighbors()` 要求这一段错误密度是平均的 4 倍且至少 3 条；`SHIFT_CODES` 只留像错位的 4 个代码。
+- **错位只看密集段**（C09）：`neighbor_ranges()` 加最小密度；`scan_neighbors()` 要求这一段错误密度是平均的 4 倍且至少 3 条；`SHIFT_CODES` 只留像错位的 5 个代码（变短、变长、缺句、没翻译、缺保护词；变长是 e2e 发现后补的：邻行译文变长变短机会一样）。
 - **同原文成组**（C01）：`repair_locked()` 用 `same_original_rows()` 找同表同原文的其它行，状态 1、不在已验收清单上的一起备份改回（备份行 `finding_id` 为它自己的发现或 0）；`$done` 防重复。复查时没翻的行如果同原文另一行已翻好，算 `duplicate`（计入 ok）。
 - **修复前检查**（C03/C12）：`repair_blocker()`（没选本引擎、自动翻译关、没配接口、接口暂停）→ 一行都不改，结果里 `blocked`；按语言暂停的语言跳过（`language_paused`）。没改成任何一行时删掉空的「运行中」批次（C14）。
 - **复查分类和判定**（C02）：`batch_check()` 分 ok / wrong / english / refused（失败表里有这句）/ left / duplicate / manual / gone；`judge()` 失败率 = (wrong + refused) / (reset − manual − gone − left)，left 过半判 `many_left`；`after_pass()` 连续 2 轮没进展、10 轮或访问满 30 分钟才判定。
@@ -212,7 +212,7 @@
 - **按需找页面**（D40）：`autofix_pick()` 报 `unmapped`（大部分错误行不知道页面的语言）→ `Pagemap::sample_plan()`（首页 + 每种文章类型 / 分类法 2 页，最多 24 页，跳过 7 天内读过的）→ 自动修复 `mapping` 阶段逐页 `map_one()`。命令行 `wp aitp map start --sample --languages=xx`。
 - **已验收不回滚**（C07）：`rollback_locked()` 和测试记录 `undo_one()`（`row_accepted()`）都跳过当前译文在已验收清单上的行。
 - **每行页数上限**（C11）：`pages_of_rows()` 先数再取，每行最多 20 页，超过的报 `wide`；`Cache_Purge::site()` 整站清一次（手动修复 / 回滚当场清，自动修复运行结束时清，按时间回滚最后清）。
-- **只回滚没翻好的 / 按时间回滚**（C12）：`rollback($batch, ['only_bad'=>true])`（`Audit_Logic::only_bad()`，批次记 `partial_rollback`，其余备份行以后仍能整批回滚）；`rollback_since($time, $auto_only, $seconds)`。命令行 `wp aitp audit rollback <批次> --only-bad`、`--since=… [--auto-only]`。按钮放第 4 批。
+- **只回滚没翻好的 / 按时间回滚**（C12）：`rollback($batch, ['only_bad'=>true])`（`Audit_Logic::only_bad()`，批次记 `partial_rollback`，其余备份行以后仍能整批回滚）；`rollback_since($time, $auto_only, $seconds)`。命令行 `wp aitp audit rollback <批次> --only-bad`、`--since=… [--all]`（默认只回滚自动修复批次）。按钮放第 4 批。
 - **只翻这批页面**（C04）：批次记录 `visit`（完整页面项）→ `visit_batch()` → `Queue::start_pages()`（从 `start_target()` 拆出）；`Queue::entries_for()` 给没有 `visit` 的旧批次按网址查队列。
 - **TP 自己不翻的文字**（E03/E12）：`tp_skips()` 用反射调 `TRP_Machine_Translator::should_translate_string()`；体检不报、修复不改、复查算 ok、测试记录不记（下载的新行带 `tp_raw`）。
 - **界面文字复数**（C17）：gettext 行 `plural_form > 0` 用 `original_plural` 比对；`original_single` 保证 0.7.0 之前的备份照常回滚（`same_original()`）。
@@ -222,4 +222,5 @@
 - **表结构 8**：`aitp_audit` 加 `tier` 列和 `state_tier` 索引；新表 `aitp_batches`。`upgrade_to_8()` 用 SQL 给旧发现补档、把旧选项里的批次复制进新表（`INSERT IGNORE`，选项保留，回退旧版照常读）。只加不删，TP 的表不动。
 - **新文件**：`includes/wp/class-aitp-batches.php`、`tests/unit/test-v070-repair.php`。
 - **新选项键**：无（`aitp_autofix_state` 多了 `mapping`、`mapped`、`run_wide`）。
+- **代码审查后改的 9 处**（Opus 审查，2026-11-15）：① TP 原样保留的行（旧体检记成「没翻译」）修复时删掉这条发现、`autofix_pick()` 也不挑，自动修复不再空转；② 批次记录不再整表读：`batches($since, $limit, $id)` 按需读，回滚 / 下载 / 「只翻这批页面」只读本批，后台只读最新 30 条（更早的用 `batches_before()` 数），测试记录只读本次测试以来的；③ 命令行按时间回滚默认只回滚自动修复批次，连手动批次要加 `--all`；④「大部分错误行没页面」按实际有页面的行数比，不再拿批大小比；⑤ 自动修复中途停止已清过整站缓存，批次做完时重新挂上「运行结束清一次」；⑥ 复数界面文字的已验收条目兼容 0.7.0 之前按单数记的（`is_accepted()` 也认 `original_single`，`row_accepted()` 对界面文字按体检方式重读）；⑦ 同原文组里被人标「不是问题」的兄弟行不跟着改回（`dismissed()`）；⑧ 复查时「同原文另一行已翻好」要那一行本身过检查（或是人工翻译）才算 ok；⑨ 接手被截断的批次时条数从备份行数，`auto_unjudged()` 只接手有备份行的批次。
 - **已知问题（不做）**：C15 整站「导出候选 → 导入」不能续跑（第 4 批收进「高级」）；C16 体检「同一译文」「邻近行」两步不分时间片（53 万行跑通过）；C19 已验收清单唯一键不含清单名。

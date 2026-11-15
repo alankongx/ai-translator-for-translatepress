@@ -849,6 +849,14 @@ final class AITP_Audit {
 	 * @return bool
 	 */
 	public static function row_accepted( $kind, $lang, array $row ) {
+		if ( $kind === 'gettext' && ! isset( $row['original_single'] ) ) {
+			// A raw row holds the singular: read it as the check does (plural original for plural forms).
+			$t   = self::table_for( $kind, $lang );
+			$cur = $t ? self::rows( $t, array( (int) $row['id'] ) ) : array();
+			if ( isset( $cur[ (int) $row['id'] ] ) ) {
+				$row = $cur[ (int) $row['id'] ];
+			}
+		}
 		$acc = self::accepted( $kind, $lang, array( (int) $row['id'] ) );
 		return AITP_Audit_Logic::is_accepted( $row, isset( $acc[ (int) $row['id'] ] ) ? $acc[ (int) $row['id'] ] : array() );
 	}
@@ -1008,25 +1016,39 @@ final class AITP_Audit {
 	 * rows but no complete record (a repair cut off before it finished, or a record lost).
 	 * Such batches carry 'incomplete' => true; download and rollback work from the backup rows.
 	 *
+	 * Records are not capped since 0.7.0: callers ask only for what they show or need.
+	 *
+	 * @param int $since Only batches made since this Unix time (0: all).
+	 * @param int $limit Only the newest ones (0: all).
+	 * @param int $id    Only this batch (0: all).
 	 * @return array<int,array> batch id => batch info.
 	 */
-	public static function batches() {
+	public static function batches( $since = 0, $limit = 0, $id = 0 ) {
 		global $wpdb;
-		$b = AITP_Batches::all();
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$rows = (array) $wpdb->get_results( 'SELECT batch, COUNT(*) AS n, MIN(created_at) AS t, SUM(restored = \'yes\') AS yes, SUM(restored = \'\') AS todo, GROUP_CONCAT(DISTINCT lang ORDER BY lang) AS langs FROM ' . AITP_Schema::table( 'repair' ) . ' GROUP BY batch', ARRAY_A );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$skips   = (array) $wpdb->get_results( 'SELECT batch, restored, COUNT(*) AS n FROM ' . AITP_Schema::table( 'repair' ) . ' WHERE restored LIKE \'skip:%\' GROUP BY batch, restored', ARRAY_A );
+		$repair = AITP_Schema::table( 'repair' );
+		$b      = AITP_Batches::all( $since, $limit, $id );
+		$w      = array( '1=1' );
+		if ( $id ) {
+			$w[] = $wpdb->prepare( 'batch = %d', (int) $id );
+		}
+		if ( $since ) {
+			$w[] = $wpdb->prepare( 'created_at >= %s', gmdate( 'Y-m-d H:i:s', (int) $since ) );
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+		$rows = (array) $wpdb->get_results( 'SELECT batch, COUNT(*) AS n, MIN(created_at) AS t, SUM(restored = \'yes\') AS yes, SUM(restored = \'\') AS todo, GROUP_CONCAT(DISTINCT lang ORDER BY lang) AS langs FROM ' . $repair . ' WHERE ' . implode( ' AND ', $w ) . ' GROUP BY batch ORDER BY batch DESC' . ( $limit ? ' LIMIT ' . (int) $limit : '' ), ARRAY_A );
+		$ids  = array_map( 'intval', wp_list_pluck( $rows, 'batch' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+		$skips   = $ids ? (array) $wpdb->get_results( 'SELECT batch, restored, COUNT(*) AS n FROM ' . $repair . ' WHERE batch IN (' . implode( ',', $ids ) . ') AND restored LIKE \'skip:%\' GROUP BY batch, restored', ARRAY_A ) : array();
 		$skip_of = array();
 		foreach ( $skips as $s ) {
 			$skip_of[ (int) $s['batch'] ][ substr( (string) $s['restored'], 5 ) ] = (int) $s['n'];
 		}
 		foreach ( $rows as $r ) {
-			$id = (int) $r['batch'];
-			if ( isset( $b[ $id ] ) && ( ! isset( $b[ $id ]['state'] ) || $b[ $id ]['state'] === 'done' ) ) {
-				$info = $b[ $id ];
+			$bid = (int) $r['batch'];
+			if ( isset( $b[ $bid ] ) && ( ! isset( $b[ $bid ]['state'] ) || $b[ $bid ]['state'] === 'done' ) ) {
+				$info = $b[ $bid ];
 			} else {
-				$info               = isset( $b[ $id ] ) ? $b[ $id ] : array(
+				$info               = isset( $b[ $bid ] ) ? $b[ $bid ] : array(
 					'time'      => (int) strtotime( $r['t'] . ' UTC' ),
 					'user'      => 0,
 					'skipped'   => array(),
@@ -1043,14 +1065,31 @@ final class AITP_Audit {
 			// Rollback counts always come from the backup rows: every round marks the rows it handled
 			// there, so rounds cut off, repeated or without a record are never counted twice or lost.
 			$info['todo'] = (int) $r['todo'];
-			if ( ! empty( $info['rolled_back'] ) || ! empty( $info['partial_rollback'] ) || (int) $r['yes'] || isset( $skip_of[ $id ] ) ) {
+			if ( ! empty( $info['rolled_back'] ) || ! empty( $info['partial_rollback'] ) || (int) $r['yes'] || isset( $skip_of[ $bid ] ) ) {
 				$info['restored']        = (int) $r['yes'];
-				$info['restore_skipped'] = isset( $skip_of[ $id ] ) ? $skip_of[ $id ] : array();
+				$info['restore_skipped'] = isset( $skip_of[ $bid ] ) ? $skip_of[ $bid ] : array();
 			}
-			$b[ $id ] = $info;
+			$b[ $bid ] = $info;
 		}
 		krsort( $b );
-		return $b;
+		return $limit ? array_slice( $b, 0, (int) $limit, true ) : $b;
+	}
+
+	/**
+	 * Batches older than one (those the admin page does not list).
+	 *
+	 * @param int $before Batch id.
+	 * @return array{count:int,open:int} open: with backup rows not rolled back yet.
+	 */
+	public static function batches_before( $before ) {
+		global $wpdb;
+		$bt = AITP_Schema::table( 'batches' );
+		$rp = AITP_Schema::table( 'repair' );
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$n    = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM (SELECT id FROM $bt WHERE id < %d UNION SELECT DISTINCT batch FROM $rp WHERE batch < %d) x", (int) $before, (int) $before ) );
+		$open = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(DISTINCT batch) FROM $rp WHERE batch < %d AND restored = ''", (int) $before ) );
+		// phpcs:enable
+		return array( 'count' => $n, 'open' => $open );
 	}
 
 	/**
@@ -1262,6 +1301,7 @@ final class AITP_Audit {
 			}
 			$g_acc  = self::accepted( $kind, $lang, $g_ids );
 			$g_find = self::open_findings( $kind, $lang, $g_ids );
+			$g_dis  = self::dismissed( $kind, $lang, $g_ids );
 			foreach ( $list as $f ) {
 				$key = $kind . '|' . $lang . '|' . (int) $f['row_id'];
 				if ( isset( $done[ $key ] ) ) {
@@ -1281,7 +1321,11 @@ final class AITP_Audit {
 					continue;
 				}
 				if ( self::tp_kept( $r ) ) {
-					$skip( 'tp_keeps' ); // Would come back unchanged: TranslatePress never translates such text.
+					// Would come back unchanged: TranslatePress never translates such text. A check made
+					// before 0.7.0 recorded it as "untranslated": the finding goes (a new check would not
+					// record it), so the auto repair and "reset all" never pick it again.
+					$skip( 'tp_keeps' );
+					$wpdb->delete( $audit, array( 'id' => (int) $f['id'] ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 					continue;
 				}
 				$known = isset( $pages[ (int) $r['id'] ] ) ? $pages[ (int) $r['id'] ] : array();
@@ -1314,6 +1358,9 @@ final class AITP_Audit {
 					}
 					if ( AITP_Audit_Logic::is_accepted( $sr, isset( $g_acc[ (int) $sid ] ) ? $g_acc[ (int) $sid ] : array() ) ) {
 						continue;
+					}
+					if ( AITP_Audit_Logic::is_accepted( $sr, isset( $g_dis[ (int) $sid ] ) ? $g_dis[ (int) $sid ] : array() ) ) {
+						continue; // A person marked this text "not a problem".
 					}
 					if ( $reset( $t, $sr, isset( $g_find[ (int) $sid ] ) ? $g_find[ (int) $sid ] : 0 ) ) {
 						$out['group']++;
@@ -1393,6 +1440,27 @@ final class AITP_Audit {
 				return count( $g ) > 1;
 			}
 		);
+	}
+
+	/**
+	 * Text people marked "not a problem" (dismissed findings), in the form of accepted entries.
+	 *
+	 * @param string $kind Table kind.
+	 * @param string $lang Language.
+	 * @param int[]  $ids  Row ids.
+	 * @return array<int,array<int,array{0:string,1:string}>> row id => [[original_hash, translated_hash]...]
+	 */
+	private static function dismissed( $kind, $lang, array $ids ) {
+		global $wpdb;
+		$ids = array_values( array_unique( array_filter( array_map( 'intval', $ids ) ) ) );
+		$out = array();
+		foreach ( array_chunk( $ids, 500 ) as $chunk ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+			foreach ( (array) $wpdb->get_results( $wpdb->prepare( 'SELECT row_id, original_hash, translated_hash FROM ' . AITP_Schema::table( 'audit' ) . " WHERE kind = %s AND lang = %s AND state = 'dismissed' AND row_id IN (" . implode( ',', $chunk ) . ')', $kind, $lang ), ARRAY_A ) as $f ) {
+				$out[ (int) $f['row_id'] ][] = array( $f['original_hash'], $f['translated_hash'] );
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -1579,7 +1647,7 @@ final class AITP_Audit {
 	 * @param int  $seconds   Time budget.
 	 * @return array{batches:int[],left:int[],restored:int,skipped:array<string,int>,purge_site?:array}
 	 */
-	public static function rollback_since( $since, $auto_only = false, $seconds = 50 ) {
+	public static function rollback_since( $since, $auto_only = true, $seconds = 50 ) {
 		$out  = array( 'batches' => array(), 'left' => array(), 'restored' => 0, 'skipped' => array() );
 		$end  = time() + max( 5, (int) $seconds );
 		$wide = false;
@@ -1701,7 +1769,7 @@ final class AITP_Audit {
 			// Translations saved after the reset are replaced by the backup now: an undo must not touch them.
 			AITP_Journal::rolled_back( $kind, $lang, $row_ids, $after, $since );
 		}
-		$info = self::batches(); // Counts read from the backup rows, this round included.
+		$info = self::batches( 0, 0, (int) $batch ); // Counts read from the backup rows, this round included.
 		if ( isset( $info[ $batch ] ) ) {
 			if ( $only ) {
 				if ( $out['restored'] ) {
@@ -1825,7 +1893,7 @@ final class AITP_Audit {
 	 * @return array{batch:int,urls:array,only_pages:string[],all_pages:string[],rows:array}
 	 */
 	public static function backup_export( $batch ) {
-		$all  = self::batches();
+		$all  = self::batches( 0, 0, (int) $batch );
 		$info = isset( $all[ $batch ] ) ? $all[ $batch ] : array();
 		return array(
 			'batch'      => (int) $batch,
@@ -1898,8 +1966,9 @@ final class AITP_Audit {
 			if ( ! $t ) {
 				continue;
 			}
-			$last = 0;
-			$skip = array( 'structured' => 0, 'no_page' => 0 );
+			$last    = 0;
+			$skip    = array( 'structured' => 0, 'no_page' => 0 );
+			$on_page = 0; // Rows looked at that are on a known page (not capped at the batch size).
 			while ( count( $out['ids'] ) < $limit ) {
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 				$list = (array) $wpdb->get_results( $wpdb->prepare( "SELECT id, row_id FROM $audit WHERE state = 'open' AND tier = 'a' AND kind = 'dictionary' AND lang = %s AND id > %d AND NOT FIND_IN_SET('auto_retried', codes) ORDER BY id LIMIT 1000", $t['lang'], $last ), ARRAY_A );
@@ -1914,6 +1983,9 @@ final class AITP_Audit {
 					if ( ! $r ) {
 						continue; // Gone: repair() will mark it.
 					}
+					if ( self::tp_kept( $r ) ) {
+						continue; // Recorded by a check before 0.7.0; repair() removes the finding.
+					}
 					if ( AITP_Text::is_structured_data( (string) $r['original'] ) ) {
 						$skip['structured']++;
 						continue;
@@ -1922,13 +1994,14 @@ final class AITP_Audit {
 						$skip['no_page']++;
 						continue;
 					}
+					$on_page++;
 					if ( count( $out['ids'] ) < $limit ) {
 						$out['ids'][] = (int) $f['id'];
 					}
 				}
 			}
-			if ( $skip['no_page'] > count( $out['ids'] ) ) {
-				$out['unmapped'][] = $t['lang'];
+			if ( $skip['no_page'] > $on_page ) {
+				$out['unmapped'][] = $t['lang']; // Most rows looked at are on no known page.
 			}
 			if ( $out['ids'] ) {
 				$out['lang']       = $t['lang'];
@@ -1968,7 +2041,7 @@ final class AITP_Audit {
 	 */
 	public static function batch_urls( $batch ) {
 		global $wpdb;
-		$info = self::batches();
+		$info = self::batches( 0, 0, (int) $batch );
 		if ( ! empty( $info[ $batch ]['urls'] ) ) {
 			return (array) $info[ $batch ]['urls']; // Chosen when the batch was reset.
 		}
@@ -2002,7 +2075,8 @@ final class AITP_Audit {
 	 * Rows still untranslated are told apart: "refused" (the engine refused the text: a
 	 * failure is on record for it), "duplicate" (another row of the same original is
 	 * translated, and TranslatePress shows that one: counted as ok) and "left" (nothing on
-	 * record: no visit asked for it yet). "untranslated" is refused + left.
+	 * record: no visit asked for it yet). "untranslated" is refused + left. A "duplicate" counts only
+	 * when the row shown is good (manual, or passing the checks when judging).
 	 *
 	 * With $judge the new translations are checked with the audit rules and recorded as
 	 * findings again when still wrong (so they show up in the list and are never picked
@@ -2074,14 +2148,22 @@ final class AITP_Audit {
 			if ( ! $zero ) {
 				continue;
 			}
-			// Another row of the same original translated: TranslatePress shows that one.
+			// Another row of the same original translated: TranslatePress shows that one. Counted as ok
+			// only when that text is good (manual, or a machine translation passing the checks).
 			$shown = array();
 			if ( $kind === 'dictionary' ) {
 				foreach ( self::same_original_rows( $t, $zero ) as $orig => $group ) {
 					foreach ( $group as $sid => $sr ) {
-						if ( ! isset( $zero[ (int) $sid ] ) && in_array( (int) $sr['status'], array( 1, 2 ), true ) && (string) $sr['translated'] !== '' ) {
-							$shown[ (string) $orig ] = true;
+						if ( isset( $zero[ (int) $sid ] ) || ! in_array( (int) $sr['status'], array( 1, 2 ), true ) || (string) $sr['translated'] === '' ) {
+							continue;
 						}
+						if ( $judge && (int) $sr['status'] === 1 && ! self::tp_kept( $sr ) ) {
+							$f = AITP_Audit_Logic::check_row( $v, (string) $sr['original'], $sr['translated'], self::source_info( $kind ), AITP_Languages::info( $lang ) );
+							if ( $f && $f['severity'] === AITP_Audit_Logic::ERROR ) {
+								continue;
+							}
+						}
+						$shown[ (string) $orig ] = true;
 					}
 				}
 			}

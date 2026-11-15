@@ -172,11 +172,12 @@ final class AITP_CLI {
 	 * can still be rolled back later.
 	 *
 	 * [--since=<time>]
-	 * : For "rollback": roll back every batch made since this time (site time zone, e.g.
-	 * "2026-11-15 09:00"), newest first. With --minutes as the time budget (default 10).
+	 * : For "rollback": roll back every batch of the auto repair made since this time (site
+	 * time zone, e.g. "2026-11-15 09:00"), newest first. With --minutes as the time budget
+	 * (default 10).
 	 *
-	 * [--auto-only]
-	 * : For "rollback --since": only batches of the auto repair.
+	 * [--all]
+	 * : For "rollback --since": also batches people started by hand.
 	 *
 	 * ## EXAMPLES
 	 *
@@ -185,7 +186,7 @@ final class AITP_CLI {
 	 *     wp aitp audit repair --ids=12,13
 	 *     wp aitp audit rollback 1762700000000
 	 *     wp aitp audit rollback 1762700000000 --only-bad
-	 *     wp aitp audit rollback --since="2026-11-15 09:00" --auto-only
+	 *     wp aitp audit rollback --since="2026-11-15 09:00"
  *     wp aitp audit protect reviewed.json --label="Reviewed 2026-11"
 	 *
 	 * @param array $args  Positional.
@@ -234,7 +235,7 @@ final class AITP_CLI {
 					}
 					$end = time() + 60 * ( isset( $assoc['minutes'] ) ? max( 1, (int) $assoc['minutes'] ) : 10 );
 					do {
-						$r = AITP_Audit::rollback_since( $since, ! empty( $assoc['auto-only'] ), max( 10, min( 120, $end - time() ) ) );
+						$r = AITP_Audit::rollback_since( $since, empty( $assoc['all'] ), max( 10, min( 120, $end - time() ) ) );
 						WP_CLI::log( wp_json_encode( $r ) );
 					} while ( $r['left'] && empty( $r['busy'] ) && time() < $end );
 					if ( $r['left'] ) {
@@ -276,7 +277,7 @@ final class AITP_CLI {
 				break;
 			case 'status':
 			default:
-				WP_CLI::log( wp_json_encode( array( 'state' => AITP_Audit::state(), 'counts' => AITP_Audit::counts(), 'batches' => AITP_Audit::batches() ), JSON_PRETTY_PRINT ) );
+				WP_CLI::log( wp_json_encode( array( 'state' => AITP_Audit::state(), 'counts' => AITP_Audit::counts(), 'batches' => AITP_Audit::batches( 0, 30 ) ), JSON_PRETTY_PRINT ) );
 		}
 	}
 
@@ -299,6 +300,9 @@ final class AITP_CLI {
 	 *
 	 * [--cap=<n>]
 	 * : For "settings": characters per day.
+	 *
+	 * [--max-batches=<n>]
+	 * : For "settings": batches per start (default 1; 0 = no limit).
 	 *
 	 * [--minutes=<minutes>]
 	 * : For "run": how long to work (default 10).
@@ -327,9 +331,9 @@ final class AITP_CLI {
 				if ( isset( $assoc['languages'] ) ) {
 					$in['languages'] = array_filter( explode( ',', (string) $assoc['languages'] ) );
 				}
-				foreach ( array( 'batch', 'cap' ) as $k ) {
-					if ( isset( $assoc[ $k ] ) ) {
-						$in[ $k ] = (int) $assoc[ $k ];
+				foreach ( array( 'batch' => 'batch', 'cap' => 'cap', 'max-batches' => 'max_batches' ) as $opt => $k ) {
+					if ( isset( $assoc[ $opt ] ) ) {
+						$in[ $k ] = (int) $assoc[ $opt ];
 					}
 				}
 				WP_CLI::log( wp_json_encode( AITP_Autofix::save_settings( $in ) ) );

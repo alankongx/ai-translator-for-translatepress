@@ -251,9 +251,10 @@ final class AITP_Audit_Logic {
 	/**
 	 * Problem codes typical of a translation saved on the wrong string. Codes any bad
 	 * translation may have (numbers, markup, patterns) are left out: with them, runs appeared
-	 * wherever errors were frequent, misplaced or not.
+	 * wherever errors were frequent, misplaced or not. A neighbour's translation is as likely
+	 * longer as shorter: both count.
 	 */
-	const SHIFT_CODES = array( 'too_short', 'sentences_missing', 'untranslated', 'protected_term_missing' );
+	const SHIFT_CODES = array( 'too_short', 'too_long', 'sentences_missing', 'untranslated', 'protected_term_missing' );
 
 	/**
 	 * Runs of misplaced-looking rows. TranslatePress stores the strings of one page view
@@ -431,15 +432,21 @@ final class AITP_Audit_Logic {
 	/**
 	 * Whether the row's current text is on the accepted list (reviewed by people).
 	 *
-	 * @param array $row      Current row: original, translated.
+	 * A plural form of interface text is compared with its plural original since 0.7.0; entries
+	 * made before hashed the singular (original_single), and still count.
+	 *
+	 * @param array $row      Current row: original, translated (original_single for interface text).
 	 * @param array $accepted Accepted entries for this row: list of [original_hash, translated_hash].
 	 * @return bool
 	 */
 	public static function is_accepted( array $row, array $accepted ) {
-		$oh = sha1( (string) $row['original'] );
+		$oh = array( sha1( (string) $row['original'] ) );
+		if ( isset( $row['original_single'] ) && (string) $row['original_single'] !== (string) $row['original'] ) {
+			$oh[] = sha1( (string) $row['original_single'] );
+		}
 		$th = sha1( (string) $row['translated'] );
 		foreach ( $accepted as $a ) {
-			if ( $a[0] === $oh && $a[1] === $th ) {
+			if ( in_array( $a[0], $oh, true ) && $a[1] === $th ) {
 				return true;
 			}
 		}

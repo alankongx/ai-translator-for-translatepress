@@ -18,15 +18,25 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class AITP_Batches {
 
 	/**
-	 * Every record.
+	 * Records, newest first.
 	 *
+	 * @param int $since Only records made since this Unix time (0: all).
+	 * @param int $limit Only the newest ones (0: all).
+	 * @param int $id    Only this batch (0: all).
 	 * @return array<int,array> batch id => info
 	 */
-	public static function all() {
+	public static function all( $since = 0, $limit = 0, $id = 0 ) {
 		global $wpdb;
 		$out = array();
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		foreach ( (array) $wpdb->get_results( 'SELECT id, info FROM ' . AITP_Schema::table( 'batches' ), ARRAY_A ) as $r ) {
+		$w   = array( '1=1' );
+		if ( $id ) {
+			$w[] = $wpdb->prepare( 'id = %d', (int) $id );
+		}
+		if ( $since ) {
+			$w[] = $wpdb->prepare( 'created_at >= %s', gmdate( 'Y-m-d H:i:s', (int) $since ) );
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+		foreach ( (array) $wpdb->get_results( 'SELECT id, info FROM ' . AITP_Schema::table( 'batches' ) . ' WHERE ' . implode( ' AND ', $w ) . ' ORDER BY id DESC' . ( $limit ? ' LIMIT ' . (int) $limit : '' ), ARRAY_A ) as $r ) {
 			$info = json_decode( (string) $r['info'], true );
 			if ( is_array( $info ) ) {
 				$out[ (int) $r['id'] ] = $info;
@@ -104,7 +114,9 @@ final class AITP_Batches {
 		$out = array();
 		$old = gmdate( 'Y-m-d H:i:s', time() - 10 * MINUTE_IN_SECONDS );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$rows = (array) $wpdb->get_results( $wpdb->prepare( 'SELECT id, state, info, updated_at FROM ' . AITP_Schema::table( 'batches' ) . " WHERE auto = 1 AND id <> %d AND (state = 'done' OR (state = 'running' AND updated_at < %s)) ORDER BY id DESC LIMIT 20", (int) $except, $old ), ARRAY_A );
+		// Only batches with backup rows: a record whose request ended before the first row was backed
+		// up changed nothing (there is nothing to judge or roll back).
+		$rows = (array) $wpdb->get_results( $wpdb->prepare( 'SELECT b.id, b.state, b.info, b.updated_at FROM ' . AITP_Schema::table( 'batches' ) . " b WHERE b.auto = 1 AND b.id <> %d AND (b.state = 'done' OR (b.state = 'running' AND b.updated_at < %s)) AND EXISTS (SELECT 1 FROM " . AITP_Schema::table( 'repair' ) . ' r WHERE r.batch = b.id) ORDER BY b.id DESC LIMIT 20', (int) $except, $old ), ARRAY_A );
 		foreach ( array_reverse( $rows ) as $r ) {
 			$info = json_decode( (string) $r['info'], true );
 			if ( is_array( $info ) && empty( $info['auto_result'] ) && empty( $info['rolled_back'] ) ) {

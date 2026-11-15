@@ -144,7 +144,7 @@ Updates come from the GitHub releases of this plugin. To turn update checks off:
 * Text TranslatePress never translates (addresses, numbers) and stores as it is no longer shows up as "untranslated" and is not reset again and again.
 * Plural interface strings are checked against the plural original.
 * Auto repair: only rows the engine refused count as failures; rows the page visits did not reach are counted apart (more than half: it stops and asks for a look). Rounds go on while they make progress (at most 10 rounds or 30 minutes). Batches cut off before they were judged are taken on next time. When most wrong rows of a language are on no known page, a small sample of pages is read first. One batch per start by default; starting no longer resets anything in the form request.
-* Rollbacks skip rows on the accepted list (also the test journal undo). New from the command line: `wp aitp audit rollback <batch> --only-bad` and `--since=<time> [--auto-only]`; `wp aitp map start --sample`.
+* Rollbacks skip rows on the accepted list (also the test journal undo). New from the command line: `wp aitp audit rollback <batch> --only-bad` and `--since=<time>` (auto repair batches; `--all` adds batches started by hand); `wp aitp map start --sample`.
 * "Translate just these pages" after a reset visits only the pages of that batch.
 * A row shown on very many pages (menus, footers) is looked up on at most 20 pages; the whole page cache is cleared once instead.
 * Repair batch records moved from an option (last 200) to a table; database version 8.

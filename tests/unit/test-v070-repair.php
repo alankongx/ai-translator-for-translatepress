@@ -88,6 +88,7 @@ test( 'C09: misplacement runs need three rows, the right codes and a dense windo
 	eq( array(), AITP_Audit_Logic::neighbor_ranges( array( 10, 15, 20 ), 5, 3, 2, 0.4 ), '3 in 11 rows is not dense enough here' );
 	eq( array( array( 8, 14 ) ), AITP_Audit_Logic::neighbor_ranges( array( 10, 11, 12 ), 5, 3, 2, 0.4 ) );
 	ok( AITP_Audit_Logic::shift_like( array( 'sentences_missing' ) ) );
+	ok( AITP_Audit_Logic::shift_like( array( 'too_long' ) ), 'a neighbour\'s translation may as well be longer' );
 	ok( ! AITP_Audit_Logic::shift_like( array( 'number_mismatch' ) ), 'any bad translation may lose a number' );
 	ok( ! AITP_Audit_Logic::shift_like( array( 'markup_mismatch', 'protected_pattern_missing', 'size_changed' ) ) );
 } );
@@ -127,4 +128,14 @@ test( 'C05: roll back only the rows that did not come out well', function () {
 	);
 	eq( array( 11, 12, 13, 14 ), array_keys( AITP_Audit_Logic::only_bad( $backups, $cats ) ), 'left, refused, wrong and English only; a row not checked is left alone' );
 	eq( array(), AITP_Audit_Logic::only_bad( $backups, array() ), 'nothing checked: nothing restored' );
+} );
+
+test( 'C17 review: accepted entries made before 0.7.0 hashed the singular of a plural row', function () {
+	$row = array( 'original' => '%d items', 'original_single' => 'One item', 'translated' => '%d articles' );
+	$old = array( array( sha1( 'One item' ), sha1( '%d articles' ) ) );
+	$new = array( array( sha1( '%d items' ), sha1( '%d articles' ) ) );
+	ok( AITP_Audit_Logic::is_accepted( $row, $old ), 'entry from before 0.7.0 (singular) still protects the row' );
+	ok( AITP_Audit_Logic::is_accepted( $row, $new ), 'entry made now (plural original)' );
+	ok( ! AITP_Audit_Logic::is_accepted( $row, array( array( sha1( 'One item' ), sha1( 'autre' ) ) ) ), 'other text: not accepted' );
+	ok( AITP_Audit_Logic::is_accepted( array( 'original' => 'A', 'translated' => 'B' ), array( array( sha1( 'A' ), sha1( 'B' ) ) ) ), 'page text without original_single' );
 } );

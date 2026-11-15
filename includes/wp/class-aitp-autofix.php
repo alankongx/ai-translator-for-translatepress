@@ -490,6 +490,9 @@ final class AITP_Autofix {
 			return false;
 		}
 		$reset = isset( $info['reset'] ) ? (int) $info['reset'] : 0;
+		if ( ! $reset ) {
+			$reset = (int) AITP_Audit::batch_check( $id, false )['reset']; // A cut-off batch: its record says 0.
+		}
 		if ( ! empty( $info['wide'] ) ) {
 			$s['run_wide'] = true;
 		}
@@ -507,6 +510,7 @@ final class AITP_Autofix {
 			'started' => time(),
 			'chars'   => 0,
 			'fails'   => 0,
+			'wide'    => ! empty( $info['wide'] ), // Set again when the batch ends (a stop in between clears the cache already).
 		);
 		self::save( $s );
 		return true;
@@ -651,6 +655,9 @@ final class AITP_Autofix {
 		AITP_Audit::tag_batch( $batch['id'], array( 'auto' => 1, 'auto_result' => $j['result'], 'auto_rate' => $j['rate'] ) );
 		array_unshift( $s['history'], $entry );
 		$s['history'] = array_slice( $s['history'], 0, self::HISTORY );
+		if ( ! empty( $batch['wide'] ) ) {
+			$s['run_wide'] = true; // A stop during the batch cleared the cache before the rows were translated.
+		}
 		$s['batch']   = null;
 		$s['batches']++;
 		$s['run_batches'] = (int) $s['run_batches'] + 1;

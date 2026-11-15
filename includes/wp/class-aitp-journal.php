@@ -392,7 +392,7 @@ final class AITP_Journal {
 		$s      = self::state();
 		$repair = AITP_Schema::table( 'repair' );
 		$n      = 0;
-		foreach ( AITP_Audit::batches() as $id => $b ) {
+		foreach ( AITP_Audit::batches( (int) $s['started'] - 60 ) as $id => $b ) {
 			if ( isset( $b['journal'] ) || (int) ( isset( $b['time'] ) ? $b['time'] : 0 ) < (int) $s['started'] - 60 ) {
 				continue;
 			}
@@ -434,7 +434,7 @@ final class AITP_Journal {
 			return array( 'translating', array() );
 		}
 		$open = array();
-		foreach ( AITP_Audit::batches() as $id => $b ) {
+		foreach ( AITP_Audit::batches( (int) $s['started'] - 60 ) as $id => $b ) {
 			if ( ! empty( $b['todo'] ) && (int) ( isset( $b['time'] ) ? $b['time'] : 0 ) >= (int) $s['started'] - 60 ) {
 				$open[] = (string) $id;
 			}

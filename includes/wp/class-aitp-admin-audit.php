@@ -294,7 +294,7 @@ final class AITP_Admin_Audit {
 		$s     = AITP_Autofix::state();
 		$langs = AITP_Queue::tp_languages();
 		echo '<h2>' . esc_html__( 'Batch auto repair', 'ai-translator-for-translatepress' ) . '</h2>';
-		echo '<p class="description" style="max-width:860px;">' . esc_html__( 'Off by default. Works through "wrong" findings of page text one batch at a time: backs up and resets one batch, visits only the pages that show those strings until they are translated again, checks the new translations, and starts the next batch only when the batch came out clean. It stops by itself when more than 5% of a batch is still wrong or untranslated, when English is stored as a translation, on provider errors or failed page loads, when TranslatePress no longer uses this engine, or when a batch is rolled back. "Probably misplaced" and "check meaning" findings, the accepted list, manual translations, structured data and interface text are never touched. Every batch can be rolled back under "Repairs". Try a few batches by hand first.', 'ai-translator-for-translatepress' ) . '</p>';
+		echo '<p class="description" style="max-width:860px;">' . esc_html__( 'Off by default. Works through "certainly wrong" findings of page text one batch at a time: backs up and resets one batch, visits only the pages that show those strings until they are translated again, checks the new translations, and starts the next batch only when the batch came out clean. It stops by itself when more than 5% of a batch is still wrong or untranslated, when English is stored as a translation, on provider errors or failed page loads, when TranslatePress no longer uses this engine, or when a batch is rolled back. "A person should look" and "for reference" findings, the accepted list, manual translations, structured data and interface text are never touched. Every batch can be rolled back under "Repairs". Try a few batches by hand first.', 'ai-translator-for-translatepress' ) . '</p>';
 
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="aitp_audit"><input type="hidden" name="do" value="autofix_settings">';
 		wp_nonce_field( 'aitp_audit' );
@@ -470,7 +470,7 @@ final class AITP_Admin_Audit {
 		}
 		echo '<button class="button" name="do" value="dismiss">' . esc_html__( 'Not a problem', 'ai-translator-for-translatepress' ) . '</button> ';
 		echo '<br><label><input type="checkbox" name="unlinked" value="1" onchange="if(this.checked&&!confirm(this.dataset.q)){this.checked=false;}" data-q="' . esc_attr__( 'Also reset rows that are on no known page? Their pages are unknown, so every page of their language is queued again (and visited when the backfill queue runs). Usually it is better to map the pages that show them first.', 'ai-translator-for-translatepress' ) . '"> ' . esc_html__( 'Also reset rows on no known page (queues every page of their language again)', 'ai-translator-for-translatepress' ) . '</label><br>';
-		echo '<details style="margin:4px 0;"><summary>' . esc_html__( 'Only use these pages (optional)', 'ai-translator-for-translatepress' ) . '</summary><textarea name="only_pages" rows="4" cols="90" placeholder="https://example.com/page/">' . '</textarea><br><span class="description">' . esc_html__( 'One address per line (default language or translated). Rows are queued only on pages of this list; rows not shown on any of them are skipped and stay open. Rows on no known page are never reset with a list.', 'ai-translator-for-translatepress' ) . '</span></details>';
+		echo '<details style="margin:4px 0;"><summary>' . esc_html__( 'Only use these pages (optional)', 'ai-translator-for-translatepress' ) . '</summary><textarea name="only_pages" rows="4" cols="90" style="max-width:100%;box-sizing:border-box;" placeholder="https://example.com/page/">' . '</textarea><br><span class="description">' . esc_html__( 'One address per line (default language or translated). Rows are queued only on pages of this list; rows not shown on any of them are skipped and stay open. Rows on no known page are never reset with a list.', 'ai-translator-for-translatepress' ) . '</span></details>';
 		echo '<button class="button" name="do" value="reopen">' . esc_html__( 'Reopen', 'ai-translator-for-translatepress' ) . '</button> ';
 		if ( $set['ai_check'] ) {
 			echo '<button class="button" name="do" value="ai">' . esc_html__( 'AI check selected', 'ai-translator-for-translatepress' ) . '</button> ';
@@ -511,7 +511,7 @@ final class AITP_Admin_Audit {
 
 	/** Repair batches. */
 	private static function render_batches() {
-		$b = AITP_Audit::batches();
+		$b = AITP_Audit::batches( 0, 30 ); // The newest ones (records are no longer capped).
 		if ( ! $b ) {
 			return;
 		}
@@ -545,15 +545,10 @@ final class AITP_Admin_Audit {
 			echo '</td></tr>';
 		}
 		echo '</tbody></table></div>';
-		if ( count( $b ) > 30 ) {
-			$open = 0;
-			foreach ( array_slice( $b, 30, null, true ) as $info ) {
-				if ( empty( $info['rolled_back'] ) || ! empty( $info['todo'] ) ) {
-					$open++;
-				}
-			}
+		$older = count( $b ) >= 30 ? AITP_Audit::batches_before( (int) min( array_keys( $b ) ) ) : array( 'count' => 0 );
+		if ( $older['count'] > 0 ) {
 			/* translators: 1: batches not listed, 2: of them not rolled back */
-			echo '<p class="description">' . esc_html( sprintf( __( '%1$s older batches are not listed; %2$s of them are not (fully) rolled back. Their backups stay in the database.', 'ai-translator-for-translatepress' ), number_format_i18n( count( $b ) - 30 ), number_format_i18n( $open ) ) ) . '</p>';
+			echo '<p class="description">' . esc_html( sprintf( __( '%1$s older batches are not listed; %2$s of them are not (fully) rolled back. Their backups stay in the database.', 'ai-translator-for-translatepress' ), number_format_i18n( $older['count'] ), number_format_i18n( $older['open'] ) ) ) . '</p>';
 		}
 	}
 
@@ -721,7 +716,14 @@ final class AITP_Admin_Audit {
 			return;
 		}
 		$what = self::action_label( (string) $last['do'] );
-		if ( $last['state'] === 'done' ) {
+		if ( $last['state'] === 'done' && $last['do'] === 'autofix_start' ) {
+			// No batch and no row count here: the batches run in the background.
+			$text = ! empty( $last['why'] )
+				/* translators: 1: action, 2: time, 3: reason */
+				? sprintf( __( 'Last action: %1$s at %2$s – not started: %3$s.', 'ai-translator-for-translatepress' ), $what, wp_date( 'Y-m-d H:i:s', (int) $last['time'] ), self::autofix_reason( (string) $last['why'] ) )
+				/* translators: 1: action, 2: time */
+				: sprintf( __( 'Last action: %1$s at %2$s – started; the batches go on in the background (see "Batch auto repair" for their state).', 'ai-translator-for-translatepress' ), $what, wp_date( 'Y-m-d H:i:s', (int) $last['time'] ) );
+		} elseif ( $last['state'] === 'done' ) {
 			/* translators: 1: action, 2: time, 3: batch, 4: rows */
 			$text = sprintf( __( 'Last action: %1$s at %2$s (batch %3$s) – finished, %4$s rows.', 'ai-translator-for-translatepress' ), $what, wp_date( 'Y-m-d H:i:s', (int) $last['time'] ), $last['batch'] ? '#' . $last['batch'] : '-', number_format_i18n( (int) $last['n'] ) );
 		} else {
@@ -920,7 +922,7 @@ final class AITP_Admin_Audit {
 			case 'autofix_start':
 				self::action_record( $form, array( 'do' => 'autofix_start', 'time' => time(), 'state' => 'running', 'batch' => 0, 'n' => 0 ) );
 				$why = AITP_Autofix::start();
-				self::action_record( $form, array( 'state' => 'done' ) );
+				self::action_record( $form, array( 'state' => 'done', 'why' => $why ) );
 				if ( $why !== '' ) {
 					/* translators: %s: reason */
 					$msg  = sprintf( __( 'The auto repair cannot start: %s.', 'ai-translator-for-translatepress' ), self::autofix_reason( $why ) );

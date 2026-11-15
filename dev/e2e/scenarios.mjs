@@ -400,7 +400,7 @@ const S = {
 
 		// Fully translated site (backfill queue), then plant the HHG failure types.
 		await reset();
-		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings") as $o) delete_option($o); echo 1;' );
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","batches") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings") as $o) delete_option($o); echo 1;' );
 		q( 'sync' );
 		q( 'start' );
 		json( q( 'run', '--ignore-rate', '--minutes=8' ) );
@@ -426,6 +426,7 @@ const S = {
 			findings: found.length, errors: found.filter( ( f ) => f.severity === 'error' ).length,
 			missed: missed.map( ( r ) => r.type + ':' + r.lang ), not_error_yet: missedErr.map( ( r ) => r.type + ':' + r.lang + ( r.long ? ':long' : ':short' ) ),
 			false_errors: falseErr.length, other_suspects: falseSus.length,
+			shift_codes: bad.filter( ( r ) => r.type === 'shift' ).map( ( r ) => [ r.lang, r.long ? 'long' : 'short', ( byKey[ key( r.kind, r.lang, r.id ) ] || {} ).codes || null ] ),
 			false_error_rows: falseErr.slice( 0, 5 ).map( ( f ) => [ f.kind, f.lang, f.row_id, f.codes, f.original.slice( 0, 80 ), f.translated.slice( 0, 80 ) ] ),
 		}, {
 			every_planted_row_found: missed.length === 0,
@@ -558,7 +559,7 @@ const S = {
 		const batches = () => json( wp( 'eval', 'echo wp_json_encode((object) AITP_Audit::batches());' ) );
 
 		await reset();
-		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_settings","aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings","aitp_autofix_state","aitp_autofix_settings","aitp_autofix_lock") as $o) delete_option($o); echo 1;' );
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","batches","protect") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_settings","aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings","aitp_autofix_state","aitp_autofix_settings","aitp_autofix_lock") as $o) delete_option($o); echo 1;' );
 		q( 'sync' );
 		q( 'start' );
 		json( q( 'run', '--ignore-rate', '--minutes=8' ) );
@@ -567,14 +568,15 @@ const S = {
 		const seed = seedc( 'dump' );
 		a( 'scan', '--minutes=5' );
 		const found = a( 'list', '--limit=5000', '--state=all' ).rows;
-		const sev = Object.fromEntries( found.map( ( f ) => [ key( f.kind, f.lang, f.row_id ), f.severity ] ) );
-		const errRows = seed.rows.filter( ( r ) => r.kind === 'dictionary' && r.type !== 'manual' && r.type !== 'structured' && sev[ key( r.kind, r.lang, r.id ) ] === 'error' );
+		// 0.7.0: the auto repair takes "certainly wrong" (tier a) page text only.
+		const tierOf = Object.fromEntries( found.map( ( f ) => [ key( f.kind, f.lang, f.row_id ), f.tier ] ) );
+		const errRows = seed.rows.filter( ( r ) => r.kind === 'dictionary' && r.type !== 'manual' && r.type !== 'structured' && tierOf[ key( r.kind, r.lang, r.id ) ] === 'a' );
 		const otherRows = seed.rows.filter( ( r ) => r.type !== 'manual' && ! errRows.includes( r ) );
 		const batchesBefore = Object.keys( batches() ).length;
 
 		// 1. Off by default.
 		const refused = afTry( 'start' );
-		af( 'settings', '--enabled=1', '--batch=20' );
+		af( 'settings', '--enabled=1', '--batch=20', '--max-batches=0' ); // 0.7.0: one batch per start by default.
 
 		// 2. Run until there is nothing left it may repair.
 		const started = afTry( 'start' );
@@ -598,13 +600,13 @@ const S = {
 			left_untranslated: st.history.filter( ( h ) => h.untranslated > 0 ).map( ( h ) => h.lang ),
 		}, {
 			off_by_default: /disabled/.test( refused ),
-			finished: st.status === 'done',
+			finished: st.status === 'done' || ( st.status === 'stopped' && st.reason === 'no_page' ), // 0.7.0: rows on no known page left -> "no_page", not "done".
 			every_batch_ok: st.history.length > 0 && st.history.every( ( h ) => h.result === 'ok' ),
 			wrong_rows_fixed_or_reported: fixed.length + st.left.no_page >= errRows.length && fixed.length > 0,
 			suspects_gettext_structured_untouched: others.length === 0,
 			manual_untouched: chk.manual_sum === seed.manual_sum,
 			batches_marked_auto: autoIds.length === st.history.length && Object.keys( bAll ).length === batchesBefore + st.history.length,
-			structured_left_for_a_person: st.left.structured >= 1,
+			structured_left_for_a_person: seed.rows.filter( ( r ) => r.type === 'structured' ).every( ( r ) => tierOf[ key( r.kind, r.lang, r.id ) ] === 'b' ), // 0.7.0: never picked (tier b).
 			queue_stayed_paused: qstate().status === 'stopped',
 		} );
 
@@ -683,7 +685,7 @@ const S = {
 		const FD = 'Another new footer line that appears during the journal test';
 
 		await reset();
-		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings","aitp_autofix_state","aitp_autofix_settings","aitp_autofix_lock","aitp_map_state","aitp_map_lock","aitp_journal_state") as $o) delete_option($o); echo 1;' );
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","batches","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings","aitp_autofix_state","aitp_autofix_settings","aitp_autofix_lock","aitp_map_state","aitp_map_lock","aitp_journal_state") as $o) delete_option($o); echo 1;' );
 		opt( 'aitp_e2e_footer', [ [ FA, '' ], [ FB, 'okay-home' ] ] );
 		wp( 'eval', `update_option('aitp_queue_settings', array_merge(AITP_Queue::defaults(), array('languages' => array('${ L }'))), false); echo 1;` );
 		q( 'sync' );
@@ -775,9 +777,9 @@ const S = {
 		} );
 		wp( 'eval', 'global $wpdb; $wpdb->query("UPDATE {$wpdb->prefix}aitp_queue SET status = \'done\', note = \'\'"); echo 1;' );
 
-		// 4. Auto repair on the same rows: picks the row on a known page, leaves the other one, visits only batch pages.
+		// 4. Auto repair on the same rows: picks the row on a known page first; for the other one it reads a sample of pages (read only), then repairs it. Translating visits go to batch pages only.
 		a( 'scan', '--minutes=3' );
-		af( 'settings', '--enabled=1', `--languages=${ L }`, '--batch=20' );
+		af( 'settings', '--enabled=1', `--languages=${ L }`, '--batch=20', '--max-batches=0' ); // 0.7.0: one batch per start by default.
 		h( 'visits', 'clear' );
 		wp( 'aitp', 'autofix', 'start' );
 		const afr = af( 'run', '--ignore-rate', '--minutes=4' );
@@ -787,11 +789,12 @@ const S = {
 		const visits2 = h( 'visits' ).visits;
 		const afA = h( 'find', L, FA );
 		const afB = h( 'find', L, FB );
-		record( 'pagemap: auto repair stays on known pages', { result: afr.result, status: afr.state.status, left: afr.state.left, batches: auto.length, allowed, visits: visits2 }, {
-			finished: afr.state.status === 'done',
+		record( 'pagemap: auto repair stays on known pages', { result: afr.result, status: afr.state.status, reason: afr.state.reason, left: afr.state.left, batches: auto.length, allowed, visits: visits2 }, {
+			finished: afr.state.status === 'done' || ( afr.state.status === 'stopped' && afr.state.reason === 'no_page' ), // 0.7.0: B is left on no known page.
 			a_fixed: afA.translated !== FA && afA.status === '1',
-			b_left_for_a_person: afB.translated === FB && afr.state.left.no_page >= 1,
-			only_batch_pages_visited: visits2.length > 0 && visits2.every( ( v ) => allowed.some( ( p ) => v.startsWith( p ) ) ),
+			// 0.7.0 (D40): B's page was unknown; a read-only sample of pages found it, then it was repaired.
+			b_found_by_sample_and_fixed: afB.translated !== FB && afB.status === '1' && afr.state.left.no_page === 0 && visits2.some( ( v ) => v.includes( 'aitp_map=1' ) ),
+			only_batch_pages_translated: visits2.filter( ( v ) => ! v.includes( 'aitp_map=1' ) ).length > 0 && visits2.filter( ( v ) => ! v.includes( 'aitp_map=1' ) ).every( ( v ) => allowed.some( ( p ) => v.startsWith( p ) ) ),
 		} );
 		for ( const [ id ] of auto ) a( 'rollback', id );
 		af( 'settings', '--enabled=0' );
@@ -843,7 +846,7 @@ const S = {
 		const SA = 'Flexible kids glasses, on a page with an Arabic address';
 
 		await reset();
-		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_map_state","aitp_map_lock","aitp_journal_state") as $o) delete_option($o); echo 1;' );
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","batches","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_map_state","aitp_map_lock","aitp_journal_state") as $o) delete_option($o); echo 1;' );
 		opt( 'aitp_e2e_footer', [] );
 		opt( 'aitp_e2e_tamper', '' );
 		opt( 'aitp_e2e_visit_log', 1 );
@@ -974,7 +977,7 @@ const S = {
 		const FB = 'Only on the home page: ask for a free sample today';
 
 		await reset();
-		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_autofix_state","aitp_autofix_lock","aitp_map_state","aitp_map_lock","aitp_journal_state","aitp_purge_list") as $o) delete_option($o); echo 1;' );
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","batches","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_autofix_state","aitp_autofix_lock","aitp_map_state","aitp_map_lock","aitp_journal_state","aitp_purge_list") as $o) delete_option($o); echo 1;' );
 		opt( 'aitp_e2e_footer', [ [ FA, '' ], [ FB, 'okay-home' ] ] );
 		for ( const o of [ 'aitp_e2e_tamper', 'aitp_e2e_kill_after', 'aitp_e2e_purge_fault' ] ) opt( o, 0 );
 		opt( 'aitp_e2e_fake_litespeed', 1 );
@@ -1053,7 +1056,7 @@ const S = {
 
 		// 4. Batch record lost altogether (as on the test site): found from the backup rows.
 		const r4 = a( 'repair', `--ids=${ findIds( four ).join( ',' ) }` );
-		wp( 'eval', 'delete_option("aitp_repair_batches"); echo 1;' );
+		ev( 'AITP_Batches::delete((int) $in); echo wp_json_encode(array("ok" => 1));', r4.batch );
 		const b4 = batches()[ r4.batch ] || {};
 		const rb4 = a( 'rollback', r4.batch );
 		const after4 = h( 'dict', L ).sum;
@@ -1093,7 +1096,7 @@ const S = {
 		setRow( [ back7.translated, back7.status, back7.row_id ] );
 		const after7 = h( 'dict', L ).sum;
 		// A record 0.6.2 stored with the count added twice shows the real count.
-		ev( '$b = get_option("aitp_repair_batches"); $b[(int) $in]["restored"] = 999; update_option("aitp_repair_batches", $b, false); echo wp_json_encode(array("ok" => 1));', r4.batch );
+		ev( '$i = AITP_Batches::get((int) $in); $i["restored"] = 999; AITP_Batches::save((int) $in, $i); echo wp_json_encode(array("ok" => 1));', r4.batch );
 		const h4 = hist( r4.batch );
 		record( 'repairsafe: rollback counts are the backup rows, pages kept with the batch', {
 			lost: { rb: rb4.restored, hist: b4after.restored }, cut: { rb: rb5.restored, total: rb5.total, hist: h5.restored }, again: { rb: rb5again.restored, hist: h5again.restored, todo: h5again.todo },
@@ -1173,7 +1176,7 @@ const S = {
 		const cleanup = () => ev( 'global $wpdb; $o = $wpdb->prefix . "trp_original_strings"; $ids = $wpdb->get_col("SELECT id FROM $o WHERE original LIKE \'AITP bulk row %\'"); if ($ids) { $wpdb->query("DELETE FROM {$wpdb->prefix}trp_original_meta WHERE original_id IN (" . implode(",", array_map("intval", $ids)) . ")"); $wpdb->query("DELETE FROM $o WHERE id IN (" . implode(",", array_map("intval", $ids)) . ")"); $wpdb->query("DELETE FROM {$wpdb->prefix}trp_dictionary_en_us_fr_fr WHERE original LIKE \'AITP bulk row %\'"); } echo wp_json_encode(array("removed" => count($ids)));' );
 
 		await reset();
-		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_audit_state","aitp_repair_batches","aitp_autofix_state","aitp_map_state","aitp_journal_state","aitp_purge_list") as $o) delete_option($o); update_option("aitp_e2e_kill_after", 0); echo 1;' );
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","batches","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_audit_state","aitp_repair_batches","aitp_autofix_state","aitp_map_state","aitp_journal_state","aitp_purge_list") as $o) delete_option($o); update_option("aitp_e2e_kill_after", 0); echo 1;' );
 		cleanup();
 		const made = ev( `global $wpdb; $art = get_page_by_path('okay-article')->ID; $ids = array();
 			for ($i = 1; $i <= (int) $in; $i++) {
@@ -1239,7 +1242,7 @@ const S = {
 		};
 
 		await reset();
-		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_audit_state","aitp_repair_batches","aitp_autofix_state","aitp_map_state","aitp_journal_state","aitp_purge_list","aitp_write_lock") as $o) delete_option($o); echo 1;' );
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","batches","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_audit_state","aitp_repair_batches","aitp_autofix_state","aitp_map_state","aitp_journal_state","aitp_purge_list","aitp_write_lock") as $o) delete_option($o); echo 1;' );
 		auto( true );
 		await visit( L, 'okay-collection' );
 		const ids = ev( `global $wpdb; echo wp_json_encode(array('ids' => array_map('intval', $wpdb->get_col("SELECT d.id FROM {$wpdb->prefix}trp_dictionary_en_us_fr_fr d JOIN {$wpdb->prefix}trp_original_meta m ON m.original_id = d.original_id AND m.meta_key = 'post_parent_id' JOIN {$wpdb->posts} p ON p.ID = m.meta_value AND p.post_name = 'okay-collection' WHERE d.status = 1 AND d.original LIKE '% %' ORDER BY d.id LIMIT 2"))));` ).ids;
@@ -1301,7 +1304,7 @@ const S = {
 		unlockTp();
 		await visit( L, 'okay-collection' );
 		const rb3 = a( 'rollback', r3.batch );
-		ev( `global $wpdb; $b = get_option('aitp_repair_batches'); unset($b[$in]['journal']); update_option('aitp_repair_batches', $b); $s = AITP_Journal::state(); $wpdb->query($wpdb->prepare("UPDATE {$wpdb->prefix}aitp_journal SET undone = '' WHERE session = %d", $s['session'])); echo 1;`, String( r3.batch ) );
+		ev( `global $wpdb; $i = AITP_Batches::get((int) $in); unset($i['journal']); AITP_Batches::save((int) $in, $i); $s = AITP_Journal::state(); $wpdb->query($wpdb->prepare("UPDATE {$wpdb->prefix}aitp_journal SET undone = '' WHERE session = %d", $s['session'])); echo 1;`, String( r3.batch ) );
 		auto( false );
 		const before3 = jcount();
 		const undo3 = j( 'undo' );
@@ -1316,7 +1319,9 @@ const S = {
 
 		// L1: one repair, rollback or undo at a time; a lock left by a dead request is taken over.
 		ev( 'update_option("aitp_write_lock", (time() + 600) . "|e2e|repair|" . time(), false); echo 1;' );
+		auto( true ); // 0.7.0: a repair is refused before the lock while automatic translation is off.
 		const busyRepair = a( 'repair', '--source=import', '--yes' );
+		auto( false );
 		const busyRollback = a( 'rollback', r1.batch );
 		const busyUndo = j( 'undo' );
 		const heldDict = h( 'dict', L, base.max );
@@ -1446,6 +1451,241 @@ const S = {
 			no_mismatch: s.mismatch === 0,
 			all_translated: s.status1 >= s.rows * 0.99,
 		} );
+	},
+
+	async batch3() {
+		// 0.7.0 third part (repair redo): same-original groups, accepted rows kept by a rollback, "only
+		// what did not come out well" and "since" rollbacks, rows on very many pages, orphan auto batches,
+		// sample mapping, tiers, plural interface text, text TranslatePress keeps as it is, old batch records.
+		const q = ( ...x ) => wp( 'aitp', 'queue', ...x );
+		const a = ( ...x ) => json( wp( 'aitp', 'audit', ...x ) );
+		const m = ( ...x ) => json( wp( 'aitp', 'map', ...x ) );
+		const af = ( ...x ) => json( wp( 'aitp', 'autofix', ...x ) );
+		const h = ( ...x ) => json( wp( 'eval-file', '/e2e/pagemap-help.php', ...x.map( String ) ) );
+		const b64 = ( v ) => Buffer.from( JSON.stringify( v ) ).toString( 'base64' );
+		const ev = ( php, v ) => json( wp( 'eval', `$in = json_decode(base64_decode('${ b64( v === undefined ? null : v ) }'), true); ${ php }` ) );
+		const batches = () => json( wp( 'eval', 'echo wp_json_encode((object) AITP_Audit::batches());' ) );
+		const L = 'fr_FR';
+		const D = '{$wpdb->prefix}trp_dictionary_en_us_fr_fr';
+		const allFindings = () => a( 'list', '--limit=5000', '--state=all' ).rows;
+		const findIds = ( rowIds, kind = 'dictionary' ) => { const rows = allFindings(); return rowIds.map( ( id ) => ( rows.find( ( f ) => f.kind === kind && Number( f.row_id ) === Number( id ) && f.lang === L ) || {} ).id ); };
+		const findings = ( rowIds ) => { a( 'import', h( 'cand', L, rowIds.join( ',' ) ).file ); return findIds( rowIds ); };
+		const logs = ( e ) => Number( wp( 'eval', `global $wpdb; echo (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}aitp_log WHERE event = '${ e }'");` ) );
+		const rowsBy = ( ids ) => ev( `global $wpdb; echo wp_json_encode(array("r" => $wpdb->get_results("SELECT id, original, translated, status, original_id FROM ${ D } WHERE id IN (" . implode(",", array_map("intval", $in)) . ") ORDER BY id", ARRAY_A)));`, ids ).r;
+		const row = ( id ) => rowsBy( [ id ] )[ 0 ] || {};
+		const check = ( batch ) => ev( 'echo wp_json_encode(AITP_Audit::batch_check((int) $in, true, true, false));', String( batch ) );
+		// "Translate just these pages" of a batch, then the queue works them off.
+		const visitBatch = ( batch ) => { const v = ev( 'echo wp_json_encode(AITP_Audit::visit_batch((int) $in));', String( batch ) ); json( q( 'run', '--ignore-rate', '--minutes=3' ) ); q( 'pause' ); return v; };
+		const lastJson = ( out ) => { const l = out.split( '\n' ).filter( ( x ) => x.startsWith( '{' ) ); return l.length ? JSON.parse( l[ l.length - 1 ] ) : {}; };
+
+		await reset();
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","batches","protect","pagemap","pagestr","journal","tasks") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings","aitp_autofix_state","aitp_autofix_settings","aitp_autofix_lock","aitp_map_state","aitp_map_lock","aitp_journal_state","aitp_purge_list","aitp_write_lock") as $o) delete_option($o); echo 1;' );
+		ev( 'update_option("aitp_e2e_footer", array()); echo wp_json_encode(array("ok" => 1));' );
+		wp( 'eval', `update_option('aitp_queue_settings', array_merge(AITP_Queue::defaults(), array('languages' => array('${ L }'))), false); echo 1;` );
+		q( 'sync' );
+		q( 'start' );
+		json( q( 'run', '--ignore-rate', '--minutes=6' ) );
+		q( 'pause' );
+		const pg = ev( 'echo wp_json_encode(array_map(function ($s) { $p = get_page_by_path($s); return array("id" => $p->ID, "src" => get_permalink($p), "url" => AITP_Queue::translated_url(get_permalink($p), "fr_FR")); }, $in));', { home: 'okay-home', article: 'okay-article' } );
+		wp( 'aitp', 'map', 'start', `--urls=${ pg.home.src },${ pg.article.src }`, `--languages=${ L }` );
+		m( 'run', '--ignore-rate', '--minutes=2' );
+		const maps = m( 'list' ).rows;
+		const rowsOf = ( url ) => { const p = maps.find( ( r ) => r.url === url ); return p ? json( wp( 'aitp', 'map', 'export', `--pages=${ p.id }` ) ).rows.map( ( r ) => Number( r.id ) ) : []; };
+		const homeIds = rowsOf( pg.home.url );
+		const artIds = rowsOf( pg.article.url ).filter( ( id ) => ! homeIds.includes( id ) );
+		const usable = ( ids ) => rowsBy( ids ).filter( ( r ) => String( r.status ) === '1' && r.translated && r.original.length > 20 && r.original !== r.translated && r.original_id && ! /[<>{}]/.test( r.original ) );
+		const H0 = usable( homeIds ).slice( 0, 8 );
+		const X0 = usable( artIds )[ 0 ];
+		if ( H0.length < 8 || ! X0 ) {
+			record( 'batch3: test pages have enough rows', { home: H0.length, article: !! X0 }, { enough_rows: false } );
+			return;
+		}
+		// Old (HHG-like) text in the rows, different from what the engine gives back now.
+		for ( const r of [ ...H0.slice( 0, 5 ), X0 ] ) h( 'set', L, r.id, 1, `Ancien texte faux ${ r.id } : ${ r.translated }` );
+		const H = rowsBy( H0.map( ( r ) => r.id ) );
+		const X = row( X0.id );
+		const d0 = h( 'dict', L );
+		const same0 = () => h( 'dict', L, d0.max ).sum === d0.sum;
+
+		// 1. Same original in two rows (C01): the machine-translated sibling is backed up and reset with the row.
+		const sib = ev( `global $wpdb; $wpdb->insert("${ D }", array("original" => $in["original"], "translated" => "Copie ancienne : " . $in["translated"], "status" => 1, "block_type" => 0, "original_id" => (int) $in["original_id"])); echo wp_json_encode(array("id" => (int) $wpdb->insert_id));`, H[ 0 ] );
+		const dG = h( 'dict', L );
+		const r1 = a( 'repair', `--ids=${ findings( [ H[ 0 ].id ] ).join( ',' ) }` );
+		const reset1 = rowsBy( [ H[ 0 ].id, sib.id ] );
+		const v1 = visitBatch( r1.batch );
+		const c1 = check( r1.batch );
+		const after1 = rowsBy( [ H[ 0 ].id, sib.id ] );
+		const rb1 = a( 'rollback', String( r1.batch ) );
+		const back1 = h( 'dict', L, dG.max ).sum === dG.sum;
+		ev( `global $wpdb; $wpdb->delete($wpdb->prefix . "trp_dictionary_en_us_fr_fr", array("id" => (int) $in)); echo wp_json_encode(array("ok" => 1));`, sib.id );
+		record( 'batch3: rows with the same original are repaired together', {
+			r1: { reset: r1.reset, group: r1.group }, reset_rows: reset1.map( ( r ) => [ r.status, r.translated ] ), visit: v1, check: c1, after: after1.map( ( r ) => r.status ), rollback: rb1,
+		}, {
+			sibling_reset_too: r1.reset === 2 && r1.group === 1 && reset1.every( ( r ) => String( r.status ) === '0' && ! r.translated ),
+			visited_batch_pages: v1.queued >= 1,
+			counted_as_ok: c1.reset === 2 && c1.ok === 2 && c1.left === 0 && c1.refused === 0 && c1.wrong === 0,
+			both_rolled_back_exactly: rb1.restored === 2 && back1 && same0(),
+		} );
+
+		// 2. "Roll back only what did not come out well", then the rest; a row people accepted since is kept.
+		const ids2 = findings( [ H[ 1 ].id, H[ 2 ].id, H[ 3 ].id ] );
+		const r2 = a( 'repair', `--ids=${ ids2.join( ',' ) }` );
+		visitBatch( r2.batch );
+		const c2 = check( r2.batch );
+		const new1 = row( H[ 1 ].id );
+		const accB64 = b64( { rows: [ { language: L, id: Number( new1.id ), original: new1.original, new: new1.translated, table: 'dictionary' } ] } );
+		wp( 'eval', `file_put_contents(WP_CONTENT_DIR . "/e2e-state/accepted-b3.json", base64_decode("${ accB64 }")); echo 1;` );
+		const prot = a( 'protect', '/var/www/html/wp-content/e2e-state/accepted-b3.json', '--label=e2e b3' );
+		h( 'set', L, H[ 2 ].id, 0, '__NULL__' ); // This row came out untranslated.
+		const ob = a( 'rollback', String( r2.batch ), '--only-bad' );
+		const bOb = batches()[ r2.batch ] || {};
+		const mid = rowsBy( [ H[ 1 ].id, H[ 2 ].id, H[ 3 ].id ] );
+		const full = a( 'rollback', String( r2.batch ) );
+		const bFull = batches()[ r2.batch ] || {};
+		const end2 = rowsBy( [ H[ 1 ].id, H[ 2 ].id, H[ 3 ].id ] );
+		wp( 'aitp', 'audit', 'unprotect', '--label=e2e b3' );
+		h( 'set', L, H[ 1 ].id, 1, H[ 1 ].translated ); // Back to the old text for the next steps.
+		record( 'batch3: roll back only the bad rows, then the rest; accepted rows are kept', {
+			check: c2, protect: prot.added, only_bad: ob, partial: { p: !! bOb.partial_rollback, rb: !! bOb.rolled_back, restored: bOb.restored }, full, done: !! bFull.rolled_back,
+		}, {
+			all_ok_before: c2.ok === 3,
+			only_bad_restores_the_bad_row: ob.only_bad === true && ob.restored === 1 && mid[ 1 ].translated === H[ 2 ].translated && String( mid[ 1 ].status ) === '1' && mid[ 2 ].translated !== H[ 3 ].translated,
+			batch_partly_rolled_back: !! bOb.partial_rollback && ! bOb.rolled_back && bOb.restored === 1,
+			full_rollback_keeps_accepted: full.restored === 1 && ( full.skipped.accepted || 0 ) === 1 && full.total === 2 && end2[ 0 ].translated === new1.translated && end2[ 2 ].translated === H[ 3 ].translated,
+			batch_rolled_back: !! bFull.rolled_back,
+			rest_exact: same0(),
+		} );
+
+		// 3. Orphan auto batch (its request ended before the auto repair took it on): adopted and judged.
+		a( 'scan', '--minutes=5' ); // The auto repair starts only after a finished check.
+		const orphan = ev( 'echo wp_json_encode(AITP_Audit::repair($in, array("auto" => true, "site_purge_later" => true)));', findings( [ H[ 2 ].id, H[ 3 ].id ] ) );
+		af( 'settings', '--enabled=1', '--batch=20', `--languages=${ L }`, '--max-batches=1' );
+		const adopt0 = logs( 'autofix_adopt' );
+		wp( 'aitp', 'autofix', 'start' );
+		const run3 = af( 'run', '--ignore-rate', '--minutes=5' );
+		const st3 = run3.state;
+		const b3 = batches();
+		const autoIds = Object.keys( b3 ).filter( ( id ) => b3[ id ].auto && ! b3[ id ].rolled_back );
+		const rb3 = a( 'rollback', String( orphan.batch ) );
+		af( 'settings', '--enabled=0' );
+		wp( 'eval', 'foreach (array("aitp_autofix_state","aitp_autofix_settings","aitp_autofix_lock") as $o) delete_option($o); echo 1;' );
+		record( 'batch3: an auto batch nobody judged is taken on by the auto repair', {
+			orphan: { batch: orphan.batch, reset: orphan.reset }, status: st3.status, reason: st3.reason, history: st3.history.map( ( x ) => [ x.batch, x.result, x.ok, x.untranslated ] ), adopted: logs( 'autofix_adopt' ) - adopt0, result: ( b3[ orphan.batch ] || {} ).auto_result, auto_batches: autoIds.length, rollback: rb3.restored,
+		}, {
+			adopted_once: logs( 'autofix_adopt' ) - adopt0 === 1,
+			judged_ok: st3.history.length === 1 && st3.history[ 0 ].batch === orphan.batch && st3.history[ 0 ].result === 'ok' && ( b3[ orphan.batch ] || {} ).auto_result === 'ok',
+			stopped_at_max_batches: st3.status === 'stopped' && st3.reason === 'max_batches' && autoIds.length === 1,
+			rolled_back_exactly: rb3.restored === 2 && same0(),
+		} );
+
+		// 4. A row on very many pages ("wide"): the whole cache is cleared once; "since" rolls back newest first.
+		ev( 'global $wpdb; for ($i = 1; $i <= 25; $i++) $wpdb->insert($wpdb->prefix . "trp_original_meta", array("original_id" => (int) $in, "meta_key" => "post_parent_id", "meta_value" => (string) (990000 + $i))); echo wp_json_encode(array("ok" => 1));', X.original_id );
+		const since = Number( wp( 'eval', 'echo time();' ) );
+		const ps0 = logs( 'cache_purge_site' );
+		const rA = a( 'repair', `--ids=${ findings( [ X.id ] ).join( ',' ) }` );
+		const ps1 = logs( 'cache_purge_site' );
+		const rB = a( 'repair', `--ids=${ findings( [ H[ 4 ].id ] ).join( ',' ) }` );
+		const ps2 = logs( 'cache_purge_site' );
+		const bA = batches()[ rA.batch ] || {};
+		const rsAuto = lastJson( wp( 'aitp', 'audit', 'rollback', `--since=@${ since }` ) ); // Auto repair batches only (none here).
+		const rs = lastJson( wp( 'aitp', 'audit', 'rollback', `--since=@${ since }`, '--all' ) );
+		const ps3 = logs( 'cache_purge_site' );
+		const rsAgain = lastJson( wp( 'aitp', 'audit', 'rollback', `--since=@${ since }`, '--all' ) );
+		ev( 'global $wpdb; $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->prefix}trp_original_meta WHERE original_id = %d AND meta_key = %s AND CAST(meta_value AS UNSIGNED) > 990000", (int) $in, "post_parent_id")); echo wp_json_encode(array("ok" => 1));', X.original_id );
+		record( 'batch3: rows on many pages clear the cache once; rollback since a time', {
+			rA: { reset: rA.reset, wide: rA.wide, site: !! rA.purge_site, urls: rA.urls.length }, rB: { reset: rB.reset, wide: rB.wide }, recorded_wide: bA.wide, purges: [ ps1 - ps0, ps2 - ps1, ps3 - ps2 ], since_auto: rsAuto, since: rs, again: rsAgain,
+		}, {
+			wide_row_found: rA.reset === 1 && rA.wide === true && !! rA.purge_site && bA.wide === true && rA.urls.length >= 1,
+			site_cleared_once_per_repair: ps1 - ps0 === 1 && ps2 - ps1 === 0 && rB.wide === false,
+			since_default_auto_only: Array.isArray( rsAuto.batches ) && rsAuto.batches.length === 0 && rsAuto.restored === 0,
+			since_newest_first: Array.isArray( rs.batches ) && rs.batches.length === 2 && rs.batches[ 0 ] === rB.batch && rs.batches[ 1 ] === rA.batch && rs.restored === 2 && rs.left.length === 0,
+			since_site_cleared_once: !! rs.purge_site && ps3 - ps2 === 1,
+			since_again_nothing: Array.isArray( rsAgain.batches ) && rsAgain.batches.length === 0,
+			exact: same0(),
+		} );
+
+		// 5. Mapping a sample of pages: home and a few pages per kind, pages read in the last 7 days left out.
+		const plan0 = ev( 'echo wp_json_encode(array("p" => AITP_Pagemap::sample_plan("fr_FR")));' ).p;
+		const startOut = wp( 'aitp', 'map', 'start', '--sample', `--languages=${ L }` );
+		const nSample = Number( ( startOut.match( /(\d+) pages to map/ ) || [] )[ 1 ] );
+		m( 'run', '--ignore-rate', '--minutes=3' );
+		const plan1 = ev( 'echo wp_json_encode(array("p" => AITP_Pagemap::sample_plan("fr_FR")));' ).p;
+		const planUrls = plan0.map( ( p ) => p.url );
+		record( 'batch3: sample mapping', { planned: plan0.length, started: nSample, urls: planUrls, after: plan1.length }, {
+			sample_planned: nSample === plan0.length && nSample >= 1 && nSample <= 24,
+			recent_pages_left_out: ! planUrls.includes( pg.home.url ) && ! planUrls.includes( pg.article.url ),
+			mapped_pages_not_planned_again: plan1.length < plan0.length,
+		} );
+
+		// 6. Check: tiers, plural interface text, text TranslatePress keeps as it is.
+		const pl = ev( `global $wpdb; $o = $wpdb->prefix . "trp_gettext_original_strings"; $t = $wpdb->prefix . "trp_gettext_fr_fr";
+			$wpdb->insert($o, array("original" => "One aitp sample bag", "domain" => "aitp-e2e", "context" => "", "original_plural" => "%d aitp sample bags", "lookup_hash" => md5("aitp-e2e-bag")));
+			$oid = (int) $wpdb->insert_id;
+			$wpdb->insert($t, array("original" => "One aitp sample bag", "translated" => "Un sac d’échantillon aitp", "domain" => "aitp-e2e", "status" => 1, "original_id" => $oid, "plural_form" => 0));
+			$single = (int) $wpdb->insert_id;
+			$wpdb->insert($t, array("original" => "One aitp sample bag", "translated" => "%d sacs d’échantillon aitp", "domain" => "aitp-e2e", "status" => 1, "original_id" => $oid, "plural_form" => 1));
+			echo wp_json_encode(array("oid" => $oid, "single" => $single, "plural" => (int) $wpdb->insert_id));` );
+		const URLTXT = 'https://example.com/files/aitp-catalog-2026.pdf';
+		const ur = ev( 'global $wpdb; $wpdb->insert($wpdb->prefix . "trp_dictionary_en_us_fr_fr", array("original" => $in, "translated" => $in, "status" => 1, "block_type" => 0)); echo wp_json_encode(array("id" => (int) $wpdb->insert_id));', URLTXT );
+		for ( const r of H.slice( 5, 7 ) ) h( 'set', L, r.id, 1, r.translated.slice( 0, 4 ) ); // Cut down to a few letters: certainly wrong.
+		const scan = a( 'scan', '--minutes=5' );
+		a( 'import', h( 'cand', L, String( H[ 7 ].id ) ).file ); // A good row from a candidate list: a person looks.
+		const fl = allFindings();
+		const tierOf = Object.fromEntries( fl.map( ( f ) => [ f.id, f.tier ] ) );
+		const of = ( kind, id ) => fl.find( ( f ) => f.kind === kind && f.lang === L && Number( f.row_id ) === Number( id ) );
+		const cnt = ev( 'echo wp_json_encode(AITP_Audit::counts());' );
+		const idsA = ev( 'echo wp_json_encode(array("ids" => AITP_Audit::ids_for(array("tier" => "a")), "all" => AITP_Audit::ids_for(array()), "langs" => (object) AITP_Audit::lang_counts(array("tier" => "a"))));' );
+		const engA = H.slice( 5, 7 ).map( ( r ) => of( 'dictionary', r.id ) );
+		const good7 = of( 'dictionary', H[ 7 ].id );
+		const urlF = of( 'dictionary', ur.id );
+		const plF = [ of( 'gettext', pl.single ), of( 'gettext', pl.plural ) ];
+		// The kept text is listed by nobody, but a candidate list may still name it: a repair leaves it.
+		a( 'import', h( 'cand', L, String( ur.id ) ).file );
+		const urFid = findIds( [ ur.id ] )[ 0 ];
+		const rU = a( 'repair', `--ids=${ urFid }` );
+		const urNow = row( ur.id );
+		const urGone = ! findIds( [ ur.id ] )[ 0 ];
+		const sumA = Object.values( cnt.tiers ).reduce( ( s, t ) => s + ( t.a || 0 ), 0 );
+		const sumB = Object.values( cnt.tiers ).reduce( ( s, t ) => s + ( t.b || 0 ), 0 );
+		record( 'batch3: tiers, plural interface text, text TranslatePress keeps as is', {
+			scanned: scan.scanned, english: engA.map( ( f ) => f && [ f.severity, f.tier, f.codes ] ), good_imported: good7 && [ good7.severity, good7.tier ], url_finding: urlF ? [ urlF.severity, urlF.codes ] : null,
+			plural: plF.map( ( f ) => f ? [ f.severity, f.codes ] : null ), counts: { open: cnt.open, ref: cnt.ref, a: sumA, b: sumB }, ids_a: idsA.ids.length, ids_all: idsA.all.length, langs: idsA.langs, url_repair: { reset: rU.reset, skipped: rU.skipped },
+		}, {
+			cut_is_tier_a: engA.every( ( f ) => f && f.tier === 'a' && f.state === 'open' ),
+			imported_good_row_tier_b: !! good7 && good7.tier === 'b' && ! idsA.ids.includes( Number( good7.id ) ) && idsA.all.includes( Number( good7.id ) ),
+			tier_filter_only_tier_a: idsA.ids.length >= 2 && idsA.ids.every( ( id ) => tierOf[ id ] === 'a' ) && engA.every( ( f ) => idsA.ids.includes( Number( f.id ) ) ),
+			counts_match_filter: sumA === idsA.ids.length && ( idsA.langs[ L ] || 0 ) === idsA.ids.length && cnt.open === sumA + sumB,
+			plural_not_flagged: ! plF[ 1 ],
+			singular_not_flagged: ! plF[ 0 ],
+			kept_text_not_flagged: ! urlF,
+			kept_text_not_reset: rU.reset === 0 && ( rU.skipped.tp_keeps || 0 ) === 1 && urNow.translated === URLTXT && String( urNow.status ) === '1',
+			kept_text_finding_removed: urGone,
+		} );
+		ev( 'global $wpdb; $wpdb->delete($wpdb->prefix . "trp_gettext_fr_fr", array("original_id" => (int) $in)); $wpdb->delete($wpdb->prefix . "trp_gettext_original_strings", array("id" => (int) $in)); echo wp_json_encode(array("ok" => 1));', pl.oid );
+
+		// 7. Batch records kept in an option before 0.7.0 (up to 200, here 250) move to their table on update.
+		const mig = ev( `global $wpdb; $a = $wpdb->prefix . "aitp_audit"; $bt = $wpdb->prefix . "aitp_batches";
+			$old = array(); for ($i = 0; $i < 250; $i++) { $old[1600000000000 + $i * 1000] = array("time" => 1600000000 + $i, "user" => 0, "state" => "done", "reset" => 1, "langs" => "fr_FR", "skipped" => array(), "pages" => 0, "mig" => "option"); }
+			AITP_Batches::save(1600000000000, array("time" => 1600000000, "state" => "done", "reset" => 7, "mig" => "table"));
+			update_option("aitp_repair_batches", $old, false);
+			$before = $wpdb->get_results("SELECT id, tier FROM $a", OBJECT_K);
+			$wpdb->query("UPDATE $a SET tier = ''");
+			update_option("aitp_db_version", "7", false);
+			AITP_Schema::maybe_upgrade();
+			$after = $wpdb->get_results("SELECT id, tier FROM $a", OBJECT_K);
+			$same = 0; foreach ($before as $id => $r) { if (isset($after[$id]) && $after[$id]->tier === $r->tier) $same++; }
+			$keep = AITP_Batches::get(1600000000000);
+			$out = array("rows" => (int) $wpdb->get_var("SELECT COUNT(*) FROM $bt WHERE id BETWEEN 1600000000000 AND 1600000249000"), "kept" => $keep["mig"], "kept_reset" => $keep["reset"], "version" => get_option("aitp_db_version"), "option_left" => is_array(get_option("aitp_repair_batches")), "tiers_same" => $same, "tiers" => count($before), "created" => $wpdb->get_var("SELECT created_at FROM $bt WHERE id = 1600000001000"), "auto" => (int) $wpdb->get_var("SELECT COUNT(*) FROM $bt WHERE id BETWEEN 1600000000000 AND 1600000249000 AND auto = 1"));
+			$wpdb->query("DELETE FROM $bt WHERE id BETWEEN 1600000000000 AND 1600000249000"); delete_option("aitp_repair_batches");
+			echo wp_json_encode($out);` );
+		record( 'batch3: old batch records move to their table, tiers filled', mig, {
+			all_250_moved: mig.rows === 250 && mig.created === '2020-09-13 12:26:41' && mig.auto === 0,
+			existing_record_kept: mig.kept === 'table' && mig.kept_reset === 7,
+			option_copied_not_deleted: mig.option_left === true && mig.version === '8',
+			tiers_filled_the_same: mig.tiers > 0 && mig.tiers_same === mig.tiers,
+		} );
+
+		wp( 'eval', 'global $wpdb; foreach (array("audit","repair","batches","protect") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_audit_state","aitp_audit_settings","aitp_map_state","aitp_queue_settings","aitp_queue_state") as $o) delete_option($o); echo 1;' ); // Other groups translate every language.
 	},
 };
 

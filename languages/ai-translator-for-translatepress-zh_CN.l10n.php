@@ -400,7 +400,7 @@ return array (
     'TranslatePress daily limit reached; continues tomorrow' => '已到 TranslatePress 每日上限，明天继续',
     'AI provider error: %s' => 'AI 接口出错：%s',
     'Batch auto repair' => '分批自动修复',
-    'Off by default. Works through "wrong" findings of page text one batch at a time: backs up and resets one batch, visits only the pages that show those strings until they are translated again, checks the new translations, and starts the next batch only when the batch came out clean. It stops by itself when more than 5% of a batch is still wrong or untranslated, when English is stored as a translation, on provider errors or failed page loads, when TranslatePress no longer uses this engine, or when a batch is rolled back. "Probably misplaced" and "check meaning" findings, the accepted list, manual translations, structured data and interface text are never touched. Every batch can be rolled back under "Repairs". Try a few batches by hand first.' => '默认关闭。按批处理页面文字里「错误」这一档：先备份并改回一批，只访问显示这些文字的页面直到重新翻好，再用体检规则检查新译文，这一批合格才开始下一批。遇到以下情况会自己停下：一批重翻后仍有超过 5% 是错的或没翻、有英文被存成译文、AI 接口出错或页面打不开、TranslatePress 不再用本引擎、某一批被回滚。「疑似错位」「待看意思」、已验收清单、人工翻译、结构化数据和界面文字（gettext）一律不碰。每一批都可以在「修复记录」里回滚。建议先手工小批试过几次再打开。',
+    'Off by default. Works through "certainly wrong" findings of page text one batch at a time: backs up and resets one batch, visits only the pages that show those strings until they are translated again, checks the new translations, and starts the next batch only when the batch came out clean. It stops by itself when more than 5% of a batch is still wrong or untranslated, when English is stored as a translation, on provider errors or failed page loads, when TranslatePress no longer uses this engine, or when a batch is rolled back. "A person should look" and "for reference" findings, the accepted list, manual translations, structured data and interface text are never touched. Every batch can be rolled back under "Repairs". Try a few batches by hand first.' => '默认关闭。按批处理页面文字里「确定是错的」这一档：先备份并改回一批，只访问显示这些文字的页面直到重新翻好，再用体检规则检查新译文，这一批合格才开始下一批。遇到以下情况会自己停下：一批重翻后仍有超过 5% 是错的或没翻、有英文被存成译文、AI 接口出错或页面打不开、TranslatePress 不再用本引擎、某一批被回滚。「需要人看」「参考」两档、已验收清单、人工翻译、结构化数据和界面文字（gettext）一律不碰。每一批都可以在「修复记录」里回滚。建议先手工小批试过几次再打开。',
     'Switch' => '开关',
     'Allow the batch auto repair' => '允许分批自动修复',
     'None ticked = all languages, one language after another.' => '一个都不勾 = 所有语言，一种语言做完再做下一种。',
@@ -679,5 +679,7 @@ return array (
     'No page of this batch is known: nothing was started.' => '这一批没有已知页面：什么都没开始。',
     '%s pages are being translated now. The rest of the backfill queue waits until they are done, then goes on as it was.' => '正在翻译 %s 个页面。补翻队列里其它页面等它们翻完，再照原样继续。',
     'Rows of %s on no known page come back with the whole queue.' => '%s 里不在已知页面上的行，要等整个队列跑到时才会重新翻译。',
+    'Last action: %1$s at %2$s – not started: %3$s.' => '上次操作：%2$s %1$s——没有启动：%3$s。',
+    'Last action: %1$s at %2$s – started; the batches go on in the background (see "Batch auto repair" for their state).' => '上次操作：%2$s %1$s——已启动，各批在后台继续（进度看「分批自动修复」）。',
   ),
 );
