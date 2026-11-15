@@ -558,7 +558,7 @@ const S = {
 		const batches = () => json( wp( 'eval', 'echo wp_json_encode((object) AITP_Audit::batches());' ) );
 
 		await reset();
-		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings","aitp_autofix_state","aitp_autofix_settings","aitp_autofix_lock") as $o) delete_option($o); echo 1;' );
+		wp( 'eval', 'global $wpdb; foreach (array("queue","audit","repair","protect") as $t) $wpdb->query("TRUNCATE {$wpdb->prefix}aitp_$t"); foreach (array("aitp_queue_settings","aitp_queue_state","aitp_queue_lock","aitp_audit_state","aitp_audit_lock","aitp_repair_batches","aitp_audit_settings","aitp_autofix_state","aitp_autofix_settings","aitp_autofix_lock") as $o) delete_option($o); echo 1;' );
 		q( 'sync' );
 		q( 'start' );
 		json( q( 'run', '--ignore-rate', '--minutes=8' ) );
@@ -594,6 +594,8 @@ const S = {
 			refused_before_switch: refused.slice( 0, 120 ), started: started.slice( 0, 120 ), result: run.result, status: st.status, reason: st.reason, secs,
 			wrong_rows: errRows.length, fixed: fixed.length, left: st.left, batches: st.batches, history: st.history.map( ( h ) => [ h.lang, h.reset, h.ok, h.wrong, h.untranslated, h.result ] ),
 			other_rows_touched: others.map( ( r ) => r.type + ':' + r.lang ), tp_chars: state().tp_counter - tp0, queue: qstate().status,
+			fail_reasons: state().fail_reasons, // Why rows stayed untranslated, if any (failed once in a full run, 2026-11-15, not reproduced).
+			left_untranslated: st.history.filter( ( h ) => h.untranslated > 0 ).map( ( h ) => h.lang ),
 		}, {
 			off_by_default: /disabled/.test( refused ),
 			finished: st.status === 'done',
